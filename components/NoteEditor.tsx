@@ -43,6 +43,9 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ initialNote, isOpen, onC
 
   // Sketch mode state
   const [isSketching, setIsSketching] = useState(false);
+  
+  // Keyboard height detection
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   const isTextMode = initialNote?.variant === 'text';
   const isCompactMode = initialNote?.variant === 'compact';
@@ -61,6 +64,40 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ initialNote, isOpen, onC
       setIsSketching(false);
     }
   }, [initialNote, isOpen]);
+  
+  // Detect keyboard height by monitoring viewport height changes
+  useEffect(() => {
+    if (!isTextMode || !isOpen) return;
+    
+    const initialViewportHeight = window.visualViewport?.height || window.innerHeight;
+    let lastHeight = initialViewportHeight;
+    
+    const handleResize = () => {
+      const currentHeight = window.visualViewport?.height || window.innerHeight;
+      const heightDiff = initialViewportHeight - currentHeight;
+      // If viewport shrunk significantly, keyboard is likely open
+      if (heightDiff > 150) {
+        setKeyboardHeight(heightDiff);
+      } else {
+        setKeyboardHeight(0);
+      }
+      lastHeight = currentHeight;
+    };
+    
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', handleResize);
+    } else {
+      window.addEventListener('resize', handleResize);
+    }
+    
+    return () => {
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', handleResize);
+      } else {
+        window.removeEventListener('resize', handleResize);
+      }
+    };
+  }, [isTextMode, isOpen]);
 
   const handleSaveTag = () => {
     if (newTagLabel.trim()) {
@@ -131,26 +168,13 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ initialNote, isOpen, onC
   };
 
   const getTextStyles = () => {
-    // Sync with BoardView rendering
-    if (isTextMode) {
-         // Text Note Scale: 3.2rem - 10rem (Aligned with sticky notes)
-         const sizeMap: Record<number, string> = {
-            1: 'text-[3.2rem]', 
-            2: 'text-[4.8rem]', 
-            3: 'text-[6.4rem]', 
-            4: 'text-[8rem]', 
-            5: 'text-[10rem]', 
-         };
-         return `${sizeMap[fontSize] || 'text-[6.4rem]'} ${isBold ? 'font-black' : 'font-medium'}`;
-    }
-
-    // Sticky/Standard Note Scale: 3.2rem - 7.2rem on Board
+    // Unified scale for all note types: 3rem - 7rem (5 levels)
     const sizeMap: Record<number, string> = {
-      1: 'text-[3.2rem]',
+      1: 'text-[3rem]',
       2: 'text-[4rem]',
       3: 'text-[5rem]',
       4: 'text-[6rem]',
-      5: 'text-[7.2rem]',
+      5: 'text-[7rem]',
     };
     return `${sizeMap[fontSize] || 'text-[5rem]'} ${isBold ? 'font-black' : 'font-medium'}`;
   };
@@ -163,23 +187,39 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ initialNote, isOpen, onC
 
   return (
     <div 
-      className={`fixed inset-0 z-[1000] flex items-center justify-center p-4 touch-none backdrop-blur-sm ${isTextMode ? '' : 'bg-black/30'}`}
+      className={`fixed inset-0 z-[1000] flex items-center justify-center ${isTextMode ? 'p-4' : 'p-4'} touch-none`}
       onPointerDown={(e) => e.stopPropagation()}
       onPointerMove={(e) => e.stopPropagation()}
       onPointerUp={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
+      style={isTextMode ? { overflow: 'hidden', touchAction: 'none', backgroundColor: 'transparent' } : {}}
     >
-      <div className="absolute inset-0" onClick={handleSave}></div>
+      <div className="absolute inset-0" onClick={handleSave} style={{ zIndex: 1 }}></div>
+      
+      {/* Blur overlay - 全屏遮罩，在卡片背后 z-5 */}
+      <div 
+        className="fixed inset-0 pointer-events-none"
+        style={{ 
+          backgroundColor: 'rgba(0, 0, 0, 0.15)',
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
+          zIndex: 5
+        }}
+      />
       
       <motion.div 
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0 }}
         // Explicit width w-[500px] to prevent auto-growing behavior. min-h-[500px] added when sketching to ensure full canvas.
-        className={`w-[500px] max-w-[95vw] flex flex-col relative z-10 transition-colors duration-300 max-h-[90vh] ${isTextMode ? 'min-h-0' : 'shadow-2xl rounded-3xl overflow-hidden min-h-[300px]'} ${isSketching ? 'min-h-[500px]' : ''}`}
+        className={`${isTextMode ? 'w-auto max-w-[95vw]' : 'w-[500px] max-w-[95vw]'} flex flex-col relative z-10 transition-colors duration-300 ${isTextMode ? 'max-h-[60vh]' : 'max-h-[90vh]'} ${isTextMode ? 'min-h-0' : 'min-h-[300px]'} ${isSketching ? 'min-h-[500px]' : ''}`}
         style={{ 
             backgroundColor: isTextMode ? 'transparent' : color,
-            boxShadow: isTextMode ? 'none' : '0 25px 50px 12px rgba(0, 0, 0, 0.15)' 
+            boxShadow: isTextMode ? 'none' : '0 25px 50px 12px rgba(0, 0, 0, 0.15)',
+            border: isTextMode ? '2px solid #FFDD00' : 'none',
+            borderRadius: isTextMode ? '12px' : undefined,
+            padding: isTextMode ? '8px' : undefined,
+            overflow: isTextMode ? 'visible' : 'hidden'
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -194,9 +234,25 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ initialNote, isOpen, onC
           </div>
         )}
         
-        <div className={`flex flex-col flex-1 h-full ${isSketching ? 'invisible' : ''}`}>
-            {/* Header */}
-            <div className={`flex justify-between items-start p-6 pb-2 relative z-20 flex-shrink-0 ${isTextMode ? 'opacity-0 hover:opacity-100 transition-opacity' : ''}`}>
+        {/* Font Control buttons - 最顶层 z-20 */}
+        <div 
+          className="absolute right-4 flex justify-center items-center gap-2 pointer-events-auto"
+          style={{ 
+            bottom: isTextMode ? '4px' : isCompactMode ? '64px' : '154px',
+            zIndex: 20
+          }}
+        >
+          <div className="flex items-center gap-1 bg-white rounded-xl shadow-lg p-2" style={{ border: 'none' }}>
+            <button onClick={() => adjustFontSize(1)} className="p-1 bg-gray-50 hover:bg-[#FFDD00]/10 text-gray-600 hover:text-[#FFDD00] rounded-lg transition-all" style={{ border: 'none', outline: 'none' }}><Plus size={18}/></button>
+            <button onClick={() => adjustFontSize(-1)} className="p-1 bg-gray-50 hover:bg-[#FFDD00]/10 text-gray-600 hover:text-[#FFDD00] rounded-lg transition-all" style={{ border: 'none', outline: 'none' }}><Minus size={18}/></button>
+            <div className="w-px h-6 bg-gray-200 mx-1"></div>
+            <button onClick={() => setIsBold(!isBold)} className={`p-1 rounded-lg transition-all ${isBold ? 'bg-[#FFDD00] text-yellow-900' : 'bg-gray-50 hover:bg-[#FFDD00]/10 text-gray-600'}`} style={{ border: 'none', outline: 'none' }}><Bold size={18}/></button>
+          </div>
+        </div>
+        
+        <div className={`flex flex-col flex-1 h-full ${isSketching ? 'invisible' : ''}`} style={isTextMode ? { backgroundColor: 'transparent', zIndex: 10 } : { zIndex: 10 }}>
+            {/* Header - 中间层 z-10（继承父容器） */}
+            <div className={`flex justify-between items-start ${isTextMode ? 'hidden' : 'p-4 pb-2'} relative flex-shrink-0 ${isTextMode ? 'opacity-0 hover:opacity-100 transition-opacity' : ''}`} style={isTextMode ? { backgroundColor: 'transparent' } : {}}>
                 {!isTextMode && !isCompactMode ? (
                   <div className="relative">
                     <button 
@@ -208,7 +264,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ initialNote, isOpen, onC
                     {showEmojiPicker && (
                       <>
                         <div className="fixed inset-0 z-10" onClick={() => setShowEmojiPicker(false)} />
-                        <div className="absolute top-full left-0 mt-2 p-2 bg-white rounded-xl shadow-xl grid grid-cols-5 gap-1 w-64 z-20 border border-gray-100">
+                        <div className="absolute top-full left-0 mt-2 p-2 bg-white rounded-xl shadow-xl grid grid-cols-5 gap-1 w-64 z-20" style={{ border: 'none' }}>
                           {EMOJI_LIST.map(e => (
                             <button 
                               key={e} 
@@ -228,20 +284,30 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ initialNote, isOpen, onC
                     </div>
                 )}
                 
-                <button 
-                    onClick={handleSave} 
-                    className="text-gray-400 hover:text-gray-600 hover:bg-black/5 rounded-full p-2 transition-colors active:scale-90"
-                >
-                    <Check size={28} />
-                </button>
+                <div className="flex items-center gap-2">
+                    {initialNote?.id && onDelete && (
+                        <button 
+                            onClick={handleDelete}
+                            className="text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full p-1 transition-colors active:scale-90"
+                        >
+                            <Trash2 size={24} />
+                        </button>
+                    )}
+                    <button 
+                        onClick={handleSave} 
+                        className="text-gray-400 hover:text-gray-600 hover:bg-black/5 rounded-full p-1 transition-colors active:scale-90"
+                    >
+                        <Check size={28} />
+                    </button>
+                </div>
             </div>
 
             {/* Auto-Growing Text Area Container */}
-            <div className={`flex-1 ${isTextMode ? 'px-2' : 'px-6'} relative group flex flex-col overflow-y-auto custom-scrollbar ${isTextMode ? 'min-h-0' : 'min-h-[120px]'}`}>
-              <div className="grid w-full min-w-0">
+            <div className={`flex-1 ${isTextMode ? 'px-2 py-2' : 'px-3'} relative group flex flex-col ${isTextMode ? 'overflow-hidden' : 'overflow-y-auto custom-scrollbar'} ${isTextMode ? 'min-h-0' : 'min-h-[120px]'}`} style={isTextMode ? { backgroundColor: 'transparent' } : {}}>
+              <div className="grid w-full min-w-0" style={isTextMode ? { backgroundColor: 'transparent' } : {}}>
                 {/* Invisible Pre-wrap div to force height */}
                 <div 
-                  className={`col-start-1 row-start-1 w-full min-w-0 whitespace-pre-wrap break-words invisible leading-none ${isTextMode ? 'pb-0' : 'pb-4'} ${getTextStyles()}`}
+                  className={`col-start-1 row-start-1 w-full min-w-0 ${isTextMode ? 'whitespace-nowrap' : 'whitespace-pre-wrap break-words'} invisible leading-none ${isTextMode ? 'pb-0' : 'pb-4'} ${getTextStyles()}`}
                   aria-hidden="true"
                 >
                    {text + ' '}
@@ -253,17 +319,17 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ initialNote, isOpen, onC
                     value={text}
                     onChange={(e) => setText(e.target.value)}
                     placeholder={isTextMode ? "Type something..." : "Write here..."}
-                    className={`col-start-1 row-start-1 w-full min-w-0 h-full bg-transparent border-none resize-none focus:ring-0 p-0 text-gray-800 placeholder-gray-500/30 leading-none overflow-hidden break-words whitespace-pre-wrap ${isTextMode ? 'pb-0' : 'pb-4'} ${getTextStyles()}`}
+                    className={`col-start-1 row-start-1 w-full min-w-0 h-full bg-transparent border-none resize-none focus:ring-0 p-0 ${isTextMode ? 'text-gray-800' : 'text-gray-800'} placeholder-gray-500/30 leading-none overflow-hidden ${isTextMode ? 'whitespace-nowrap' : 'break-words whitespace-pre-wrap'} ${isTextMode ? 'pb-0' : 'pb-4'} ${getTextStyles()}`}
                     spellCheck={false}
+                    style={{ 
+                      backgroundColor: 'transparent',
+                      border: 'none',
+                      outline: 'none',
+                      boxShadow: 'none'
+                    }}
                 />
               </div>
               
-              {/* Floating Text Controls */}
-                <div className="absolute top-0 right-4 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-30">
-                  <button onClick={() => adjustFontSize(1)} className="p-1.5 bg-white/60 hover:bg-white text-gray-600 hover:text-[#FFDD00] rounded-lg shadow-sm backdrop-blur-sm transition-all"><Plus size={16}/></button>
-                  <button onClick={() => adjustFontSize(-1)} className="p-1.5 bg-white/60 hover:bg-white text-gray-600 hover:text-[#FFDD00] rounded-lg shadow-sm backdrop-blur-sm transition-all"><Minus size={16}/></button>
-                  <button onClick={() => setIsBold(!isBold)} className={`p-1.5 rounded-lg shadow-sm backdrop-blur-sm transition-colors ${isBold ? 'bg-[#FFDD00] text-yellow-900' : 'bg-white/60 hover:bg-white text-gray-600'}`}><Bold size={16}/></button>
-                </div>
             </div>
 
             {/* Footer Actions */}
@@ -272,8 +338,8 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ initialNote, isOpen, onC
                 
                 {/* Media Row */}
                 {!isCompactMode && (
-                  <div className="px-5 pt-2 flex gap-3">
-                      <label className="w-20 h-20 bg-white/60 hover:bg-white shadow-sm rounded-2xl flex items-center justify-center cursor-pointer transition-colors relative overflow-hidden group">
+                  <div className="px-3 pt-1 flex gap-3">
+                      <label className="w-20 h-20 bg-white/60 hover:bg-white shadow-sm rounded-2xl flex items-center justify-center cursor-pointer transition-colors relative overflow-hidden group" style={{ border: 'none' }}>
                           {images.length > 0 ? (
                               <img src={images[images.length - 1]} className="w-full h-full object-cover" />
                           ) : <Camera size={24} className="text-gray-500"/>}
@@ -283,6 +349,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ initialNote, isOpen, onC
                       <button 
                         onClick={() => setIsSketching(true)}
                         className="w-20 h-20 bg-white/60 hover:bg-white shadow-sm rounded-2xl flex items-center justify-center transition-colors relative overflow-hidden group"
+                        style={{ border: 'none' }}
                       >
                           {sketch ? (
                               <img src={sketch} className="w-full h-full object-cover" />
@@ -294,7 +361,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ initialNote, isOpen, onC
 
                 {/* Tags Row */}
                 {!isCompactMode && (
-                    <div className="px-5 pt-3 pb-2 flex-1 flex gap-2 overflow-x-auto scrollbar-hide items-center min-h-[50px]">
+                    <div className="px-3 pt-2 pb-2 flex-1 flex gap-2 overflow-x-auto scrollbar-hide items-center min-h-[50px]">
                         {tags.map(tag => (
                             <span key={tag.id} className="flex-shrink-0 h-6 px-2.5 rounded-full text-xs font-bold text-white shadow-sm flex items-center gap-1" style={{backgroundColor: tag.color}}>
                                 {tag.label}
@@ -302,17 +369,17 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ initialNote, isOpen, onC
                             </span>
                         ))}
                         {isAddingTag ? (
-                            <div className="flex items-center gap-1 bg-white rounded-full shadow-sm p-1 pr-2 h-10 animate-in fade-in slide-in-from-left-2 border border-gray-100">
+                            <div className="flex items-center gap-1 bg-white rounded-full shadow-sm p-1 pr-2 h-10 animate-in fade-in slide-in-from-left-2" style={{ border: 'none' }}>
                             <input 
                                 autoFocus
-                                className="w-28 text-sm bg-transparent outline-none ml-2 text-gray-700 placeholder-gray-400"
+                                className="w-16 text-sm bg-transparent outline-none ml-2 text-gray-700 placeholder-gray-400"
                                 placeholder="Tag name..."
                                 value={newTagLabel}
                                 onChange={(e) => setNewTagLabel(e.target.value)}
                                 onKeyDown={(e) => e.key === 'Enter' && handleSaveTag()}
                             />
-                            <div className="flex gap-1 border-l border-gray-100 pl-2">
-                                {TAG_COLORS.slice(0,7).map(c => (
+                            <div className="flex gap-1 pl-2" style={{ borderLeft: 'none' }}>
+                                {TAG_COLORS.slice(0,5).map(c => (
                                     <button 
                                         key={c} 
                                         onClick={() => setNewTagColor(c)} 
@@ -324,7 +391,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ initialNote, isOpen, onC
                             <button onClick={handleSaveTag} className="ml-1 text-green-500 hover:text-green-600 active:scale-90 transition-transform"><Check size={18}/></button>
                             </div>
                         ) : (
-                            <button onClick={() => setIsAddingTag(true)} className="flex-shrink-0 h-10 px-4 bg-white/60 hover:bg-white rounded-full text-xs font-bold text-gray-500 border border-gray-200/50 shadow-sm flex items-center transition-all">
+                            <button onClick={() => setIsAddingTag(true)} className="flex-shrink-0 h-10 px-4 bg-white/60 hover:bg-white rounded-full text-xs font-bold text-gray-500 shadow-sm flex items-center transition-all" style={{ border: 'none' }}>
                                 + Tag
                             </button>
                         )}
@@ -333,42 +400,22 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ initialNote, isOpen, onC
 
                 <div className="h-px w-full mt-2 bg-black/5"></div>
 
-                {/* Color & Delete Row */}
-                <div className="px-5 py-3 flex justify-between items-center">
+                {/* Color Row */}
+                <div className="px-4 py-4 flex justify-start items-center">
                     <div className="flex gap-2">
                         {PASTEL_COLORS.map(c => (
                             <button
                                 key={c}
                                 onClick={() => setColor(c)}
-                                className={`w-6 h-6 rounded-full border border-black/5 shadow-sm transition-transform ${color === c ? 'scale-125 ring-2 ring-gray-400 ring-offset-1' : 'hover:scale-110'}`}
-                                style={{ backgroundColor: c }}
+                                className={`w-6 h-6 rounded-full shadow-sm transition-transform ${color === c ? 'scale-125 ring-2 ring-gray-400 ring-offset-1' : 'hover:scale-110'}`}
+                                style={{ backgroundColor: c, border: 'none' }}
                             />
                         ))}
                     </div>
-
-                    {initialNote?.id && onDelete && (
-                        <button 
-                            onClick={handleDelete}
-                            className="text-red-400 hover:text-red-600 hover:bg-red-50 p-2 rounded-lg transition-colors active:scale-90 active:bg-red-100"
-                        >
-                            <Trash2 size={20} />
-                        </button>
-                    )}
                 </div>
               </div>
             )}
             
-            {/* Simple Delete for Text Mode */}
-            {isTextMode && initialNote?.id && onDelete && (
-                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button 
-                        onClick={handleDelete}
-                        className="text-red-400 hover:text-red-600 bg-white/50 hover:bg-red-50 p-2 rounded-full transition-colors active:scale-90"
-                    >
-                        <Trash2 size={16} />
-                    </button>
-                </div>
-            )}
         </div>
       </motion.div>
     </div>
