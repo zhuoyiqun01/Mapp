@@ -213,7 +213,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ initialNote, isOpen, onC
                             <button 
                               key={e} 
                               onClick={() => { setEmoji(e); setShowEmojiPicker(false); }}
-                              className="text-2xl p-2 hover:bg-yellow-50 rounded-lg transition-colors"
+                              className="text-2xl p-2 hover:bg-[#FFDD00]/10 rounded-lg transition-colors"
                             >
                               {e}
                             </button>
@@ -259,11 +259,11 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ initialNote, isOpen, onC
               </div>
               
               {/* Floating Text Controls */}
-              <div className="absolute top-0 right-4 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-30">
-                  <button onClick={() => adjustFontSize(1)} className="p-1.5 bg-white/60 hover:bg-white text-gray-600 hover:text-yellow-600 rounded-lg shadow-sm backdrop-blur-sm transition-all"><Plus size={16}/></button>
-                  <button onClick={() => adjustFontSize(-1)} className="p-1.5 bg-white/60 hover:bg-white text-gray-600 hover:text-yellow-600 rounded-lg shadow-sm backdrop-blur-sm transition-all"><Minus size={16}/></button>
-                  <button onClick={() => setIsBold(!isBold)} className={`p-1.5 rounded-lg shadow-sm backdrop-blur-sm transition-colors ${isBold ? 'bg-yellow-400 text-yellow-900' : 'bg-white/60 hover:bg-white text-gray-600'}`}><Bold size={16}/></button>
-              </div>
+                <div className="absolute top-0 right-4 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-30">
+                  <button onClick={() => adjustFontSize(1)} className="p-1.5 bg-white/60 hover:bg-white text-gray-600 hover:text-[#FFDD00] rounded-lg shadow-sm backdrop-blur-sm transition-all"><Plus size={16}/></button>
+                  <button onClick={() => adjustFontSize(-1)} className="p-1.5 bg-white/60 hover:bg-white text-gray-600 hover:text-[#FFDD00] rounded-lg shadow-sm backdrop-blur-sm transition-all"><Minus size={16}/></button>
+                  <button onClick={() => setIsBold(!isBold)} className={`p-1.5 rounded-lg shadow-sm backdrop-blur-sm transition-colors ${isBold ? 'bg-[#FFDD00] text-yellow-900' : 'bg-white/60 hover:bg-white text-gray-600'}`}><Bold size={16}/></button>
+                </div>
             </div>
 
             {/* Footer Actions */}
