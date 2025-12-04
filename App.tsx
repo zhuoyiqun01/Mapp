@@ -22,21 +22,21 @@ function App() {
   useEffect(() => {
     const loadProjects = async () => {
       try {
-        const storedProjects = await get<Project[]>('lemon-map-projects');
+        const storedProjects = await get<Project[]>('mapp-projects');
         
         if (storedProjects) {
           setProjects(storedProjects);
         } else {
           // Migration: Check localStorage one last time
-          const localData = localStorage.getItem('lemon-map-projects');
+          const localData = localStorage.getItem('mapp-projects');
           if (localData) {
              try {
                const parsed = JSON.parse(localData);
                setProjects(parsed);
                // Migrate to IDB
-               await set('lemon-map-projects', parsed);
+               await set('mapp-projects', parsed);
                // Clear LocalStorage
-               localStorage.removeItem('lemon-map-projects');
+               localStorage.removeItem('mapp-projects');
              } catch (e) {
                console.error("Migration failed", e);
              }
@@ -54,7 +54,7 @@ function App() {
   // Save to IndexedDB
   useEffect(() => {
     if (!isLoading) {
-      set('lemon-map-projects', projects).catch((err) => {
+      set('mapp-projects', projects).catch((err) => {
         console.error("Failed to save projects to IDB", err);
         if (err.name === 'QuotaExceededError') {
           alert("Storage Limit Reached. Please delete some projects or images.");
@@ -110,7 +110,7 @@ function App() {
 
   if (isLoading) {
     return (
-      <div className="w-full h-screen bg-yellow-400 flex flex-col items-center justify-center text-yellow-900">
+      <div className="w-full h-screen bg-[#FFDD00] flex flex-col items-center justify-center text-yellow-900">
          <Loader2 size={48} className="animate-spin mb-4" />
          <div className="font-bold text-xl">Loading your maps...</div>
       </div>
@@ -154,7 +154,7 @@ function App() {
         {!isEditorOpen && !isBoardEditMode && (
           <button 
              onClick={() => setIsSidebarOpen(true)}
-             className="absolute top-24 left-0 z-[900] pl-3 pr-4 py-2 bg-yellow-400 hover:bg-yellow-300 rounded-r-xl shadow-lg text-yellow-950 transition-colors"
+             className="absolute top-24 left-0 z-[900] pl-3 pr-4 py-2 bg-[#FFDD00] hover:bg-[#E6C700] rounded-r-xl shadow-lg text-yellow-950 transition-colors"
           >
              <Menu size={18} />
           </button>
@@ -187,7 +187,7 @@ function App() {
             className={`
               flex items-center gap-2 px-6 py-3 rounded-xl transition-all font-bold text-sm
               ${viewMode === 'map' 
-                ? 'bg-yellow-400 text-yellow-950 shadow-md scale-105' 
+                ? 'bg-[#FFDD00] text-yellow-950 shadow-md scale-105' 
                 : 'hover:bg-gray-100 text-gray-500'}
             `}
           >
@@ -199,7 +199,7 @@ function App() {
             className={`
               flex items-center gap-2 px-6 py-3 rounded-xl transition-all font-bold text-sm
               ${viewMode === 'board' 
-                ? 'bg-yellow-400 text-yellow-950 shadow-md scale-105' 
+                ? 'bg-[#FFDD00] text-yellow-950 shadow-md scale-105' 
                 : 'hover:bg-gray-100 text-gray-500'}
             `}
           >
