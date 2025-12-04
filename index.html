@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>LemonMap</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+     crossorigin=""/>
+     <style>
+       /* Custom scrollbar for better aesthetics */
+       ::-webkit-scrollbar {
+         width: 6px;
+         height: 6px;
+       }
+       ::-webkit-scrollbar-track {
+         background: #f1f1f1; 
+       }
+       ::-webkit-scrollbar-thumb {
+         background: #facc15; 
+         border-radius: 3px;
+       }
+       ::-webkit-scrollbar-thumb:hover {
+         background: #eab308; 
+       }
+       /* Leaflet fix for z-index issues in some frameworks */
+       .leaflet-pane { z-index: 10; }
+       .leaflet-bottom { z-index: 20; }
+       .leaflet-top { z-index: 20; }
+
+       /* Disable default touch actions for better app-like feel */
+       .leaflet-container {
+         -webkit-touch-callout: none !important;
+         -webkit-user-select: none !important;
+         user-select: none !important;
+         touch-action: none; 
+       }
+     </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.2.0",
+    "react/": "https://esm.sh/react@18.2.0/",
+    "react-dom": "https://esm.sh/react-dom@18.2.0?external=react",
+    "react-dom/": "https://esm.sh/react-dom@18.2.0/?external=react",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client?external=react",
+    "framer-motion": "https://esm.sh/framer-motion@11.0.8?external=react,react-dom",
+    "lucide-react": "https://esm.sh/lucide-react@0.344.0?external=react",
+    "leaflet": "https://esm.sh/leaflet@1.9.4",
+    "react-leaflet": "https://esm.sh/react-leaflet@4.2.1?external=react,react-dom,leaflet",
+    "html-to-image": "https://esm.sh/html-to-image@1.11.11",
+    "idb-keyval": "https://esm.sh/idb-keyval@6.2.1"
+  }
+}
+</script>
+</head>
+  <body class="bg-gray-50 text-gray-800 antialiased overflow-hidden">
+    <div id="root"></div>
+  </body>
+</html>

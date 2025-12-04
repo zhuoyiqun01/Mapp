@@ -1,0 +1,9 @@
+{
+  "name": "Mapping App",
+  "description": "A creative mapping application with lemon-yellow accents. Pin memories with emojis, photos, and sketches on a map, or organize them on a free-form canvas.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
