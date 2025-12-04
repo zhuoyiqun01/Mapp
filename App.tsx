@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Map, Grid, Menu, Loader2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { MapView } from './components/MapView';
 import { BoardView } from './components/BoardView';
 import { ProjectManager } from './components/ProjectManager';
@@ -89,7 +90,15 @@ function App() {
     if (!currentProjectId) return;
     setProjects(prev => prev.map(p => {
         if (p.id === currentProjectId) {
-            return { ...p, notes: p.notes.filter(n => n.id !== noteId) };
+            // 删除便利贴时，同时删除相关的连接
+            const updatedConnections = (p.connections || []).filter(
+              conn => conn.fromNoteId !== noteId && conn.toNoteId !== noteId
+            );
+            return { 
+              ...p, 
+              notes: p.notes.filter(n => n.id !== noteId),
+              connections: updatedConnections
+            };
         }
         return p;
     }));
@@ -110,7 +119,7 @@ function App() {
 
   if (isLoading) {
     return (
-      <div className="w-full h-screen bg-[#FFDD00] flex flex-col items-center justify-center text-yellow-900">
+      <div className="w-full min-h-screen bg-[#FFDD00] flex flex-col items-center justify-center text-yellow-900">
          <Loader2 size={48} className="animate-spin mb-4" />
          <div className="font-bold text-xl">Loading your maps...</div>
       </div>
@@ -119,35 +128,54 @@ function App() {
 
   if (!activeProject) {
     return (
-      <ProjectManager 
-         projects={projects}
-         currentProjectId={null}
-         onCreateProject={handleCreateProject}
-         onSelectProject={setCurrentProjectId}
-         onDeleteProject={handleDeleteProject}
-      />
+      <div className="w-full min-h-screen bg-[#FFDD00]">
+        <ProjectManager 
+           projects={projects}
+           currentProjectId={null}
+           onCreateProject={handleCreateProject}
+           onSelectProject={setCurrentProjectId}
+           onDeleteProject={handleDeleteProject}
+        />
+      </div>
     );
   }
 
   return (
     <div className="w-full h-screen flex flex-col bg-gray-50 overflow-hidden relative">
       
-      {isSidebarOpen && (
-        <div className="fixed inset-0 z-[2000] flex">
-           <div className="fixed inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)} />
-           <div className="relative h-full animate-in slide-in-from-left z-[2001]">
-              <ProjectManager 
-                 isSidebar
-                 projects={projects}
-                 currentProjectId={currentProjectId}
-                 onCreateProject={handleCreateProject}
-                 onSelectProject={(id) => { setCurrentProjectId(id); setIsSidebarOpen(false); }}
-                 onDeleteProject={handleDeleteProject}
-                 onCloseSidebar={() => setIsSidebarOpen(false)}
-              />
-           </div>
-        </div>
-      )}
+      <AnimatePresence>
+        {isSidebarOpen && (
+          <div className="fixed inset-0 z-[2000] flex overflow-hidden">
+             <motion.div 
+               className="fixed inset-0 bg-black/20 backdrop-blur-sm" 
+               onClick={() => setIsSidebarOpen(false)}
+               initial={{ opacity: 0 }}
+               animate={{ opacity: 1 }}
+               exit={{ opacity: 0 }}
+             />
+             <motion.div 
+               className="relative h-full w-[80%] z-[2001] overflow-hidden"
+               initial={{ x: '-80%' }}
+               animate={{ x: 0 }}
+               exit={{ x: '-80%' }}
+               transition={{ type: "spring", damping: 25, stiffness: 200 }}
+             >
+                <ProjectManager 
+                   isSidebar
+                   projects={projects}
+                   currentProjectId={currentProjectId}
+                   onCreateProject={handleCreateProject}
+                   onSelectProject={(id) => { setCurrentProjectId(id); setIsSidebarOpen(false); }}
+                   onDeleteProject={handleDeleteProject}
+                   onCloseSidebar={() => setIsSidebarOpen(false)}
+                   onBackToHome={() => { setCurrentProjectId(null); }}
+                   viewMode={viewMode}
+                   activeProject={activeProject}
+                />
+             </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <div className="flex-1 relative overflow-hidden z-0">
         
@@ -176,16 +204,26 @@ function App() {
             onDeleteNote={deleteNote}
             onToggleEditor={setIsEditorOpen}
             onEditModeChange={setIsBoardEditMode}
+            connections={activeProject.connections || []}
+            onUpdateConnections={(connections) => {
+              if (!currentProjectId) return;
+              setProjects(prev => prev.map(p => {
+                if (p.id === currentProjectId) {
+                  return { ...p, connections };
+                }
+                return p;
+              }));
+            }}
           />
         )}
       </div>
 
       {!isEditorOpen && !isBoardEditMode && (
-        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50 bg-white/90 backdrop-blur-md p-1.5 rounded-2xl shadow-xl border border-white/50 flex gap-1 animate-in slide-in-from-bottom-4 fade-in">
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-white/90 backdrop-blur-md p-1.5 rounded-2xl shadow-xl border border-white/50 flex gap-1 animate-in slide-in-from-bottom-4 fade-in">
           <button
             onClick={() => setViewMode('map')}
             className={`
-              flex items-center gap-2 px-6 py-3 rounded-xl transition-all font-bold text-sm
+              flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
               ${viewMode === 'map' 
                 ? 'bg-[#FFDD00] text-yellow-950 shadow-md scale-105' 
                 : 'hover:bg-gray-100 text-gray-500'}
@@ -197,7 +235,7 @@ function App() {
           <button
             onClick={() => setViewMode('board')}
             className={`
-              flex items-center gap-2 px-6 py-3 rounded-xl transition-all font-bold text-sm
+              flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
               ${viewMode === 'board' 
                 ? 'bg-[#FFDD00] text-yellow-950 shadow-md scale-105' 
                 : 'hover:bg-gray-100 text-gray-500'}
