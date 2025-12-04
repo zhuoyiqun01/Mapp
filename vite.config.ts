@@ -16,7 +16,9 @@ export default defineConfig(({ mode }) => {
           registerType: 'autoUpdate',
           manifest: false,
           workbox: {
-            globPatterns: ['**/*.{js,css,html}'],
+            globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+            globDirectory: 'dist',
+            navigateFallback: null,
             runtimeCaching: [
               {
                 urlPattern: /^https:\/\/.*\.tile\.openstreetmap\.org\/.*/i,
