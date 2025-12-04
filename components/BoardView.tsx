@@ -92,13 +92,13 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
     
     switch (side) {
       case 'top':
-        return { x: x + width / 2, y: y };
+        return { x: x + width / 2, y: y - 8 };
       case 'right':
-        return { x: x + width, y: y + height / 2 };
+        return { x: x + width + 8, y: y + height / 2 };
       case 'bottom':
-        return { x: x + width / 2, y: y + height };
+        return { x: x + width / 2, y: y + height + 8 };
       case 'left':
-        return { x: x, y: y + height / 2 };
+        return { x: x - 8, y: y + height / 2 };
     }
   };
 
@@ -117,10 +117,14 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
       const distPrev = Math.sqrt(Math.pow(curr.x - prev.x, 2) + Math.pow(curr.y - prev.y, 2));
       const distNext = Math.sqrt(Math.pow(next.x - curr.x, 2) + Math.pow(next.y - curr.y, 2));
       
-      // 固定使用指定的圆角半径
-      const actualRadius = radius;
+      // 自适应圆角半径：优先使用指定半径，如果线段太短则降级为6px，再短就直线
+      let actualRadius = radius;
+      if (distPrev < radius * 2 || distNext < radius * 2) {
+        // 线段太短，降级使用6px圆角
+        actualRadius = 6;
+      }
       
-      // 如果线段太短，使用直线连接，不做圆角处理
+      // 如果连6px圆角都放不下，使用直线连接
       if (distPrev < actualRadius * 2 || distNext < actualRadius * 2) {
         path += ` L ${curr.x + SVG_OVERFLOW_PADDING} ${curr.y + SVG_OVERFLOW_PADDING}`;
         continue;
@@ -810,17 +814,18 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
             <defs>
               <marker
                 id="arrowForward"
-                markerWidth="12"
-                markerHeight="12"
-                refX="11"
-                refY="6"
+                markerWidth="36"
+                markerHeight="36"
+                refX="30"
+                refY="18"
                 orient="auto"
+                markerUnits="userSpaceOnUse"
               >
-                {/* 直角箭头（L形）*/}
+                {/* 90度折角箭头 */}
                 <path
-                  d="M 2 2 L 10 2 L 10 10"
+                  d="M 12 3 L 30 18 L 12 33"
                   stroke="#FFDD00"
-                  strokeWidth="2"
+                  strokeWidth="6"
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   fill="none"
@@ -828,17 +833,18 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               </marker>
               <marker
                 id="arrowReverse"
-                markerWidth="12"
-                markerHeight="12"
-                refX="1"
-                refY="6"
+                markerWidth="36"
+                markerHeight="36"
+                refX="30"
+                refY="18"
                 orient="auto-start-reverse"
+                markerUnits="userSpaceOnUse"
               >
-                {/* 直角箭头（L形）反向 */}
+                {/* 90度折角箭头 */}
                 <path
-                  d="M 10 2 L 2 2 L 2 10"
+                  d="M 12 3 L 30 18 L 12 33"
                   stroke="#FFDD00"
-                  strokeWidth="2"
+                  strokeWidth="6"
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   fill="none"
