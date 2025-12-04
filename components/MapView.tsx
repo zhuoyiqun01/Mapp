@@ -34,17 +34,53 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
 
     const handleStart = (e: TouchEvent | MouseEvent) => {
       if (e instanceof MouseEvent && e.button !== 0) return;
+      
+      // 检查点击目标是否是Marker或其子元素
+      const target = e.target as HTMLElement;
+      if (target) {
+        // 检查是否是Marker元素（Leaflet的Marker通常有leaflet-marker-icon类）
+        const isMarker = target.closest('.leaflet-marker-icon, .leaflet-marker-pane');
+        if (isMarker) {
+          // 如果是Marker，取消任何进行中的长按计时
+          if (timerRef.current) {
+            clearTimeout(timerRef.current);
+            timerRef.current = null;
+          }
+          startPosRef.current = null;
+          return;
+        }
+      }
+      
+      // 阻止浏览器默认的长按右键菜单（移动端）
+      if ('touches' in e) {
+        e.preventDefault();
+      }
+      
+      // 多指触控（比如双指缩放）时，直接忽略长按逻辑
+      if ('touches' in e && e.touches.length !== 1) {
+        // 如果已经有计时器在运行，立即清除
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+        startPosRef.current = null;
+        return;
+      }
+      
       const clientX = 'touches' in e ? e.touches[0].clientX : (e as MouseEvent).clientX;
       const clientY = 'touches' in e ? e.touches[0].clientY : (e as MouseEvent).clientY;
       startPosRef.current = { x: clientX, y: clientY };
 
       timerRef.current = setTimeout(() => {
-        const rect = container.getBoundingClientRect();
-        const relativeX = clientX - rect.left;
-        const relativeY = clientY - rect.top;
-        const latlng = map.containerPointToLatLng([relativeX, relativeY]);
-        if (navigator.vibrate) navigator.vibrate(50);
-        onLongPress(latlng);
+        // 再次检查是否仍然是单指（防止在等待期间变成多指）
+        if (startPosRef.current) {
+          const rect = container.getBoundingClientRect();
+          const relativeX = clientX - rect.left;
+          const relativeY = clientY - rect.top;
+          const latlng = map.containerPointToLatLng([relativeX, relativeY]);
+          if (navigator.vibrate) navigator.vibrate(50);
+          onLongPress(latlng);
+        }
         startPosRef.current = null;
         timerRef.current = null;
       }, 600); 
@@ -52,16 +88,40 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
 
     const handleMove = (e: TouchEvent | MouseEvent) => {
        if (!startPosRef.current || !timerRef.current) return;
+       
+       // 阻止浏览器默认行为（移动端）
+       if ('touches' in e) {
+         e.preventDefault();
+       }
+       
+       // 如果变成多指触控，立即取消长按计时
+       if ('touches' in e && e.touches.length !== 1) {
+         clearTimeout(timerRef.current);
+         timerRef.current = null;
+         startPosRef.current = null;
+         return;
+       }
+       
        const clientX = 'touches' in e ? e.touches[0].clientX : (e as MouseEvent).clientX;
        const clientY = 'touches' in e ? e.touches[0].clientY : (e as MouseEvent).clientY;
        const dx = clientX - startPosRef.current.x;
        const dy = clientY - startPosRef.current.y;
        const dist = Math.sqrt(dx*dx + dy*dy);
-       if (dist > 10) {
+       // 移动距离阈值从10增加到15，减少误触
+       if (dist > 15) {
          clearTimeout(timerRef.current);
          timerRef.current = null;
          startPosRef.current = null;
        }
+    };
+
+    const handleCancel = () => {
+      // touchcancel 事件（比如缩放开始时）会触发这个，立即取消长按
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      startPosRef.current = null;
     };
 
     const handleEnd = () => {
@@ -72,10 +132,11 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
        startPosRef.current = null;
     };
 
-    container.addEventListener('touchstart', handleStart, { passive: true });
+    container.addEventListener('touchstart', handleStart, { passive: false });
     container.addEventListener('mousedown', handleStart);
-    container.addEventListener('touchmove', handleMove, { passive: true });
+    container.addEventListener('touchmove', handleMove, { passive: false });
     container.addEventListener('mousemove', handleMove);
+    container.addEventListener('touchcancel', handleCancel, { passive: true });
     container.addEventListener('touchend', handleEnd);
     container.addEventListener('mouseup', handleEnd);
 
@@ -84,6 +145,7 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
       container.removeEventListener('mousedown', handleStart);
       container.removeEventListener('touchmove', handleMove);
       container.removeEventListener('mousemove', handleMove);
+      container.removeEventListener('touchcancel', handleCancel);
       container.removeEventListener('touchend', handleEnd);
       container.removeEventListener('mouseup', handleEnd);
     };
@@ -95,9 +157,18 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
 const MapControls = () => {
     const map = useMap();
     const locate = () => {
-        map.locate().on("locationfound", function (e) {
-            map.flyTo(e.latlng, 16);
-        });
+        if (navigator.geolocation) {
+            map.locate({
+                setView: false,
+                watch: false
+            }).on("locationfound", function (e) {
+                map.flyTo(e.latlng, 16, { duration: 1.5 });
+            }).on("locationerror", function (e) {
+                alert("无法获取您的位置，请检查定位权限设置");
+            });
+        } else {
+            alert("您的浏览器不支持定位功能");
+        }
     };
     return (
         <div 
@@ -106,8 +177,21 @@ const MapControls = () => {
             onDoubleClick={(e) => e.stopPropagation()}
         >
             <button 
-                onClick={(e) => { e.stopPropagation(); locate(); }}
-                className="bg-white p-3 rounded-xl shadow-lg hover:bg-[#FFDD00]/10 text-gray-700 transition-colors"
+                onClick={(e) => { 
+                    e.stopPropagation(); 
+                    e.preventDefault();
+                    locate(); 
+                }}
+                onTouchStart={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                }}
+                onTouchEnd={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    locate();
+                }}
+                className="bg-white p-3 rounded-xl shadow-lg hover:bg-[#FFDD00]/10 active:bg-[#FFDD00]/20 text-gray-700 transition-colors z-[501]"
                 title="Locate Me"
             >
                 <Locate size={20} />
@@ -116,14 +200,49 @@ const MapControls = () => {
     );
 }
 
-const MapZoomController = ({min, max, step = 1}: {min: number, max: number, step?: number}) => {
+const MapZoomController = ({min, max, step = 1, onDragChange}: {min: number, max: number, step?: number, onDragChange?: (isDragging: boolean) => void}) => {
     const map = useMap();
     const [zoom, setZoom] = useState(map.getZoom());
     useMapEvents({
         zoomend: () => setZoom(map.getZoom())
     });
+
+    // 当拖动滑块时，锁定地图的拖动和滚轮缩放
+    useEffect(() => {
+      if (onDragChange) {
+        const handleDragChange = (isDragging: boolean) => {
+          if (isDragging) {
+            map.dragging.disable();
+            map.scrollWheelZoom.disable();
+          } else {
+            map.dragging.enable();
+            map.scrollWheelZoom.enable();
+          }
+          onDragChange(isDragging);
+        };
+        // 这个回调会在 ZoomSlider 内部通过 onDragChange prop 调用
+        // 我们需要通过一个 ref 或者直接在这里处理
+      }
+    }, [map, onDragChange]);
+
     return (
-      <ZoomSlider value={zoom} min={min} max={max} step={step} onChange={(val) => map.setZoom(val)} />
+      <ZoomSlider 
+        value={zoom} 
+        min={min} 
+        max={max} 
+        step={step} 
+        onChange={(val) => map.setZoom(val)}
+        onDragChange={(isDragging) => {
+          if (isDragging) {
+            map.dragging.disable();
+            map.scrollWheelZoom.disable();
+          } else {
+            map.dragging.enable();
+            map.scrollWheelZoom.enable();
+          }
+          onDragChange?.(isDragging);
+        }}
+      />
     );
 };
 
@@ -160,15 +279,29 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   // Calculate dynamic min zoom for image
   useEffect(() => {
     if (project.type === 'image' && mapInstance && imageDimensions) {
-        const bounds = L.latLngBounds([0,0], imageDimensions);
-        // "inside=true" means fit the bounds inside the view
-        const fitZoom = mapInstance.getBoundsZoom(bounds, true);
-        
-        setMinImageZoom(fitZoom);
-        mapInstance.setMinZoom(fitZoom);
-        
-        // Initially fit bounds if first load or logic dictates
-        mapInstance.fitBounds(bounds);
+        // 等待地图容器尺寸计算完成
+        setTimeout(() => {
+            if (!mapInstance) return;
+            
+            const bounds = L.latLngBounds([0,0], imageDimensions);
+            // "inside=true" means fit the bounds inside the view
+            const fitZoom = mapInstance.getBoundsZoom(bounds, true);
+            
+            // 最小值：改为fitZoom的25%，允许图片缩得更小
+            const minZoom = fitZoom * 0.25;
+            // 最大值：2
+            const maxZoom = 2;
+            
+            setMinImageZoom(minZoom);
+            mapInstance.setMinZoom(minZoom);
+            mapInstance.setMaxZoom(maxZoom);
+            
+            // 计算图片中心点并居中显示
+            const centerLat = imageDimensions[0] / 2;
+            const centerLng = imageDimensions[1] / 2;
+            // 使用minZoom确保图片完全居中且不超出屏幕
+            mapInstance.setView([centerLat, centerLng], minZoom, { animate: false });
+        }, 150);
     }
   }, [mapInstance, imageDimensions, project.type]);
 
@@ -288,10 +421,10 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     <div id="map-view-container" className="relative w-full h-full z-0 bg-gray-100">
       <MapContainer 
         key={project.id} 
-        center={isMapMode ? defaultCenter : [500, 500]} 
-        zoom={isMapMode ? 16 : -3}
-        minZoom={isMapMode ? 14 : -5} 
-        maxZoom={isMapMode ? 18 : 4}
+        center={isMapMode ? defaultCenter : (imageDimensions ? [imageDimensions[0] / 2, imageDimensions[1] / 2] : [500, 500])} 
+        zoom={isMapMode ? 16 : (imageDimensions ? minImageZoom : -3)}
+        minZoom={isMapMode ? 14 : (imageDimensions ? minImageZoom : -5)} 
+        maxZoom={isMapMode ? 18 : (imageDimensions ? 2 : 4)}
         crs={isMapMode ? L.CRS.EPSG3857 : L.CRS.Simple}
         style={{ height: '100%', width: '100%' }}
         zoomControl={false}
@@ -318,12 +451,56 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             key={note.id} 
             position={[note.coords.lat, note.coords.lng]}
             icon={createCustomIcon(note.emoji)}
-            eventHandlers={{ click: () => handleMarkerClick(note) }}
+            eventHandlers={{ 
+              click: (e) => {
+                const leafletEvent = e as any;
+                const originalEvent = leafletEvent.originalEvent;
+                if (originalEvent) {
+                  originalEvent.stopPropagation();
+                  originalEvent.preventDefault();
+                }
+                // 立即执行，不延迟
+                handleMarkerClick(note);
+              },
+              mousedown: (e) => {
+                const leafletEvent = e as any;
+                if (leafletEvent.originalEvent) {
+                  leafletEvent.originalEvent.stopPropagation();
+                  leafletEvent.originalEvent.preventDefault();
+                }
+              },
+              touchstart: (e) => {
+                const leafletEvent = e as any;
+                if (leafletEvent.originalEvent) {
+                  leafletEvent.originalEvent.stopPropagation();
+                  leafletEvent.originalEvent.preventDefault();
+                }
+              },
+              touchend: (e) => {
+                const leafletEvent = e as any;
+                if (leafletEvent.originalEvent) {
+                  leafletEvent.originalEvent.stopPropagation();
+                  leafletEvent.originalEvent.preventDefault();
+                  // 在touchend时也触发点击
+                  handleMarkerClick(note);
+                }
+              },
+              dblclick: (e) => {
+                const leafletEvent = e as any;
+                if (leafletEvent.originalEvent) {
+                  leafletEvent.originalEvent.stopPropagation();
+                  leafletEvent.originalEvent.preventDefault();
+                }
+              }
+            }}
+            interactive={true}
+            bubblingMouseEvents={false}
+            zIndexOffset={1000}
           />
         ))}
 
         {isMapMode && (
-          <div className="absolute top-4 left-4 right-4 z-[500] flex gap-2 pointer-events-none items-start">
+          <div className="fixed top-4 left-4 right-4 z-[500] flex gap-2 pointer-events-none items-start">
               <div 
                   className="flex-1 max-w-md relative group pointer-events-auto"
                   onPointerDown={(e) => e.stopPropagation()}
@@ -369,10 +546,10 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           </div>
         )}
 
-        <div className="absolute bottom-24 left-4 z-[500]">
+        <div className="fixed bottom-24 left-4 z-[500]">
            <MapZoomController 
              min={isMapMode ? 14 : minImageZoom} 
-             max={isMapMode ? 18 : 4} 
+             max={isMapMode ? 18 : (project.type === 'image' ? 2 : 4)} 
              step={isMapMode ? 1 : 0.1}
            />
         </div>
