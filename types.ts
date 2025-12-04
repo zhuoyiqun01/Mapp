@@ -31,6 +31,15 @@ export interface Note {
   variant?: 'standard' | 'text' | 'compact';
 }
 
+export interface Connection {
+  id: string;
+  fromNoteId: string;
+  toNoteId: string;
+  fromSide: 'top' | 'right' | 'bottom' | 'left';
+  toSide: 'top' | 'right' | 'bottom' | 'left';
+  arrow?: 'none' | 'forward' | 'reverse'; // 箭头方向：无、正向、反向
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -38,6 +47,7 @@ export interface Project {
   backgroundImage?: string; // Base64 string for image mode
   createdAt: number;
   notes: Note[];
+  connections?: Connection[]; // Connections between notes in board view
 }
 
 export type ViewMode = 'map' | 'board';
