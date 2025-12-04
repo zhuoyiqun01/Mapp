@@ -189,13 +189,13 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({ onSave, onCancel, 
          <div className="flex bg-gray-100 rounded-lg p-0.5">
             <button
               onClick={() => setMode('draw')}
-              className={`p-1.5 rounded-md transition-all ${mode === 'draw' ? 'bg-white text-yellow-600 shadow-sm' : 'text-gray-400'}`}
+              className={`p-1.5 rounded-md transition-all ${mode === 'draw' ? 'bg-white text-[#FFDD00] shadow-sm' : 'text-gray-400'}`}
             >
               <Pencil size={18} />
             </button>
             <button
               onClick={() => setMode('erase')}
-              className={`p-1.5 rounded-md transition-all ${mode === 'erase' ? 'bg-white text-yellow-600 shadow-sm' : 'text-gray-400'}`}
+              className={`p-1.5 rounded-md transition-all ${mode === 'erase' ? 'bg-white text-[#FFDD00] shadow-sm' : 'text-gray-400'}`}
             >
               <Eraser size={18} />
             </button>
@@ -214,7 +214,7 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({ onSave, onCancel, 
 
          <div className="w-px h-6 bg-gray-200"></div>
 
-         <button onClick={handleDone} className="p-2 bg-yellow-400 text-yellow-950 rounded-full hover:bg-yellow-300 shadow-sm active:scale-95 transition-all">
+         <button onClick={handleDone} className="p-2 bg-[#FFDD00] text-yellow-950 rounded-full hover:bg-[#E6C700] shadow-sm active:scale-95 transition-all">
             <Check size={20} />
          </button>
       </div>
