@@ -3,7 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>LemonMap</title>
+    <meta name="theme-color" content="#FFDD00" />
+    <title>Mapp</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
@@ -18,11 +20,11 @@
          background: #f1f1f1; 
        }
        ::-webkit-scrollbar-thumb {
-         background: #facc15; 
+         background: #FFDD00; 
          border-radius: 3px;
        }
        ::-webkit-scrollbar-thumb:hover {
-         background: #eab308; 
+         background: #E6C700; 
        }
        /* Leaflet fix for z-index issues in some frameworks */
        .leaflet-pane { z-index: 10; }
@@ -54,8 +56,10 @@
   }
 }
 </script>
+<link rel="stylesheet" href="/index.css">
 </head>
   <body class="bg-gray-50 text-gray-800 antialiased overflow-hidden">
     <div id="root"></div>
-  </body>
+  <script type="module" src="/index.tsx"></script>
+</body>
 </html>
