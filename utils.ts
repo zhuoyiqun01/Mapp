@@ -71,3 +71,67 @@ export const exportToJpeg = async (elementId: string, fileName: string) => {
     alert('Failed to export image.');
   }
 };
+
+// 导出当前视图的中心对齐截图
+export const exportToJpegCentered = async (elementId: string, fileName: string) => {
+  const node = document.getElementById(elementId);
+  if (!node) {
+    alert('无法找到要导出的视图');
+    return;
+  }
+
+  try {
+    // 隐藏所有 UI 元素（使用 fixed 定位的按钮、滑块等）
+    const uiElements = document.querySelectorAll('.fixed, [class*="z-["]');
+    const originalDisplays: string[] = [];
+    
+    uiElements.forEach((el, index) => {
+      const htmlEl = el as HTMLElement;
+      originalDisplays[index] = htmlEl.style.display;
+      // 只隐藏按钮、控件等，不隐藏整个容器
+      if (htmlEl.tagName === 'BUTTON' || 
+          htmlEl.className.includes('pointer-events-auto') ||
+          htmlEl.className.includes('z-[500]') ||
+          htmlEl.className.includes('z-50')) {
+        htmlEl.style.display = 'none';
+      }
+    });
+    
+    // 等待一帧确保DOM更新
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    
+    // 导出整个视口
+    const dataUrl = await toJpeg(node, {
+      quality: 0.95,
+      pixelRatio: 2,
+      backgroundColor: '#f9fafb',
+      width: viewportWidth,
+      height: viewportHeight,
+    });
+
+    // 恢复 UI 元素
+    uiElements.forEach((el, index) => {
+      const htmlEl = el as HTMLElement;
+      htmlEl.style.display = originalDisplays[index];
+    });
+
+    // 直接下载
+    const link = document.createElement('a');
+    link.download = `${fileName}.jpg`;
+    link.href = dataUrl;
+    link.click();
+  } catch (error) {
+    // 确保恢复 UI 元素
+    const uiElements = document.querySelectorAll('.fixed, [class*="z-["]');
+    uiElements.forEach(el => {
+      const htmlEl = el as HTMLElement;
+      htmlEl.style.display = '';
+    });
+    
+    console.error('Export failed', error);
+    alert('导出图片失败');
+  }
+};
