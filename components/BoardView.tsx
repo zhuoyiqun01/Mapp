@@ -216,7 +216,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
         className={`w-full h-full relative overflow-hidden transition-all duration-300`}
         style={{
             boxShadow: isEditMode 
-                ? 'inset 0 0 0 6px #FACC15, inset 0 0 60px rgba(250,204,21,0.5)' 
+                ? 'inset 0 0 0 6px #FFDD00, inset 0 0 60px rgba(255,221,0,0.5)' 
                 : 'none'
         }}
     >
@@ -232,7 +232,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
         <div 
           className="absolute inset-0 pointer-events-none z-0"
           style={{
-              backgroundImage: `radial-gradient(#FDE047 ${dotSize}px, transparent ${dotSize + 0.5}px)`,
+              backgroundImage: `radial-gradient(#FFDD00 ${dotSize}px, transparent ${dotSize + 0.5}px)`,
               backgroundPosition: `${transform.x}px ${transform.y}px`,
               backgroundSize: `${gridSize}px ${gridSize}px`,
               opacity: 0.8
@@ -294,7 +294,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                   )}
 
                   {isText ? (
-                      <div className={`p-2 rounded-lg border-2 ${isDragging ? 'border-yellow-400 bg-white shadow-lg' : 'border-transparent'}`}>
+                      <div className={`p-2 rounded-lg border-2 ${isDragging ? 'border-[#FFDD00] bg-white shadow-lg' : 'border-transparent'}`}>
                           <p 
                             className={`text-gray-800 leading-none whitespace-pre-wrap break-words ${note.isBold ? 'font-bold' : 'font-medium'}`} 
                             style={{ 
@@ -308,7 +308,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                       </div>
                   ) : (
                       <div 
-                          className={`w-full h-full shadow-xl flex flex-col overflow-hidden group rounded-sm transition-shadow ${isDragging ? 'shadow-2xl ring-4 ring-yellow-400' : ''}`}
+                          className={`w-full h-full shadow-xl flex flex-col overflow-hidden group rounded-sm transition-shadow ${isDragging ? 'shadow-2xl ring-4 ring-[#FFDD00]' : ''}`}
                           style={{
                               transform: `rotate(${(parseInt(note.id.slice(-2), 36) % 6) - 3}deg)`,
                               backgroundColor: note.color || '#FFFDF5'
@@ -363,7 +363,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
 
         <div className="absolute top-8 right-8 z-[500] flex gap-3 pointer-events-auto" onPointerDown={(e) => e.stopPropagation()}>
           {isEditMode ? (
-              <button onClick={() => setIsEditMode(false)} className="flex items-center gap-2 px-6 py-2 bg-yellow-400 text-yellow-950 rounded-xl shadow-lg hover:bg-yellow-300 font-bold">
+              <button onClick={() => setIsEditMode(false)} className="flex items-center gap-2 px-6 py-2 bg-[#FFDD00] text-yellow-950 rounded-xl shadow-lg hover:bg-[#E6C700] font-bold">
                   <Check size={18} /> Done
               </button>
           ) : (
@@ -382,14 +382,14 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                 <div className="bg-white p-1.5 rounded-xl shadow-lg border border-gray-100 flex gap-2">
                     <button
                         onClick={() => createNoteAtCenter('text')}
-                        className="w-12 h-12 rounded-lg bg-gray-50 hover:bg-yellow-50 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
+                        className="w-12 h-12 rounded-lg bg-gray-50 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
                         title="Add Text"
                     >
                         <Type size={24} />
                     </button>
                     <button
                         onClick={() => createNoteAtCenter('compact')}
-                        className="w-12 h-12 rounded-lg bg-gray-50 hover:bg-yellow-50 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
+                        className="w-12 h-12 rounded-lg bg-gray-50 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
                         title="Add Sticky Note"
                     >
                         <StickyNote size={24} />
