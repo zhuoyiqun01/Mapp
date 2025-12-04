@@ -1,8 +1,8 @@
 
 import React, { useState } from 'react';
 import { Project } from '../types';
-import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X } from 'lucide-react';
-import { generateId, fileToBase64, formatDate, exportToJpeg } from '../utils';
+import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home } from 'lucide-react';
+import { generateId, fileToBase64, formatDate, exportToJpeg, exportToJpegCentered } from '../utils';
 
 interface ProjectManagerProps {
   projects: Project[];
@@ -12,6 +12,9 @@ interface ProjectManagerProps {
   onDeleteProject: (id: string) => void;
   isSidebar?: boolean;
   onCloseSidebar?: () => void;
+  onBackToHome?: () => void;
+  viewMode?: 'map' | 'board';
+  activeProject?: Project | null;
 }
 
 export const ProjectManager: React.FC<ProjectManagerProps> = ({ 
@@ -21,7 +24,10 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   onSelectProject, 
   onDeleteProject,
   isSidebar = false,
-  onCloseSidebar
+  onCloseSidebar,
+  onBackToHome,
+  viewMode = 'map',
+  activeProject
 }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
@@ -46,6 +52,11 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     setNewProjectName('');
     setBgImage(null);
     setNewProjectType('map');
+    
+    // 如果是侧边栏模式，创建后关闭侧边栏
+    if (isSidebar && onCloseSidebar) {
+      onCloseSidebar();
+    }
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -59,21 +70,71 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     }
   };
 
-  const handleExport = (type: 'map' | 'board', project: Project) => {
-    if (project.id !== currentProjectId) {
-      alert("Please open the project to export its views.");
-      onSelectProject(project.id);
+  const handleExportCurrentView = () => {
+    if (!activeProject) {
+      alert("请先打开一个项目");
       return;
     }
 
-    const elementId = type === 'map' ? 'map-view-container' : 'board-view-container';
-    exportToJpeg(elementId, `${project.name}-${type}`);
+    const elementId = viewMode === 'map' ? 'map-view-container' : 'board-view-container';
+    exportToJpegCentered(elementId, `${activeProject.name}-${viewMode}`);
+  };
+
+  const handleExportData = (project: Project) => {
+    // 只导出标准便签（不包括小便签和纯文本）
+    const standardNotes = project.notes.filter(note => 
+      note.variant !== 'text' && note.variant !== 'compact'
+    );
+    
+    if (standardNotes.length === 0) {
+      alert("该项目没有标准便签数据");
+      setOpenMenuId(null);
+      return;
+    }
+
+    // 根据项目类型决定坐标格式
+    const isMapProject = project.type === 'map';
+    const coordHeader = isMapProject ? '经纬度坐标' : 'XY坐标';
+    
+    // 创建CSV内容
+    const headers = [coordHeader, '文本内容', 'Tag1', 'Tag2', 'Tag3'];
+    const rows = standardNotes.map(note => {
+      // 坐标：根据项目类型选择
+      const coords = isMapProject 
+        ? `${note.coords.lat.toFixed(6)}, ${note.coords.lng.toFixed(6)}`
+        : `${note.boardX.toFixed(2)}, ${note.boardY.toFixed(2)}`;
+      
+      // 文本内容
+      const text = note.text || '';
+      
+      // 标签
+      const tags = note.tags || [];
+      const tag1 = tags[0]?.label || '';
+      const tag2 = tags[1]?.label || '';
+      const tag3 = tags[2]?.label || '';
+      
+      return [coords, text, tag1, tag2, tag3];
+    });
+
+    // 转换为CSV格式
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+
+    // 创建下载链接
+    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${project.name}-数据.csv`;
+    link.click();
+    
     setOpenMenuId(null);
   };
 
   const containerClass = isSidebar 
-    ? "h-full w-80 bg-[#FFDD00] shadow-2xl flex flex-col border-r border-[#FFDD00]" 
-    : "w-full h-full bg-[#FFDD00] flex flex-col items-center justify-start pt-48 p-4 relative"; 
+    ? "h-full w-full bg-[#FFDD00] shadow-2xl flex flex-col border-r border-[#FFDD00] overflow-hidden" 
+    : "w-full min-h-screen bg-[#FFDD00] flex flex-col items-center justify-start pt-40 pb-0 p-4 relative"; 
 
   const titleClass = isSidebar
     ? "hidden" // Hide title in sidebar
@@ -82,12 +143,46 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   return (
     <div className={containerClass}>
       {isSidebar && (
-        <button onClick={onCloseSidebar} className="absolute top-4 right-4 text-yellow-800 hover:text-white transition-colors">
-          <X size={24} />
-        </button>
+        <>
+          <button 
+            onClick={() => {
+              if (onBackToHome) {
+                onBackToHome();
+              }
+              if (onCloseSidebar) {
+                onCloseSidebar();
+              }
+            }} 
+            className="absolute top-4 left-4 text-yellow-800 hover:text-white transition-colors z-[2010]"
+          >
+            <Home size={24} />
+          </button>
+          {activeProject && (
+            <button 
+              onClick={handleExportCurrentView}
+              className="absolute top-4 right-12 text-yellow-800 hover:text-white transition-colors z-[2010]"
+              title="导出当前视图"
+            >
+              <Download size={24} />
+            </button>
+          )}
+          <button 
+            onClick={onCloseSidebar} 
+            className="absolute top-4 right-4 text-yellow-800 hover:text-white transition-colors z-[2010]"
+          >
+            <X size={24} />
+          </button>
+          <button 
+            onClick={() => setIsCreating(true)}
+            disabled={isCreating}
+            className="absolute top-14 left-4 right-4 px-4 py-3 bg-white text-yellow-900 rounded-2xl font-bold shadow-lg hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2 transition-all z-[2010] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+          >
+            <Plus size={20} /> New Project
+          </button>
+        </>
       )}
 
-      <div className={isSidebar ? "p-6 pt-16 border-b border-[#FFDD00]/20" : "flex flex-col items-center"}>
+      <div className={isSidebar ? "p-6 pt-28 border-b border-[#FFDD00]/20 flex-shrink-0" : "flex flex-col items-center"}>
         {!isSidebar && (
           <h1 className={titleClass}>
             <span>START</span>
@@ -106,17 +201,38 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         )}
       </div>
 
-      <div className={`flex-1 overflow-y-auto custom-scrollbar w-full ${isSidebar ? "p-4" : "max-w-md mt-8 bg-white/10 backdrop-blur-sm rounded-3xl p-4 w-full"}`}>
-        {isSidebar && (
-           <button 
-             onClick={() => setIsCreating(true)}
-             className="w-full mb-4 p-4 bg-[#FFDD00]/50 hover:bg-[#FFDD00] text-yellow-900 border border-[#FFDD00]/20 rounded-2xl font-bold hover:scale-[1.02] active:scale-95 flex items-center justify-between transition-all"
-           >
-             <span>New Project</span>
-             <Plus size={20} />
-           </button>
-        )}
-
+      <div
+        className={
+          isSidebar
+            ? "flex-1 overflow-y-auto custom-scrollbar w-full p-4"
+            : "w-full max-w-md mt-8 bg-transparent p-4 pb-8"
+        }
+        style={isSidebar ? { 
+          touchAction: 'pan-y',
+          overscrollBehavior: 'contain',
+          WebkitOverflowScrolling: 'touch'
+        } : {}}
+        onTouchStart={(e) => {
+          if (isSidebar) {
+            e.stopPropagation();
+          }
+        }}
+        onTouchMove={(e) => {
+          if (isSidebar) {
+            e.stopPropagation();
+          }
+        }}
+        onWheel={(e) => {
+          if (isSidebar) {
+            e.stopPropagation();
+          }
+        }}
+        onScroll={(e) => {
+          if (isSidebar) {
+            e.stopPropagation();
+          }
+        }}
+      >
         <div className="flex flex-col gap-3">
           {projects.map(p => (
             <div 
@@ -150,28 +266,44 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
 
                 {openMenuId === p.id && (
                   <>
-                    <div className="fixed inset-0 z-40" onClick={() => setOpenMenuId(null)} />
-                    <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl z-50 border border-gray-100 overflow-hidden py-1 animate-in fade-in zoom-in-95 origin-top-right">
-                      <button 
-                        onClick={() => handleExport('map', p)}
-                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
-                      >
-                        <MapIcon size={16} /> Export Mapping
-                      </button>
-                      <button 
-                        onClick={() => handleExport('board', p)}
-                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
-                      >
-                        <LayoutGrid size={16} /> Export Board
-                      </button>
-                      <div className="h-px bg-gray-100 my-1" />
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); onDeleteProject(p.id); }}
-                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-red-50 text-red-500 flex items-center gap-2"
-                      >
-                        <Trash2 size={16} /> Delete Project
-                      </button>
-                    </div>
+                    <div className="fixed inset-0 z-[45] bg-black/20" onClick={() => setOpenMenuId(null)} />
+                    {isSidebar ? (
+                      <div className="absolute right-0 top-full mt-2 w-48 max-h-[60vh] overflow-auto bg-white rounded-xl shadow-xl z-50 border border-gray-100 py-1 animate-in fade-in zoom-in-95 origin-top-right">
+                        <button 
+                          onClick={() => handleExportData(p)}
+                          className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                        >
+                          <Download size={16} /> 导出数据
+                        </button>
+                        <div className="h-px bg-gray-100 my-1" />
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); onDeleteProject(p.id); }}
+                          className="w-full text-left px-4 py-2.5 text-sm hover:bg-red-50 text-red-500 flex items-center gap-2"
+                        >
+                          <Trash2 size={16} /> Delete Project
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="fixed inset-x-4 bottom-6 z-[50] bg-white rounded-3xl shadow-2xl border border-gray-200 py-2 animate-in slide-in-from-bottom-4" onClick={(e) => e.stopPropagation()}>
+                        <div className="px-4 pt-2 pb-1">
+                          <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Project</div>
+                          <div className="text-sm font-bold text-gray-800 truncate">{p.name}</div>
+                        </div>
+                        <button 
+                          onClick={() => handleExportData(p)}
+                          className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                        >
+                          <Download size={16} /> 导出数据
+                        </button>
+                        <div className="h-px bg-gray-100 my-1" />
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); onDeleteProject(p.id); }}
+                          className="w-full text-left px-4 py-2.5 text-sm hover:bg-red-50 text-red-500 flex items-center gap-2"
+                        >
+                          <Trash2 size={16} /> Delete Project
+                        </button>
+                      </div>
+                    )}
                   </>
                 )}
               </div>
@@ -185,7 +317,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       </div>
 
       {isCreating && (
-        <div className="fixed inset-0 z-[2000] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[3000] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 animate-in zoom-in-95">
             <h2 className="text-2xl font-black text-gray-800 mb-6">New Project</h2>
             <div className="space-y-4">
@@ -195,6 +327,12 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                   autoFocus
                   value={newProjectName}
                   onChange={(e) => setNewProjectName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleCreate();
+                    }
+                  }}
                   className="w-full p-3 bg-gray-50 rounded-xl outline-none focus:ring-2 focus:ring-[#FFDD00] transition-all font-medium"
                   placeholder="My Mapp Trip"
                 />
