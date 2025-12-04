@@ -76,13 +76,13 @@ export const ZoomSlider: React.FC<ZoomSliderProps> = ({ value, min, max, onChang
 
             {/* Filled Track */}
             <div 
-                className="absolute bottom-0 w-1 bg-yellow-400 rounded-full pointer-events-none transition-all duration-75"
+                className="absolute bottom-0 w-1 bg-[#FFDD00] rounded-full pointer-events-none transition-all duration-75"
                 style={{ height: `${percentage}%` }}
             />
 
             {/* Circular Thumb */}
             <div 
-                className="absolute w-5 h-5 bg-white border-2 border-yellow-400 rounded-full shadow-md pointer-events-none transition-all duration-75"
+                className="absolute w-5 h-5 bg-white border-2 border-[#FFDD00] rounded-full shadow-md pointer-events-none transition-all duration-75"
                 style={{ bottom: `calc(${percentage}% - 10px)` }}
             />
         </div>
