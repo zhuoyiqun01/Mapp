@@ -107,7 +107,7 @@ const MapControls = () => {
         >
             <button 
                 onClick={(e) => { e.stopPropagation(); locate(); }}
-                className="bg-white p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors"
+                className="bg-white p-3 rounded-xl shadow-lg hover:bg-[#FFDD00]/10 text-gray-700 transition-colors"
                 title="Locate Me"
             >
                 <Locate size={20} />
@@ -262,8 +262,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const createCustomIcon = (emoji: string) => {
       return L.divIcon({
           className: 'custom-icon',
-          html: `<div style="
-            background-color: #FDE047; 
+         html: `<div style="
+            background-color: #FFDD00; 
             width: 40px; 
             height: 40px; 
             border-radius: 50% 50% 50% 0; 
@@ -346,7 +346,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                               <button
                                   key={i}
                                   onClick={() => selectSearchResult(result)}
-                                  className="w-full text-left px-4 py-3 hover:bg-yellow-50 border-b border-gray-50 last:border-none transition-colors flex flex-col gap-0.5"
+                                  className="w-full text-left px-4 py-3 hover:bg-[#FFDD00]/10 border-b border-gray-50 last:border-none transition-colors flex flex-col gap-0.5"
                               >
                                   <span className="font-medium text-gray-800 text-sm truncate w-full block">{result.display_name.split(',')[0]}</span>
                                   <span className="text-xs text-gray-400 truncate w-full block">{result.display_name}</span>
