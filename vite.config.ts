@@ -17,6 +17,22 @@ export default defineConfig(({ mode }) => {
           manifest: false,
           workbox: {
             globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}'],
+            runtimeCaching: [
+              {
+                urlPattern: /^https:\/\/.*\.tile\.openstreetmap\.org\/.*/i,
+                handler: 'CacheFirst',
+                options: {
+                  cacheName: 'openstreetmap-tiles',
+                  expiration: {
+                    maxEntries: 500,
+                    maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
+                  },
+                  cacheableResponse: {
+                    statuses: [0, 200],
+                  },
+                },
+              },
+            ],
           },
         }),
       ],
