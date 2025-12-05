@@ -34,6 +34,12 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
 
     const handleStart = (e: TouchEvent | MouseEvent) => {
       if (e instanceof MouseEvent && e.button !== 0) return;
+      
+      // 如果是多指触摸（双指缩放），不启动长按计时器
+      if ('touches' in e && e.touches.length > 1) {
+        return;
+      }
+      
       const clientX = 'touches' in e ? e.touches[0].clientX : (e as MouseEvent).clientX;
       const clientY = 'touches' in e ? e.touches[0].clientY : (e as MouseEvent).clientY;
       startPosRef.current = { x: clientX, y: clientY };
@@ -52,6 +58,15 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
 
     const handleMove = (e: TouchEvent | MouseEvent) => {
        if (!startPosRef.current || !timerRef.current) return;
+       
+       // 如果变成多指触摸（双指缩放），取消长按计时器
+       if ('touches' in e && e.touches.length > 1) {
+         clearTimeout(timerRef.current);
+         timerRef.current = null;
+         startPosRef.current = null;
+         return;
+       }
+       
        const clientX = 'touches' in e ? e.touches[0].clientX : (e as MouseEvent).clientX;
        const clientY = 'touches' in e ? e.touches[0].clientY : (e as MouseEvent).clientY;
        const dx = clientX - startPosRef.current.x;
@@ -288,7 +303,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     <div id="map-view-container" className="relative w-full h-full z-0 bg-gray-100">
       <MapContainer 
         key={project.id} 
-        center={isMapMode ? defaultCenter : [500, 500]} 
+        center={isMapMode ? defaultCenter : [0, 0]} 
         zoom={isMapMode ? 16 : -8}
         minZoom={isMapMode ? 14 : -20} 
         maxZoom={isMapMode ? 18 : 2}
