@@ -28,6 +28,7 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
   const map = useMap();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startPosRef = useRef<{ x: number, y: number } | null>(null);
+  const touchCountRef = useRef<number>(0);
   
   useEffect(() => {
     const container = map.getContainer();
@@ -35,9 +36,21 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
     const handleStart = (e: TouchEvent | MouseEvent) => {
       if (e instanceof MouseEvent && e.button !== 0) return;
       
+      // 清除任何已存在的计时器
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      
       // 如果是多指触摸（双指缩放），不启动长按计时器
-      if ('touches' in e && e.touches.length > 1) {
-        return;
+      if ('touches' in e) {
+        touchCountRef.current = e.touches.length;
+        if (e.touches.length > 1) {
+          startPosRef.current = null;
+          return;
+        }
+      } else {
+        touchCountRef.current = 1;
       }
       
       const clientX = 'touches' in e ? e.touches[0].clientX : (e as MouseEvent).clientX;
@@ -45,6 +58,13 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
       startPosRef.current = { x: clientX, y: clientY };
 
       timerRef.current = setTimeout(() => {
+        // 再次检查触摸点数量，防止在等待期间变成多指
+        if (touchCountRef.current > 1) {
+          timerRef.current = null;
+          startPosRef.current = null;
+          return;
+        }
+        
         const rect = container.getBoundingClientRect();
         const relativeX = clientX - rect.left;
         const relativeY = clientY - rect.top;
@@ -58,6 +78,11 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
 
     const handleMove = (e: TouchEvent | MouseEvent) => {
        if (!startPosRef.current || !timerRef.current) return;
+       
+       // 更新触摸点数量
+       if ('touches' in e) {
+         touchCountRef.current = e.touches.length;
+       }
        
        // 如果变成多指触摸（双指缩放），取消长按计时器
        if ('touches' in e && e.touches.length > 1) {
@@ -79,7 +104,14 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
        }
     };
 
-    const handleEnd = () => {
+    const handleEnd = (e?: TouchEvent | MouseEvent) => {
+       // 更新触摸点数量
+       if (e && 'touches' in e) {
+         touchCountRef.current = e.touches.length;
+       } else {
+         touchCountRef.current = 0;
+       }
+       
        if (timerRef.current) {
          clearTimeout(timerRef.current);
          timerRef.current = null;
@@ -91,7 +123,7 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
     container.addEventListener('mousedown', handleStart);
     container.addEventListener('touchmove', handleMove, { passive: true });
     container.addEventListener('mousemove', handleMove);
-    container.addEventListener('touchend', handleEnd);
+    container.addEventListener('touchend', (e) => handleEnd(e));
     container.addEventListener('mouseup', handleEnd);
 
     return () => {
