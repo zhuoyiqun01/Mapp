@@ -1,0 +1,28 @@
+{
+  "name": "mapping-app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "framer-motion": "11.0.8",
+    "lucide-react": "0.344.0",
+    "leaflet": "1.9.4",
+    "react-leaflet": "4.2.1",
+    "html-to-image": "1.11.11",
+    "idb-keyval": "6.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "vite-plugin-pwa": "^0.20.5",
+    "typescript": "~5.8.2",
+    "vite": "^5.4.0"
+  }
+}

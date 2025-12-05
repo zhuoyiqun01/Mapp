@@ -1,0 +1,57 @@
+html, body, #root {
+  height: 100%;
+}
+
+.app-root {
+  min-height: 100dvh;
+}
+
+/* Hide scrollbar but keep scrolling functionality */
+.scrollbar-hide {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;  /* Chrome, Safari and Opera */
+}
+
+/* Fixed width for tag columns to prevent table expansion */
+.tag-header-column {
+  width: 128px;
+  min-width: 128px;
+  max-width: 128px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.tag-content-column {
+  width: 128px;
+  min-width: 128px;
+  max-width: 128px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.tag-content-column > * {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+@media (min-width: 640px) {
+  .tag-header-column {
+    width: 256px;
+    min-width: 256px;
+    max-width: 256px;
+  }
+  
+  .tag-content-column {
+    width: 256px;
+    min-width: 256px;
+    max-width: 256px;
+  }
+}
+
+
