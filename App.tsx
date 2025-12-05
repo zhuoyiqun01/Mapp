@@ -352,6 +352,7 @@ export default function App() {
                   viewMode={viewMode}
                   activeProject={activeProject}
                   onExportCSV={handleExportCSV}
+                  syncStatus={syncStatus}
               />
              </motion.div>
         </div>
@@ -360,62 +361,8 @@ export default function App() {
 
       <div className="flex-1 relative overflow-hidden z-0">
         
-        {/* 同步状态指示器 */}
-        {!isEditorOpen && !isBoardEditMode && (
-          <div className="absolute top-4 right-4 z-[900]">
-            <AnimatePresence mode="wait">
-              {syncStatus === 'syncing' && (
-                <motion.div
-                  key="syncing"
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.8 }}
-                  className="flex items-center gap-2 px-3 py-2 bg-blue-500/90 backdrop-blur-sm text-white rounded-lg shadow-lg text-sm"
-                >
-                  <Loader2 size={16} className="animate-spin" />
-                  <span>同步中...</span>
-                </motion.div>
-              )}
-              {syncStatus === 'success' && (
-                <motion.div
-                  key="success"
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.8 }}
-                  className="flex items-center gap-2 px-3 py-2 bg-green-500/90 backdrop-blur-sm text-white rounded-lg shadow-lg text-sm"
-                >
-                  <CheckCircle2 size={16} />
-                  <span>已同步</span>
-                </motion.div>
-              )}
-              {syncStatus === 'error' && (
-                <motion.div
-                  key="error"
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.8 }}
-                  className="flex items-center gap-2 px-3 py-2 bg-red-500/90 backdrop-blur-sm text-white rounded-lg shadow-lg text-sm"
-                  title={syncError || '同步失败'}
-                >
-                  <AlertCircle size={16} />
-                  <span>同步失败</span>
-                </motion.div>
-              )}
-              {syncStatus === 'idle' && getLastSyncTime() && (
-                <motion.div
-                  key="idle"
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.8 }}
-                  className="flex items-center gap-2 px-3 py-2 bg-gray-500/70 backdrop-blur-sm text-white rounded-lg shadow-lg text-sm"
-                  title={`最后同步: ${new Date(getLastSyncTime()!).toLocaleString('zh-CN')}`}
-                >
-                  <Cloud size={16} />
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        )}
+        {/* 同步状态指示器 - 只在侧边栏打开时显示（在侧边栏内） */}
+        {/* 主视图中不再显示云图标，统一在侧边栏显示 */}
         
         {!isEditorOpen && !isBoardEditMode && (
           <button 

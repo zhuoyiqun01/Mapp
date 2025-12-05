@@ -1,8 +1,9 @@
 
 import React, { useState } from 'react';
 import { Project } from '../types';
-import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home } from 'lucide-react';
+import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud } from 'lucide-react';
 import { generateId, fileToBase64, formatDate, exportToJpeg, exportToJpegCentered } from '../utils';
+import { getLastSyncTime, type SyncStatus } from '../utils/sync';
 
 interface ProjectManagerProps {
   projects: Project[];
@@ -16,6 +17,7 @@ interface ProjectManagerProps {
   viewMode?: 'map' | 'board' | 'table';
   activeProject?: Project | null;
   onExportCSV?: (project: Project) => void;
+  syncStatus?: SyncStatus;
 }
 
 export const ProjectManager: React.FC<ProjectManagerProps> = ({ 
@@ -24,6 +26,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   onCreateProject, 
   onSelectProject, 
   onDeleteProject,
+  syncStatus,
   isSidebar = false,
   onCloseSidebar,
   onBackToHome,
@@ -170,13 +173,24 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
             <Home size={24} />
           </button>
           {activeProject && (
-            <button 
-              onClick={handleExportCurrentView}
-              className="absolute top-4 right-12 text-yellow-800 hover:text-white transition-colors z-[2010]"
-              title="导出当前视图"
-            >
-              <Download size={24} />
-            </button>
+            <>
+              {/* 云图标 - 在导出按钮左侧 */}
+              {syncStatus === 'idle' && getLastSyncTime() && (
+                <div
+                  className="absolute top-4 right-20 flex items-center justify-center w-8 h-8 text-yellow-800 hover:text-white transition-colors z-[2010] cursor-help"
+                  title={`已同步: ${new Date(getLastSyncTime()!).toLocaleString('zh-CN')}`}
+                >
+                  <Cloud size={20} />
+                </div>
+              )}
+              <button 
+                onClick={handleExportCurrentView}
+                className="absolute top-4 right-12 text-yellow-800 hover:text-white transition-colors z-[2010]"
+                title="导出当前视图"
+              >
+                <Download size={24} />
+              </button>
+            </>
           )}
           <button 
             onClick={onCloseSidebar} 
