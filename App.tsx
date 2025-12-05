@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect } from 'react';
-import { Map, Grid, Menu, Loader2, Table2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Map, Grid, Menu, Loader2, Table2, Cloud, CloudOff, CheckCircle2, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapView } from './components/MapView';
 import { BoardView } from './components/BoardView';
@@ -8,6 +8,14 @@ import { TableView } from './components/TableView';
 import { ProjectManager } from './components/ProjectManager';
 import { Note, ViewMode, Project } from './types';
 import { get, set } from 'idb-keyval';
+import { 
+  syncProjectsToCloud, 
+  loadProjectsFromCloud, 
+  mergeProjects, 
+  shouldSync,
+  getLastSyncTime,
+  type SyncStatus 
+} from './utils/sync';
 
 export default function App() {
   const [viewMode, setViewMode] = useState<ViewMode>('map');
@@ -19,14 +27,22 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  
+  // Cloud Sync State
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Load Projects from IndexedDB
+  // Load Projects from IndexedDB and Cloud
   useEffect(() => {
     const loadProjects = async () => {
       try {
+        // 1. 先从本地 IndexedDB 加载（快速显示）
         const storedProjects = await get<Project[]>('mapp-projects');
+        let localProjects: Project[] = [];
         
         if (storedProjects) {
+          localProjects = storedProjects;
           setProjects(storedProjects);
         } else {
           // Migration: Check localStorage one last time
@@ -34,6 +50,7 @@ export default function App() {
           if (localData) {
              try {
                const parsed = JSON.parse(localData);
+               localProjects = parsed;
                setProjects(parsed);
                // Migrate to IDB
                await set('mapp-projects', parsed);
@@ -44,9 +61,58 @@ export default function App() {
              }
           }
         }
+        
+        setIsLoading(false);
+        
+        // 2. 然后从云端同步（后台进行）
+        try {
+          setSyncStatus('syncing');
+          const cloudResult = await loadProjectsFromCloud();
+          
+          if (cloudResult.success && cloudResult.projects) {
+            // 合并本地和云端数据
+            const merged = mergeProjects(localProjects, cloudResult.projects);
+            
+            // 如果合并后的数据与本地不同，更新本地
+            if (JSON.stringify(merged) !== JSON.stringify(localProjects)) {
+              setProjects(merged);
+              await set('mapp-projects', merged);
+            }
+            
+            // 如果云端有更新，同步到云端
+            if (!cloudResult.isNewDevice) {
+              await syncProjectsToCloud(merged);
+            }
+            
+            setSyncStatus('success');
+            setTimeout(() => setSyncStatus('idle'), 2000);
+          } else if (cloudResult.error) {
+            console.warn('云端加载失败，使用本地数据:', cloudResult.error);
+            setSyncStatus('error');
+            setSyncError(cloudResult.error);
+            setTimeout(() => {
+              setSyncStatus('idle');
+              setSyncError(null);
+            }, 3000);
+          } else {
+            // 新设备，上传本地数据到云端
+            if (localProjects.length > 0) {
+              await syncProjectsToCloud(localProjects);
+            }
+            setSyncStatus('success');
+            setTimeout(() => setSyncStatus('idle'), 2000);
+          }
+        } catch (err) {
+          console.error("云端同步失败:", err);
+          setSyncStatus('error');
+          setSyncError(err instanceof Error ? err.message : '同步失败');
+          setTimeout(() => {
+            setSyncStatus('idle');
+            setSyncError(null);
+          }, 3000);
+        }
       } catch (err) {
         console.error("Failed to load projects", err);
-      } finally {
         setIsLoading(false);
       }
     };
@@ -80,16 +146,57 @@ export default function App() {
     };
   }, []);
 
-  // Save to IndexedDB
+  // Save to IndexedDB and Cloud
   useEffect(() => {
     if (!isLoading) {
+      // 1. 保存到本地 IndexedDB
       set('mapp-projects', projects).catch((err) => {
         console.error("Failed to save projects to IDB", err);
         if (err.name === 'QuotaExceededError') {
           alert("Storage Limit Reached. Please delete some projects or images.");
         }
       });
+      
+      // 2. 延迟同步到云端（防抖，避免频繁同步）
+      if (syncTimeoutRef.current) {
+        clearTimeout(syncTimeoutRef.current);
+      }
+      
+      syncTimeoutRef.current = setTimeout(async () => {
+        if (shouldSync()) {
+          try {
+            setSyncStatus('syncing');
+            const result = await syncProjectsToCloud(projects);
+            
+            if (result.success) {
+              setSyncStatus('success');
+              setTimeout(() => setSyncStatus('idle'), 2000);
+            } else {
+              setSyncStatus('error');
+              setSyncError(result.error || '同步失败');
+              setTimeout(() => {
+                setSyncStatus('idle');
+                setSyncError(null);
+              }, 3000);
+            }
+          } catch (err) {
+            console.error("云端同步失败:", err);
+            setSyncStatus('error');
+            setSyncError(err instanceof Error ? err.message : '同步失败');
+            setTimeout(() => {
+              setSyncStatus('idle');
+              setSyncError(null);
+            }, 3000);
+          }
+        }
+      }, 2000); // 2秒后同步
     }
+    
+    return () => {
+      if (syncTimeoutRef.current) {
+        clearTimeout(syncTimeoutRef.current);
+      }
+    };
   }, [projects, isLoading]);
 
   const activeProject = projects.find(p => p.id === currentProjectId);
@@ -252,6 +359,63 @@ export default function App() {
       </AnimatePresence>
 
       <div className="flex-1 relative overflow-hidden z-0">
+        
+        {/* 同步状态指示器 */}
+        {!isEditorOpen && !isBoardEditMode && (
+          <div className="absolute top-4 right-4 z-[900]">
+            <AnimatePresence mode="wait">
+              {syncStatus === 'syncing' && (
+                <motion.div
+                  key="syncing"
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.8 }}
+                  className="flex items-center gap-2 px-3 py-2 bg-blue-500/90 backdrop-blur-sm text-white rounded-lg shadow-lg text-sm"
+                >
+                  <Loader2 size={16} className="animate-spin" />
+                  <span>同步中...</span>
+                </motion.div>
+              )}
+              {syncStatus === 'success' && (
+                <motion.div
+                  key="success"
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.8 }}
+                  className="flex items-center gap-2 px-3 py-2 bg-green-500/90 backdrop-blur-sm text-white rounded-lg shadow-lg text-sm"
+                >
+                  <CheckCircle2 size={16} />
+                  <span>已同步</span>
+                </motion.div>
+              )}
+              {syncStatus === 'error' && (
+                <motion.div
+                  key="error"
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.8 }}
+                  className="flex items-center gap-2 px-3 py-2 bg-red-500/90 backdrop-blur-sm text-white rounded-lg shadow-lg text-sm"
+                  title={syncError || '同步失败'}
+                >
+                  <AlertCircle size={16} />
+                  <span>同步失败</span>
+                </motion.div>
+              )}
+              {syncStatus === 'idle' && getLastSyncTime() && (
+                <motion.div
+                  key="idle"
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.8 }}
+                  className="flex items-center gap-2 px-3 py-2 bg-gray-500/70 backdrop-blur-sm text-white rounded-lg shadow-lg text-sm"
+                  title={`最后同步: ${new Date(getLastSyncTime()!).toLocaleString('zh-CN')}`}
+                >
+                  <Cloud size={16} />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
         
         {!isEditorOpen && !isBoardEditMode && (
           <button 

@@ -138,7 +138,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
   
   const [imageDimensions, setImageDimensions] = useState<[number, number] | null>(null);
-  const [minImageZoom, setMinImageZoom] = useState(-5);
+  const [minImageZoom, setMinImageZoom] = useState(-20);
 
   const defaultCenter: [number, number] = [28.1847, 112.9467];
   const isMapMode = project.type === 'map';
@@ -289,9 +289,9 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       <MapContainer 
         key={project.id} 
         center={isMapMode ? defaultCenter : [500, 500]} 
-        zoom={isMapMode ? 16 : -3}
-        minZoom={isMapMode ? 14 : -5} 
-        maxZoom={isMapMode ? 18 : 4}
+        zoom={isMapMode ? 16 : -8}
+        minZoom={isMapMode ? 14 : -20} 
+        maxZoom={isMapMode ? 18 : 2}
         crs={isMapMode ? L.CRS.EPSG3857 : L.CRS.Simple}
         style={{ height: '100%', width: '100%' }}
         zoomControl={false}
@@ -360,7 +360,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         )}
 
         {mapNotes.length === 0 && (
-          <div className="absolute top-4 left-0 right-0 z-[400] pointer-events-none flex justify-center">
+          <div className="absolute top-24 left-0 right-0 z-[400] pointer-events-none flex justify-center">
              <div className="relative">
                 <div className="bg-white/90 backdrop-blur px-4 py-2 rounded-full shadow-lg text-sm text-gray-600 animate-bounce whitespace-nowrap">
                     Long press anywhere to pin
