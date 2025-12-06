@@ -11,6 +11,7 @@ interface TableViewProps {
 }
 
 export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onUpdateFrames }) => {
+  const [tableLevel, setTableLevel] = useState<'一级' | '二级'>('一级');
   const [draggedNoteId, setDraggedNoteId] = useState<string | null>(null);
   const [draggedOverGroup, setDraggedOverGroup] = useState<string | null>(null);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -26,6 +27,43 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
     project.notes.filter(note => note.variant !== 'text' && note.variant !== 'compact'),
     [project.notes]
   );
+
+  // 小便签（text和compact变体）
+  const compactNotes = useMemo(() => 
+    project.notes.filter(note => note.variant === 'text' || note.variant === 'compact'),
+    [project.notes]
+  );
+
+  // 按分组整理小便签
+  const groupedCompactNotes = useMemo(() => {
+    const groups: { [key: string]: { notes: Note[], frameId?: string } } = {};
+    
+    compactNotes.forEach(note => {
+      const groupName = note.groupName || '未分组';
+      if (!groups[groupName]) {
+        groups[groupName] = { notes: [], frameId: note.groupId };
+      }
+      groups[groupName].notes.push(note);
+    });
+    
+    // 按创建时间排序
+    Object.keys(groups).forEach(key => {
+      groups[key].notes.sort((a, b) => a.createdAt - b.createdAt);
+    });
+    
+    // 未分组放第一位
+    const sortedGroupNames = Object.keys(groups).sort((a, b) => {
+      if (a === '未分组') return -1;
+      if (b === '未分组') return 1;
+      return 0;
+    });
+    
+    return sortedGroupNames.map(name => ({
+      name,
+      notes: groups[name].notes,
+      frameId: groups[name].frameId
+    }));
+  }, [compactNotes]);
 
   // 按分组整理便签
   const groupedNotes = useMemo(() => {
@@ -163,12 +201,38 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
     <div className="w-full h-full bg-gray-50 overflow-auto p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="mb-6">
+        <div className="mb-6 flex justify-between items-center">
           <h2 className="text-3xl font-black text-gray-800">数据表格</h2>
+          
+          {/* 表格级别切换 */}
+          <div className="flex gap-1 bg-gray-200 rounded-lg p-0.5">
+            <button
+              onClick={() => setTableLevel('一级')}
+              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+                tableLevel === '一级'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              一级
+            </button>
+            <button
+              onClick={() => setTableLevel('二级')}
+              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+                tableLevel === '二级'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              二级
+            </button>
+          </div>
         </div>
 
         {/* Groups */}
-        {groupedNotes.map((group) => (
+        {tableLevel === '一级' ? (
+          // 一级表格：标准便签
+          groupedNotes.map((group) => (
           <div key={group.name} className="mb-8">
             <h3 className="text-base font-bold text-gray-700 mb-3 flex items-center gap-2">
               {editingFrameId === group.frameId ? (
@@ -329,11 +393,57 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
               </div>
             </div>
           </div>
-        ))}
+          ))
+        ) : (
+          // 二级表格：小便签（按分组显示）
+          groupedCompactNotes.map((group) => (
+            <div key={group.name} className="mb-8">
+              <h3 className="text-base font-bold text-gray-700 mb-3 flex items-center gap-2">
+                <span className="bg-gray-200 px-3 py-1 rounded-lg text-sm">
+                  {group.name}
+                </span>
+                <span className="text-sm text-gray-400">({group.notes.length})</span>
+              </h3>
+              
+              <div className="bg-white rounded-2xl shadow-sm overflow-hidden w-full">
+                <div className="w-full">
+                  {/* Table Header */}
+                  <div className="flex px-4 py-2 bg-gray-100 font-bold text-sm text-gray-600 border-b border-gray-200">
+                    <div className="flex-1">文本内容</div>
+                  </div>
+                  
+                  {/* Table Rows */}
+                  {group.notes.length > 0 ? (
+                    group.notes.map((note) => (
+                      <div
+                        key={note.id}
+                        className="flex px-4 py-3 border-b border-gray-100 hover:bg-gray-50 transition-colors"
+                      >
+                        <div className="flex-1 text-gray-800 whitespace-pre-wrap break-words">
+                          {note.text || <span className="text-gray-400 italic">空白便签</span>}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="p-8 text-center text-gray-400 italic">
+                      该分组暂无数据
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))
+        )}
         
-        {groupedNotes.length === 0 && (
+        {tableLevel === '一级' && groupedNotes.length === 0 && (
           <div className="text-center text-gray-400 italic py-12">
             暂无标准便签数据
+          </div>
+        )}
+        
+        {tableLevel === '二级' && groupedCompactNotes.length === 0 && (
+          <div className="text-center text-gray-400 italic py-12">
+            暂无小便签数据
           </div>
         )}
       </div>

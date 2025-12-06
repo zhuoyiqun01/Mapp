@@ -1,7 +1,8 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Note, Tag } from '../types';
-import { EMOJI_LIST, TAG_COLORS } from '../constants';
+import { EMOJI_LIST, EMOJI_CATEGORIES, TAG_COLORS } from '../constants';
 import { createTag, fileToBase64, generateId } from '../utils';
 import { X, Camera, Plus, Check, PenTool, Minus, Bold, Image as ImageIcon, Trash2 } from 'lucide-react';
 import { DrawingCanvas } from './DrawingCanvas';
@@ -13,6 +14,10 @@ interface NoteEditorProps {
   onClose: () => void;
   onSave: (note: Partial<Note>) => void;
   onDelete?: (noteId: string) => void;
+  clusterNotes?: Note[];
+  currentIndex?: number;
+  onNext?: () => void;
+  onPrev?: () => void;
 }
 
 const DEFAULT_BG = '#FFFDF5';
@@ -25,9 +30,20 @@ const PASTEL_COLORS = [
   '#FFE4E6', // Rose-100
 ];
 
-export const NoteEditor: React.FC<NoteEditorProps> = ({ initialNote, isOpen, onClose, onSave, onDelete }) => {
-  const [emoji, setEmoji] = useState(initialNote?.emoji || EMOJI_LIST[0]);
+export const NoteEditor: React.FC<NoteEditorProps> = ({ 
+  initialNote, 
+  isOpen, 
+  onClose, 
+  onSave, 
+  onDelete,
+  clusterNotes = [],
+  currentIndex = 0,
+  onNext,
+  onPrev
+}) => {
+  const [emoji, setEmoji] = useState(initialNote?.emoji || '');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [selectedEmojiCategory, setSelectedEmojiCategory] = useState<keyof typeof EMOJI_CATEGORIES>('最近');
   const [text, setText] = useState(initialNote?.text || '');
   const [fontSize, setFontSize] = useState<number>(initialNote?.fontSize || 3); 
   const [isBold, setIsBold] = useState(initialNote?.isBold || false);
@@ -46,13 +62,52 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ initialNote, isOpen, onC
 
   // Keyboard height detection
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  
+  // Swipe detection for cluster navigation
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const touchEndRef = useRef<{ x: number; y: number } | null>(null);
+  const emojiButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [emojiPickerPosition, setEmojiPickerPosition] = useState<{ left: number; top: number } | null>(null);
+  
+  const minSwipeDistance = 50; // 最小滑动距离
 
   const isTextMode = initialNote?.variant === 'text';
   const isCompactMode = initialNote?.variant === 'compact';
+  
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  };
+  
+  const handleTouchMove = (e: React.TouchEvent) => {
+    touchEndRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  };
+  
+  const handleTouchEnd = () => {
+    if (!touchStartRef.current || !touchEndRef.current) return;
+    
+    const deltaX = touchEndRef.current.x - touchStartRef.current.x;
+    const deltaY = touchEndRef.current.y - touchStartRef.current.y;
+    const absDeltaX = Math.abs(deltaX);
+    const absDeltaY = Math.abs(deltaY);
+    
+    // 只处理水平滑动，且水平距离大于垂直距离
+    if (absDeltaX > minSwipeDistance && absDeltaX > absDeltaY) {
+      if (deltaX > 0 && onNext) {
+        // 右滑 - 下一个
+        onNext();
+      } else if (deltaX < 0 && onPrev) {
+        // 左滑 - 上一个
+        onPrev();
+      }
+    }
+    
+    touchStartRef.current = null;
+    touchEndRef.current = null;
+  };
 
   useEffect(() => {
     if (isOpen) {
-      setEmoji(initialNote?.emoji || EMOJI_LIST[0]);
+      setEmoji(initialNote?.emoji || '');
       setText(initialNote?.text || '');
       setFontSize(initialNote?.fontSize || 3);
       setIsBold(initialNote?.isBold || false);
@@ -196,6 +251,9 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ initialNote, isOpen, onC
       onPointerMove={(e) => e.stopPropagation()}
       onPointerUp={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
       style={isTextMode ? { overflow: 'hidden', touchAction: 'none', backgroundColor: 'transparent' } : {}}
     >
       <div className="absolute inset-0" onClick={handleSave} style={{ zIndex: 1 }}></div>
@@ -247,58 +305,29 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ initialNote, isOpen, onC
           }}
         >
           <div className="flex items-center gap-1 bg-white rounded-xl shadow-lg p-2" style={{ border: 'none' }}>
-            <button onClick={() => adjustFontSize(1)} className="p-1 bg-gray-50 hover:bg-[#FFDD00]/10 text-gray-600 hover:text-[#FFDD00] rounded-lg transition-all" style={{ border: 'none', outline: 'none' }}><Plus size={18}/></button>
-            <button onClick={() => adjustFontSize(-1)} className="p-1 bg-gray-50 hover:bg-[#FFDD00]/10 text-gray-600 hover:text-[#FFDD00] rounded-lg transition-all" style={{ border: 'none', outline: 'none' }}><Minus size={18}/></button>
+            <button onClick={() => { setShowEmojiPicker(false); adjustFontSize(1); }} className="p-1 bg-gray-50 hover:bg-[#FFDD00]/10 text-gray-600 hover:text-[#FFDD00] rounded-lg transition-all" style={{ border: 'none', outline: 'none' }}><Plus size={18}/></button>
+            <button onClick={() => { setShowEmojiPicker(false); adjustFontSize(-1); }} className="p-1 bg-gray-50 hover:bg-[#FFDD00]/10 text-gray-600 hover:text-[#FFDD00] rounded-lg transition-all" style={{ border: 'none', outline: 'none' }}><Minus size={18}/></button>
             <div className="w-px h-6 bg-gray-200 mx-1"></div>
-            <button onClick={() => setIsBold(!isBold)} className={`p-1 rounded-lg transition-all ${isBold ? 'bg-[#FFDD00] text-yellow-900' : 'bg-gray-50 hover:bg-[#FFDD00]/10 text-gray-600'}`} style={{ border: 'none', outline: 'none' }}><Bold size={18}/></button>
+            <button onClick={() => { setShowEmojiPicker(false); setIsBold(!isBold); }} className={`p-1 rounded-lg transition-all ${isBold ? 'bg-[#FFDD00] text-yellow-900' : 'bg-gray-50 hover:bg-[#FFDD00]/10 text-gray-600'}`} style={{ border: 'none', outline: 'none' }}><Bold size={18}/></button>
           </div>
         </div>
         
         <div className={`flex flex-col flex-1 h-full ${isSketching ? 'invisible' : ''}`} style={isTextMode ? { backgroundColor: 'transparent', zIndex: 10 } : { zIndex: 10 }}>
             {/* Header - 中间层 z-10（继承父容器） */}
             <div className={`flex justify-between items-start ${isTextMode ? 'hidden' : 'p-4 pb-2'} relative flex-shrink-0 ${isTextMode ? 'opacity-0 hover:opacity-100 transition-opacity' : ''}`} style={isTextMode ? { backgroundColor: 'transparent' } : {}}>
-                {!isTextMode && !isCompactMode ? (
-                  <div className="relative">
-                    <button 
-                      onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                      className="text-5xl hover:scale-110 transition-transform cursor-pointer leading-none"
-                    >
-                      {emoji}
-                    </button>
-                    {showEmojiPicker && (
-                      <>
-                        <div className="fixed inset-0 z-10" onClick={() => setShowEmojiPicker(false)} />
-                        <div className="absolute top-full left-0 mt-2 p-2 bg-white rounded-xl shadow-xl grid grid-cols-5 gap-1 w-64 z-20" style={{ border: 'none' }}>
-                          {EMOJI_LIST.map(e => (
-                            <button 
-                              key={e} 
-                              onClick={() => { setEmoji(e); setShowEmojiPicker(false); }}
-                              className="text-2xl p-2 hover:bg-[#FFDD00]/10 rounded-lg transition-colors"
-                            >
-                              {e}
-                            </button>
-                          ))}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                ) : (
-                    <div className="text-gray-400 font-bold text-sm tracking-wider uppercase">
-                        {isTextMode ? '' : 'Sticky Note'}
-                    </div>
-                )}
+                <div></div>
                 
                 <div className="flex items-center gap-2">
                     {initialNote?.id && onDelete && (
                         <button 
-                            onClick={handleDelete}
+                            onClick={() => { setShowEmojiPicker(false); handleDelete(); }}
                             className="text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full p-1 transition-colors active:scale-90"
                         >
                             <Trash2 size={24} />
                         </button>
                     )}
                 <button 
-                    onClick={handleSave} 
+                    onClick={() => { setShowEmojiPicker(false); handleSave(); }}
                         className="text-gray-400 hover:text-gray-600 hover:bg-black/5 rounded-full p-1 transition-colors active:scale-90"
                 >
                     <Check size={28} />
@@ -343,22 +372,132 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ initialNote, isOpen, onC
                 {/* Media Row */}
                 {!isCompactMode && (
                   <div className="px-3 pt-1 flex gap-3">
+                      <div className="relative group">
+                        <div 
+                          ref={emojiButtonRef}
+                          onClick={() => {
+                            if (emojiButtonRef.current) {
+                              const rect = emojiButtonRef.current.getBoundingClientRect();
+                              const spaceBelow = window.innerHeight - rect.bottom;
+                              const spaceAbove = rect.top;
+                              // 如果下方空间不足，显示在上方
+                              if (spaceBelow < 400 && spaceAbove > spaceBelow) {
+                                setEmojiPickerPosition({
+                                  left: rect.left,
+                                  top: rect.top - 200 - 8
+                                });
+                              } else {
+                                setEmojiPickerPosition({
+                                  left: rect.left,
+                                  top: rect.bottom + 8
+                                });
+                              }
+                            }
+                            setShowEmojiPicker(!showEmojiPicker);
+                          }}
+                          className="w-20 h-20 bg-white/60 hover:bg-white shadow-sm rounded-2xl flex items-center justify-center transition-colors cursor-pointer"
+                          style={{ border: 'none' }}
+                        >
+                          <span className="text-3xl leading-none">{emoji || '📌'}</span>
+                        </div>
+                        {emoji && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEmoji('');
+                              setShowEmojiPicker(false);
+                            }}
+                            className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                            style={{ border: 'none' }}
+                          >
+                            <X size={12} />
+                          </button>
+                        )}
+                        {showEmojiPicker && emojiPickerPosition && createPortal(
+                          <>
+                            <div 
+                              className="fixed inset-0" 
+                              style={{ zIndex: 9999 }}
+                              onClick={() => setShowEmojiPicker(false)} 
+                            />
+                            <div 
+                              className="fixed bg-white rounded-xl shadow-2xl overflow-hidden"
+                              style={{ 
+                                border: 'none',
+                                width: '320px',
+                                maxHeight: '400px',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                left: `${emojiPickerPosition.left}px`,
+                                top: `${emojiPickerPosition.top}px`,
+                                zIndex: 10000,
+                                position: 'fixed',
+                                pointerEvents: 'auto'
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {/* Category Tabs */}
+                              <div className="flex gap-1 p-1.5 border-b border-gray-100 overflow-x-auto scrollbar-hide">
+                                {Object.keys(EMOJI_CATEGORIES).map(category => (
+                                  <button
+                                    key={category}
+                                    onClick={() => setSelectedEmojiCategory(category as keyof typeof EMOJI_CATEGORIES)}
+                                    className={`px-2 py-1 text-xs font-medium rounded-lg whitespace-nowrap transition-colors ${
+                                      selectedEmojiCategory === category
+                                        ? 'bg-[#FFDD00] text-gray-900'
+                                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                    }`}
+                                  >
+                                    {category}
+                                  </button>
+                                ))}
+                              </div>
+                              
+                              {/* Emoji Grid */}
+                              <div className="p-3 overflow-y-auto" style={{ maxHeight: '320px' }}>
+                                <div className="grid grid-cols-8 gap-1">
+                                  {(EMOJI_CATEGORIES[selectedEmojiCategory] || EMOJI_CATEGORIES['最近']).map(e => (
+                                    <button 
+                                      key={e} 
+                                      onClick={() => { 
+                                        setEmoji(e); 
+                                        setShowEmojiPicker(false);
+                                        // Add to recent
+                                        if (selectedEmojiCategory !== '最近') {
+                                          const recent = EMOJI_CATEGORIES['最近'];
+                                          if (!recent.includes(e)) {
+                                            EMOJI_CATEGORIES['最近'] = [e, ...recent.slice(0, 19)];
+                                          }
+                                        }
+                                      }}
+                                      className="text-2xl p-2 hover:bg-[#FFDD00]/10 rounded-lg transition-colors flex items-center justify-center"
+                                    >
+                                      {e}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          </>,
+                          document.body
+                        )}
+                      </div>
                       <label className="w-20 h-20 bg-white/60 hover:bg-white shadow-sm rounded-2xl flex items-center justify-center cursor-pointer transition-colors relative overflow-hidden group" style={{ border: 'none' }}>
                           {images.length > 0 ? (
                               <img src={images[images.length - 1]} className="w-full h-full object-cover" />
                           ) : <Camera size={24} className="text-gray-500"/>}
-                          <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
-                          {images.length > 0 && <button onClick={removeImage} className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><X size={12}/></button>}
+                          <input type="file" accept="image/*" className="hidden" onChange={(e) => { setShowEmojiPicker(false); handleImageUpload(e); }} />
+                          {images.length > 0 && <button onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(false); removeImage(e); }} className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><X size={12}/></button>}
                       </label>
                       <button 
-                        onClick={() => setIsSketching(true)}
+                        onClick={() => { setShowEmojiPicker(false); setIsSketching(true); }}
                         className="w-20 h-20 bg-white/60 hover:bg-white shadow-sm rounded-2xl flex items-center justify-center transition-colors relative overflow-hidden group"
                         style={{ border: 'none' }}
                       >
                           {sketch ? (
                               <img src={sketch} className="w-full h-full object-cover" />
                           ) : <PenTool size={24} className="text-gray-500"/>}
-                          {sketch && <div onClick={(e) => {e.stopPropagation(); removeSketch(e)}} className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><X size={12}/></div>}
+                          {sketch && <div onClick={(e) => {e.stopPropagation(); setShowEmojiPicker(false); removeSketch(e); }} className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><X size={12}/></div>}
                       </button>
                   </div>
                 )}
@@ -369,7 +508,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ initialNote, isOpen, onC
                         {tags.map(tag => (
                             <span key={tag.id} className="flex-shrink-0 h-6 px-2.5 rounded-full text-xs font-bold text-white shadow-sm flex items-center gap-1" style={{backgroundColor: tag.color}}>
                                 {tag.label}
-                                <button onClick={() => removeTag(tag.id)}><X size={10}/></button>
+                                <button onClick={() => { setShowEmojiPicker(false); removeTag(tag.id); }}><X size={10}/></button>
                             </span>
                         ))}
                         {isAddingTag ? (
@@ -395,7 +534,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ initialNote, isOpen, onC
                             <button onClick={handleSaveTag} className="ml-1 text-green-500 hover:text-green-600 active:scale-90 transition-transform"><Check size={18}/></button>
                             </div>
                         ) : (
-                            <button onClick={() => setIsAddingTag(true)} className="flex-shrink-0 h-10 px-4 bg-white/60 hover:bg-white rounded-full text-xs font-bold text-gray-500 shadow-sm flex items-center transition-all" style={{ border: 'none' }}>
+                            <button onClick={() => { setShowEmojiPicker(false); setIsAddingTag(true); }} className="flex-shrink-0 h-10 px-4 bg-white/60 hover:bg-white rounded-full text-xs font-bold text-gray-500 shadow-sm flex items-center transition-all" style={{ border: 'none' }}>
                                 + Tag
                             </button>
                         )}

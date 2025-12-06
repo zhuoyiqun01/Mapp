@@ -22,6 +22,8 @@ export default function App() {
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [isBoardEditMode, setIsBoardEditMode] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [sidebarButtonY, setSidebarButtonY] = useState(96); // 初始位置 top-24 = 96px
+  const sidebarButtonDragRef = useRef({ isDragging: false, startY: 0, startButtonY: 0 });
   
   // Project State
   const [projects, setProjects] = useState<Project[]>([]);
@@ -297,6 +299,12 @@ export default function App() {
     }
   };
 
+  const handleUpdateProject = (id: string, updates: Partial<Project>) => {
+    setProjects(prev => prev.map(p => 
+      p.id === id ? { ...p, ...updates } : p
+    ));
+  };
+
   if (isLoading) {
     return (
       <div className="w-full min-h-screen bg-[#FFDD00] flex flex-col items-center justify-center text-yellow-900">
@@ -315,6 +323,7 @@ export default function App() {
          onCreateProject={handleCreateProject}
          onSelectProject={setCurrentProjectId}
          onDeleteProject={handleDeleteProject}
+         onUpdateProject={handleUpdateProject}
       />
       </div>
     );
@@ -347,6 +356,7 @@ export default function App() {
                  onCreateProject={handleCreateProject}
                  onSelectProject={(id) => { setCurrentProjectId(id); setIsSidebarOpen(false); }}
                  onDeleteProject={handleDeleteProject}
+         onUpdateProject={handleUpdateProject}
                  onCloseSidebar={() => setIsSidebarOpen(false)}
                   onBackToHome={() => { setCurrentProjectId(null); }}
                   viewMode={viewMode}
@@ -366,8 +376,61 @@ export default function App() {
         
         {!isEditorOpen && !isBoardEditMode && (
           <button 
-             onClick={() => setIsSidebarOpen(true)}
-             className="absolute top-24 left-0 z-[900] pl-3 pr-4 py-2 bg-[#FFDD00] hover:bg-[#E6C700] rounded-r-xl shadow-lg text-yellow-950 transition-colors"
+             onClick={(e) => {
+               // 只有在没有拖动时才触发点击
+               if (!sidebarButtonDragRef.current.isDragging) {
+                 setIsSidebarOpen(true);
+               }
+             }}
+             onMouseDown={(e) => {
+               sidebarButtonDragRef.current = {
+                 isDragging: false,
+                 startY: e.clientY,
+                 startButtonY: sidebarButtonY
+               };
+             }}
+             onMouseMove={(e) => {
+               const dragState = sidebarButtonDragRef.current;
+               if (e.buttons === 1) { // 左键按下
+                 const deltaY = e.clientY - dragState.startY;
+                 if (Math.abs(deltaY) > 5) {
+                   dragState.isDragging = true;
+                   const newY = Math.max(0, Math.min(window.innerHeight - 50, dragState.startButtonY + deltaY));
+                   setSidebarButtonY(newY);
+                 }
+               }
+             }}
+             onMouseUp={() => {
+               // 延迟重置isDragging，确保onClick不会触发
+               setTimeout(() => {
+                 sidebarButtonDragRef.current.isDragging = false;
+               }, 10);
+             }}
+             onTouchStart={(e) => {
+               const touch = e.touches[0];
+               sidebarButtonDragRef.current = {
+                 isDragging: false,
+                 startY: touch.clientY,
+                 startButtonY: sidebarButtonY
+               };
+             }}
+             onTouchMove={(e) => {
+               const touch = e.touches[0];
+               const dragState = sidebarButtonDragRef.current;
+               const deltaY = touch.clientY - dragState.startY;
+               if (Math.abs(deltaY) > 5) {
+                 dragState.isDragging = true;
+                 const newY = Math.max(0, Math.min(window.innerHeight - 50, dragState.startButtonY + deltaY));
+                 setSidebarButtonY(newY);
+               }
+             }}
+             onTouchEnd={() => {
+               setTimeout(() => {
+                 sidebarButtonDragRef.current.isDragging = false;
+               }, 10);
+             }}
+             className="absolute left-0 z-[900] pl-3 pr-4 py-2 bg-[#FFDD00] hover:bg-[#E6C700] rounded-r-xl shadow-lg text-yellow-950 transition-none cursor-move"
+             style={{ top: `${sidebarButtonY}px` }}
           >
              <Menu size={18} />
           </button>

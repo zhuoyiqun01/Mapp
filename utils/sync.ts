@@ -71,7 +71,16 @@ export async function syncProjectsToCloud(projects: Project[]): Promise<{ succes
 
     return { success: true };
   } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : '未知错误';
+    let errorMessage = '未知错误';
+    if (err instanceof Error) {
+      errorMessage = err.message;
+      // 检查是否是网络错误
+      if (errorMessage.includes('Failed to fetch') || errorMessage.includes('NetworkError')) {
+        errorMessage = '网络连接失败，请检查网络或 Supabase 配置';
+      } else if (errorMessage.includes('CORS')) {
+        errorMessage = 'CORS 错误，请检查 Supabase 配置';
+      }
+    }
     console.error('同步异常:', err);
     return { success: false, error: errorMessage };
   }
@@ -121,7 +130,16 @@ export async function loadProjectsFromCloud(): Promise<{
 
     return { success: true, projects };
   } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : '未知错误';
+    let errorMessage = '未知错误';
+    if (err instanceof Error) {
+      errorMessage = err.message;
+      // 检查是否是网络错误
+      if (errorMessage.includes('Failed to fetch') || errorMessage.includes('NetworkError')) {
+        errorMessage = '网络连接失败，请检查网络或 Supabase 配置';
+      } else if (errorMessage.includes('CORS')) {
+        errorMessage = 'CORS 错误，请检查 Supabase 配置';
+      }
+    }
     console.error('加载异常:', err);
     return { success: false, error: errorMessage };
   }

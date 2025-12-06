@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Project } from '../types';
-import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud } from 'lucide-react';
+import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check } from 'lucide-react';
 import { generateId, fileToBase64, formatDate, exportToJpeg, exportToJpegCentered } from '../utils';
 import { getLastSyncTime, type SyncStatus } from '../utils/sync';
 
@@ -11,6 +11,7 @@ interface ProjectManagerProps {
   onCreateProject: (project: Project) => void;
   onSelectProject: (id: string) => void;
   onDeleteProject: (id: string) => void;
+  onUpdateProject?: (project: Project) => void;
   isSidebar?: boolean;
   onCloseSidebar?: () => void;
   onBackToHome?: () => void;
@@ -26,6 +27,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   onCreateProject, 
   onSelectProject, 
   onDeleteProject,
+  onUpdateProject,
   syncStatus,
   isSidebar = false,
   onCloseSidebar,
@@ -39,6 +41,8 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   const [newProjectType, setNewProjectType] = useState<'map' | 'image'>('map');
   const [bgImage, setBgImage] = useState<string | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editingProjectName, setEditingProjectName] = useState('');
 
   const handleCreate = () => {
     if (!newProjectName.trim()) return;
@@ -90,6 +94,28 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       const elementId = viewMode === 'map' ? 'map-view-container' : 'board-view-container';
       exportToJpegCentered(elementId, `${activeProject.name}-${viewMode}`);
     }
+  };
+
+  const handleRename = (project: Project) => {
+    setEditingProjectId(project.id);
+    setEditingProjectName(project.name);
+    setOpenMenuId(null);
+  };
+
+  const handleSaveRename = (project: Project) => {
+    if (!editingProjectName.trim() || !onUpdateProject) return;
+    
+    onUpdateProject({
+      ...project,
+      name: editingProjectName.trim()
+    });
+    setEditingProjectId(null);
+    setEditingProjectName('');
+  };
+
+  const handleCancelRename = () => {
+    setEditingProjectId(null);
+    setEditingProjectName('');
   };
 
   const handleExportData = (project: Project) => {
@@ -273,13 +299,52 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
             >
               <div 
                 className="flex-1 cursor-pointer" 
-                onClick={() => onSelectProject(p.id)}
+                onClick={() => !editingProjectId && onSelectProject(p.id)}
               >
-                <div className="font-bold text-lg leading-tight">{p.name}</div>
-                <div className={`text-xs flex items-center gap-1 mt-1 ${p.id === currentProjectId ? 'text-yellow-700' : 'text-yellow-800/60'}`}>
-                  {p.type === 'map' ? <MapIcon size={12}/> : <ImageIcon size={12}/>}
-                  {formatDate(p.createdAt)}
-                </div>
+                {editingProjectId === p.id ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      autoFocus
+                      value={editingProjectName}
+                      onChange={(e) => setEditingProjectName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          handleSaveRename(p);
+                        } else if (e.key === 'Escape') {
+                          handleCancelRename();
+                        }
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="flex-1 px-2 py-1 bg-white border-2 border-[#FFDD00] rounded-lg outline-none text-lg font-bold"
+                    />
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSaveRename(p);
+                      }}
+                      className="p-1 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                    >
+                      <Check size={18} />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCancelRename();
+                      }}
+                      className="p-1 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="font-bold text-lg leading-tight">{p.name}</div>
+                    <div className={`text-xs flex items-center gap-1 mt-1 ${p.id === currentProjectId ? 'text-yellow-700' : 'text-yellow-800/60'}`}>
+                      {p.type === 'map' ? <MapIcon size={12}/> : <ImageIcon size={12}/>}
+                      {formatDate(p.createdAt)}
+                    </div>
+                  </>
+                )}
               </div>
 
               <div className="relative">
@@ -295,6 +360,13 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                     <div className="fixed inset-0 z-[45] bg-black/20" onClick={() => setOpenMenuId(null)} />
                     {isSidebar ? (
                       <div className="absolute right-0 top-full mt-2 w-48 max-h-[60vh] overflow-auto bg-white rounded-xl shadow-xl z-50 border border-gray-100 py-1 animate-in fade-in zoom-in-95 origin-top-right">
+                      <button 
+                          onClick={() => handleRename(p)}
+                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                      >
+                          <Edit2 size={16} /> 重命名
+                        </button>
+                        <div className="h-px bg-gray-100 my-1" />
                       <button 
                           onClick={() => handleExportData(p)}
                         className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
@@ -315,6 +387,13 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                           <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Project</div>
                           <div className="text-sm font-bold text-gray-800 truncate">{p.name}</div>
                         </div>
+                      <button 
+                          onClick={() => handleRename(p)}
+                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                      >
+                          <Edit2 size={16} /> 重命名
+                      </button>
+                      <div className="h-px bg-gray-100 my-1" />
                       <button 
                           onClick={() => handleExportData(p)}
                         className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
