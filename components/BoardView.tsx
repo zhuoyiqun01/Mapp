@@ -105,7 +105,86 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
     lat: number;
     lng: number;
     error?: string;
+    isDuplicate?: boolean;
+    imageFingerprint?: string;
   }>>([]);
+  
+  // Ultra-lightweight image fingerprint: dimensions and first pixel only (no filename, no size)
+  // This ensures consistent comparison between File objects and base64 strings
+  const calculateImageFingerprint = async (file: File, imageUrl: string): Promise<string> => {
+    try {
+      // Load image to get dimensions
+      const img = new Image();
+      img.src = imageUrl;
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+      });
+      
+      const width = img.naturalWidth;
+      const height = img.naturalHeight;
+      
+      // Sample only first pixel (top-left corner) for maximum speed
+      const canvas = document.createElement('canvas');
+      canvas.width = 1;
+      canvas.height = 1;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return `${width}_${height}`;
+      
+      // Draw and sample only first pixel
+      ctx.drawImage(img, 0, 0, 1, 1);
+      const imageData = ctx.getImageData(0, 0, 1, 1);
+      const data = imageData.data;
+      
+      // Get first pixel RGB (3 values)
+      const firstPixel = data.length >= 3 
+        ? `${data[0]},${data[1]},${data[2]}` 
+        : '0,0,0';
+      
+      // Create fingerprint: width_height_firstPixel (no filename, no size for consistency)
+      return `${width}_${height}_${firstPixel}`;
+    } catch (error) {
+      console.error('Error calculating image fingerprint:', error);
+      return `unknown`;
+    }
+  };
+  
+  // Ultra-lightweight fingerprint from base64 image (no filename, no size)
+  const calculateFingerprintFromBase64 = async (base64Image: string): Promise<string> => {
+    try {
+      const img = new Image();
+      img.src = base64Image;
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+      });
+      
+      const width = img.naturalWidth;
+      const height = img.naturalHeight;
+      
+      // Sample only first pixel
+      const canvas = document.createElement('canvas');
+      canvas.width = 1;
+      canvas.height = 1;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return `${width}_${height}`;
+      
+      ctx.drawImage(img, 0, 0, 1, 1);
+      const imageData = ctx.getImageData(0, 0, 1, 1);
+      const data = imageData.data;
+      
+      const firstPixel = data.length >= 3 
+        ? `${data[0]},${data[1]},${data[2]}` 
+        : '0,0,0';
+      
+      // Same format as calculateImageFingerprint: width_height_firstPixel
+      return `${width}_${height}_${firstPixel}`;
+    } catch (error) {
+      console.error('Error calculating fingerprint from base64:', error);
+      return `unknown`;
+    }
+  };
+  
   const [showImportDialog, setShowImportDialog] = useState(false);
   
   // Text measurement refs
@@ -729,6 +808,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
       lat: number;
       lng: number;
       error?: string;
+      isDuplicate?: boolean;
+      imageFingerprint?: string;
     }> = [];
     
     for (const file of fileArray) {
@@ -830,11 +911,67 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
           continue;
         }
         
+        // Calculate image fingerprint
+        const imageUrl = URL.createObjectURL(file);
+        const imageFingerprint = await calculateImageFingerprint(file, imageUrl);
+        
+        // Check if this image has already been imported (lightweight comparison, no filename)
+        let isDuplicate = false;
+        
+        // Compare with existing images
+        for (const note of notes) {
+          if (!note.images || note.images.length === 0) continue;
+          
+          for (const existingImage of note.images) {
+            try {
+              // Calculate fingerprint for existing image (no filename)
+              const existingFingerprint = await calculateFingerprintFromBase64(existingImage);
+              
+              // Debug: log fingerprints for comparison
+              console.log('Comparing fingerprints:', {
+                new: imageFingerprint,
+                existing: existingFingerprint,
+                match: imageFingerprint === existingFingerprint
+              });
+              
+              // Compare fingerprints (exact match)
+              if (imageFingerprint === existingFingerprint) {
+                isDuplicate = true;
+                console.log('Duplicate detected: exact fingerprint match');
+                break;
+              }
+              
+              // Fallback: compare by width and height only (without pixel)
+              const currentParts = imageFingerprint.split('_');
+              const existingParts = existingFingerprint.split('_');
+              
+              // Fingerprint format: width_height_firstPixel
+              // So indices are: [0]=width, [1]=height, [2]=firstPixel
+              if (currentParts.length >= 2 && existingParts.length >= 2) {
+                // Compare width and height (first 2 parts)
+                const currentBase = currentParts.slice(0, 2).join('_');
+                const existingBase = existingParts.slice(0, 2).join('_');
+                
+                if (currentBase === existingBase) {
+                  isDuplicate = true;
+                  console.log('Duplicate detected: width and height match');
+                  break;
+                }
+              }
+            } catch (error) {
+              console.error('Error comparing fingerprints:', error);
+            }
+          }
+          if (isDuplicate) break;
+        }
+        
         previews.push({
           file,
-          imageUrl: URL.createObjectURL(file),
+          imageUrl: imageUrl,
           lat: lat,
-          lng: lng
+          lng: lng,
+          isDuplicate: isDuplicate,
+          imageFingerprint: imageFingerprint
         });
       } catch (error) {
         console.error('Error reading EXIF data from:', file.name, error);
@@ -854,10 +991,16 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   
   // Confirm import
   const handleConfirmImport = async () => {
-    const validPreviews = importPreview.filter(p => !p.error);
+    // Filter out errors and duplicates
+    const validPreviews = importPreview.filter(p => !p.error && !p.isDuplicate);
+    const duplicateCount = importPreview.filter(p => !p.error && p.isDuplicate).length;
     
     if (validPreviews.length === 0) {
-      alert('No valid images to import');
+      if (duplicateCount > 0) {
+        alert(`All images have already been imported. ${duplicateCount} duplicate(s) skipped.`);
+      } else {
+        alert('No valid images to import');
+      }
       return;
     }
     
@@ -866,34 +1009,53 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
     const noteWidth = 256; // Default width for standard notes
     const noteHeight = 256; // Default height for standard notes
     const spacing = 50;
+    const aspectRatioThreshold = 2.5; // If width/height > 2.5, start a new row
     
     let spawnX = 100;
     let spawnY = 100;
     
     if (boardNotes.length > 0) {
+      let minX = Infinity;
       let minY = Infinity;
       let maxX = -Infinity;
+      let maxY = -Infinity;
       let sumCenterY = 0;
       let count = 0;
       
       boardNotes.forEach(note => {
         const existingNoteWidth = (note.variant === 'compact') ? 180 : 256;
         const existingNoteHeight = (note.variant === 'compact') ? 180 : 256;
-        const noteRight = (note.boardX || 0) + existingNoteWidth;
+        const noteLeft = note.boardX || 0;
+        const noteRight = noteLeft + existingNoteWidth;
         const noteTop = note.boardY || 0;
+        const noteBottom = noteTop + existingNoteHeight;
         const noteCenterY = noteTop + existingNoteHeight / 2;
         
+        if (noteLeft < minX) minX = noteLeft;
         if (noteTop < minY) minY = noteTop;
         if (noteRight > maxX) maxX = noteRight;
+        if (noteBottom > maxY) maxY = noteBottom;
         sumCenterY += noteCenterY;
         count++;
       });
       
       if (maxX !== -Infinity && minY !== Infinity && count > 0) {
-        spawnX = maxX + spacing;
-        // Use average center Y position, then adjust to top of note
-        const avgCenterY = sumCenterY / count;
-        spawnY = avgCenterY - noteHeight / 2;
+        const contentWidth = maxX - minX;
+        const contentHeight = maxY - minY;
+        const aspectRatio = contentHeight > 0 ? contentWidth / contentHeight : 0;
+        
+        // If aspect ratio is too wide, start a new row
+        if (aspectRatio > aspectRatioThreshold) {
+          // Start new row: go to left edge, below existing content
+          spawnX = minX;
+          spawnY = maxY + spacing;
+        } else {
+          // Continue current row: add to the right
+          spawnX = maxX + spacing;
+          // Use average center Y position, then adjust to top of note
+          const avgCenterY = sumCenterY / count;
+          spawnY = avgCenterY - noteHeight / 2;
+        }
       }
     }
     
@@ -919,6 +1081,11 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
       };
       
       onAddNote?.(newNote);
+    }
+    
+    // Show message if there were duplicates
+    if (duplicateCount > 0) {
+      alert(`Successfully imported ${validPreviews.length} new image(s). ${duplicateCount} duplicate(s) were skipped.`);
     }
     
     // Clean up
@@ -1101,29 +1268,47 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
      let spawnX = centerX - noteWidth / 2;
      let spawnY = centerY - noteHeight / 2;
 
-     // New logic: detect top and right edges of existing content, then add to the right with spacing, aligned to top
+     // New logic: detect bounds of existing content, add to the right or start new row if too wide
      if (notes.length > 0) {
         // Calculate bounds of all existing notes
+        let minX = Infinity;
         let minY = Infinity;
         let maxX = -Infinity;
+        let maxY = -Infinity;
         
         notes.forEach(note => {
           // Use actual note width based on variant (must match rendered sizes)
           // compact: 180px, text/standard: 256px
           const existingNoteWidth = (note.variant === 'compact') ? 180 : 256;
-          const noteRight = note.boardX + existingNoteWidth;
+          const existingNoteHeight = (note.variant === 'compact') ? 180 : 256;
+          const noteLeft = note.boardX;
+          const noteRight = noteLeft + existingNoteWidth;
           const noteTop = note.boardY;
+          const noteBottom = noteTop + existingNoteHeight;
           
+          if (noteLeft < minX) minX = noteLeft;
           if (noteTop < minY) minY = noteTop;
           if (noteRight > maxX) maxX = noteRight;
+          if (noteBottom > maxY) maxY = noteBottom;
         });
         
         // Ensure we have valid values before using them
         if (maxX !== -Infinity && minY !== Infinity) {
-          // Position new note to the right of existing content with spacing
-          spawnX = maxX + spacing;
-          // Align to top of existing content
-          spawnY = minY;
+          const contentWidth = maxX - minX;
+          const contentHeight = maxY - minY;
+          const aspectRatioThreshold = 2.5; // If width/height > 2.5, start a new row
+          const aspectRatio = contentHeight > 0 ? contentWidth / contentHeight : 0;
+          
+          // If aspect ratio is too wide, start a new row
+          if (aspectRatio > aspectRatioThreshold) {
+            // Start new row: go to left edge, below existing content
+            spawnX = minX;
+            spawnY = maxY + spacing;
+          } else {
+            // Continue current row: add to the right, aligned to top
+            spawnX = maxX + spacing;
+            spawnY = minY;
+          }
         }
         
         console.log('createNoteAtCenter calculation:', {
@@ -1214,98 +1399,115 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   
   const [isZooming, setIsZooming] = useState(false);
   
-  const handleTouchStart = (e: React.TouchEvent) => {
-    // 如果是双指，取消所有长按检测
-    if (e.touches.length === 2) {
-      e.preventDefault(); // 禁用浏览器的双指缩放
-      setIsZooming(true); // 标记正在缩放
-      
-      // 取消便利贴的长按检测
-      if (longPressTimerRef.current) {
-        clearTimeout(longPressTimerRef.current);
-        longPressTimerRef.current = null;
-      }
-      longPressNoteIdRef.current = null;
-      
-      const touch1 = e.touches[0];
-      const touch2 = e.touches[1];
-      const distance = Math.sqrt(
-        Math.pow(touch2.clientX - touch1.clientX, 2) + 
-        Math.pow(touch2.clientY - touch1.clientY, 2)
-      );
-      // 计算两指中心点（相对于容器）
-      const centerX = (touch1.clientX + touch2.clientX) / 2;
-      const centerY = (touch1.clientY + touch2.clientY) / 2;
-      
-      if (containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect();
-        const relativeCenterX = centerX - rect.left;
-        const relativeCenterY = centerY - rect.top;
+  // Use native event listeners for touch events to allow preventDefault
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      // 如果是双指，取消所有长按检测
+      if (e.touches.length === 2) {
+        e.preventDefault(); // 禁用浏览器的双指缩放
+        setIsZooming(true); // 标记正在缩放
         
-        touchStartRef.current = { 
-          distance, 
-          scale: transform.scale,
-          centerX: relativeCenterX,
-          centerY: relativeCenterY,
-          transformX: transform.x,
-          transformY: transform.y
-        };
+        // 取消便利贴的长按检测
+        if (longPressTimerRef.current) {
+          clearTimeout(longPressTimerRef.current);
+          longPressTimerRef.current = null;
+        }
+        longPressNoteIdRef.current = null;
+        
+        const touch1 = e.touches[0];
+        const touch2 = e.touches[1];
+        const distance = Math.sqrt(
+          Math.pow(touch2.clientX - touch1.clientX, 2) + 
+          Math.pow(touch2.clientY - touch1.clientY, 2)
+        );
+        // 计算两指中心点（相对于容器）
+        const centerX = (touch1.clientX + touch2.clientX) / 2;
+        const centerY = (touch1.clientY + touch2.clientY) / 2;
+        
+        if (container) {
+          const rect = container.getBoundingClientRect();
+          const relativeCenterX = centerX - rect.left;
+          const relativeCenterY = centerY - rect.top;
+          
+          touchStartRef.current = { 
+            distance, 
+            scale: transform.scale,
+            centerX: relativeCenterX,
+            centerY: relativeCenterY,
+            transformX: transform.x,
+            transformY: transform.y
+          };
+        }
       }
-    }
-  };
-  
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (e.touches.length === 2 && touchStartRef.current && containerRef.current) {
-      e.preventDefault();
-      // 阻止长按检测
-      if (longPressTimerRef.current) {
-        clearTimeout(longPressTimerRef.current);
-        longPressTimerRef.current = null;
+    };
+    
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && touchStartRef.current && container) {
+        e.preventDefault();
+        // 阻止长按检测
+        if (longPressTimerRef.current) {
+          clearTimeout(longPressTimerRef.current);
+          longPressTimerRef.current = null;
+        }
+        longPressNoteIdRef.current = null;
+        
+        const touch1 = e.touches[0];
+        const touch2 = e.touches[1];
+        const distance = Math.sqrt(
+          Math.pow(touch2.clientX - touch1.clientX, 2) + 
+          Math.pow(touch2.clientY - touch1.clientY, 2)
+        );
+        const scaleRatio = distance / touchStartRef.current.distance;
+        const newScale = Math.min(Math.max(0.2, touchStartRef.current.scale * scaleRatio), 4);
+        
+        // 计算当前两指中心点（相对于容器）
+        const currentCenterX = (touch1.clientX + touch2.clientX) / 2;
+        const currentCenterY = (touch1.clientY + touch2.clientY) / 2;
+        const rect = container.getBoundingClientRect();
+        const relativeCenterX = currentCenterX - rect.left;
+        const relativeCenterY = currentCenterY - rect.top;
+        
+        // 将当前两指中心点转换为世界坐标（使用当前的 transform）
+        // 这样缩放就会以当前两指中心为中心
+        const worldX = (relativeCenterX - transform.x) / transform.scale;
+        const worldY = (relativeCenterY - transform.y) / transform.scale;
+        
+        // 计算新的 transform，使得同一个世界坐标点仍然在当前两指中心位置
+        const newX = relativeCenterX - worldX * newScale;
+        const newY = relativeCenterY - worldY * newScale;
+        
+        setTransform({ 
+          x: newX, 
+          y: newY, 
+          scale: newScale 
+        });
       }
-      longPressNoteIdRef.current = null;
-      
-      const touch1 = e.touches[0];
-      const touch2 = e.touches[1];
-      const distance = Math.sqrt(
-        Math.pow(touch2.clientX - touch1.clientX, 2) + 
-        Math.pow(touch2.clientY - touch1.clientY, 2)
-      );
-      const scaleRatio = distance / touchStartRef.current.distance;
-      const newScale = Math.min(Math.max(0.2, touchStartRef.current.scale * scaleRatio), 4);
-      
-      // 计算当前两指中心点（相对于容器）
-      const currentCenterX = (touch1.clientX + touch2.clientX) / 2;
-      const currentCenterY = (touch1.clientY + touch2.clientY) / 2;
-      const rect = containerRef.current.getBoundingClientRect();
-      const relativeCenterX = currentCenterX - rect.left;
-      const relativeCenterY = currentCenterY - rect.top;
-      
-      // 将当前两指中心点转换为世界坐标（使用当前的 transform）
-      // 这样缩放就会以当前两指中心为中心
-      const worldX = (relativeCenterX - transform.x) / transform.scale;
-      const worldY = (relativeCenterY - transform.y) / transform.scale;
-      
-      // 计算新的 transform，使得同一个世界坐标点仍然在当前两指中心位置
-      const newX = relativeCenterX - worldX * newScale;
-      const newY = relativeCenterY - worldY * newScale;
-      
-      setTransform({ 
-        x: newX, 
-        y: newY, 
-        scale: newScale 
-      });
-    }
-  };
-  
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (e.touches.length < 2) {
-      touchStartRef.current = null;
-      // 延迟重置缩放状态，防止触发误点击
-      setTimeout(() => {
-        setIsZooming(false);
-      }, 100);
-    }
-  };
+    };
+    
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) {
+        touchStartRef.current = null;
+        // 延迟重置缩放状态，防止触发误点击
+        setTimeout(() => {
+          setIsZooming(false);
+        }, 100);
+      }
+    };
+
+    // Add event listeners with { passive: false } to allow preventDefault
+    container.addEventListener('touchstart', handleTouchStart, { passive: false });
+    container.addEventListener('touchmove', handleTouchMove, { passive: false });
+    container.addEventListener('touchend', handleTouchEnd, { passive: false });
+
+    return () => {
+      container.removeEventListener('touchstart', handleTouchStart);
+      container.removeEventListener('touchmove', handleTouchMove);
+      container.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [transform, longPressTimerRef, longPressNoteIdRef]);
 
   const handleBoardPointerDown = (e: React.PointerEvent) => {
       // 阻止浏览器默认长按菜单
@@ -1969,9 +2171,6 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
         ref={containerRef}
         className={`w-full h-full overflow-hidden bg-gray-50 relative touch-none select-none ${isPanning ? 'cursor-grabbing' : 'cursor-grab'} ${isDragging ? 'ring-4 ring-[#FFDD00] ring-offset-2' : ''}`}
         onWheel={handleWheel}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
         onPointerDown={handleBoardPointerDown}
         onPointerMove={handleBoardPointerMove}
         onDragEnter={handleDragEnter}
@@ -2909,14 +3108,6 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                     e.stopPropagation();
                     e.preventDefault();
                   }}
-                  onTouchStart={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                  }}
-                  onTouchEnd={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                  }}
                   className="absolute -top-3 -right-3 z-[500] bg-red-500 text-white rounded-full p-2 shadow-lg hover:scale-110 transition-transform cursor-pointer"
                   style={{ 
                     transform: `scale(${1 / transform.scale})`,
@@ -2997,7 +3188,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
 
         {/* Edit Toolbar: Unified White Buttons at Top Left */}
         <div 
-            className="fixed top-4 left-4 z-[500] pointer-events-auto animate-in slide-in-from-left-4 fade-in flex items-center"
+            className={`fixed top-4 z-[500] pointer-events-auto animate-in fade-in flex items-center ${isEditMode ? 'left-1/2 -translate-x-1/2' : 'left-4 slide-in-from-left-4'}`}
             style={{ height: '40px' }}
             onPointerDown={(e) => e.stopPropagation()} 
         >
@@ -3144,7 +3335,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               <div className="p-4">
                 <h3 className="text-lg font-bold text-gray-800">Import Photo Preview</h3>
                 <div className="mt-1 text-sm text-gray-600">
-                  Importable: {importPreview.filter(p => !p.error).length} | 
+                  Importable: {importPreview.filter(p => !p.error && !p.isDuplicate).length} | 
+                  Already imported: {importPreview.filter(p => !p.error && p.isDuplicate).length} | 
                   Cannot import: {importPreview.filter(p => p.error).length}
                 </div>
               </div>
@@ -3163,6 +3355,13 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                           <div className="text-center text-red-600 text-xs px-2">
                             <X size={16} className="mx-auto mb-1" />
                             <span className="font-bold">{preview.error}</span>
+                          </div>
+                        </div>
+                      ) : preview.isDuplicate ? (
+                        <div className="absolute inset-0 bg-yellow-500/20 rounded-lg flex items-center justify-center">
+                          <div className="text-center text-yellow-700 text-xs px-2">
+                            <Check size={16} className="mx-auto mb-1" />
+                            <span className="font-bold">Already imported</span>
                           </div>
                         </div>
                       ) : (
@@ -3189,10 +3388,10 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                 </button>
                 <button
                   onClick={handleConfirmImport}
-                  disabled={importPreview.filter(p => !p.error).length === 0}
+                  disabled={importPreview.filter(p => !p.error && !p.isDuplicate).length === 0}
                   className="px-6 py-2 bg-[#FFDD00] hover:bg-[#E6C700] disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg text-gray-900 font-medium transition-colors"
                 >
-                  Confirm Import ({importPreview.filter(p => !p.error).length})
+                  Confirm Import ({importPreview.filter(p => !p.error && !p.isDuplicate).length})
                 </button>
               </div>
             </div>

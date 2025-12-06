@@ -391,10 +391,86 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     lat: number;
     lng: number;
     error?: string;
+    isDuplicate?: boolean;
+    imageFingerprint?: string;
   }>>([]);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dataImportInputRef = useRef<HTMLInputElement>(null);
+  
+  // Ultra-lightweight image fingerprint: dimensions and first pixel only (no filename, no size)
+  // This ensures consistent comparison between File objects and base64 strings
+  const calculateImageFingerprint = async (file: File, imageUrl: string): Promise<string> => {
+    try {
+      const img = new Image();
+      img.src = imageUrl;
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+      });
+      
+      const width = img.naturalWidth;
+      const height = img.naturalHeight;
+      
+      // Sample only first pixel for maximum speed
+      const canvas = document.createElement('canvas');
+      canvas.width = 1;
+      canvas.height = 1;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return `${width}_${height}`;
+      
+      ctx.drawImage(img, 0, 0, 1, 1);
+      const imageData = ctx.getImageData(0, 0, 1, 1);
+      const data = imageData.data;
+      
+      // Get first pixel RGB (3 values)
+      const firstPixel = data.length >= 3 
+        ? `${data[0]},${data[1]},${data[2]}` 
+        : '0,0,0';
+      
+      // Create fingerprint: width_height_firstPixel (no filename, no size for consistency)
+      return `${width}_${height}_${firstPixel}`;
+    } catch (error) {
+      console.error('Error calculating image fingerprint:', error);
+      return `unknown`;
+    }
+  };
+  
+  // Ultra-lightweight fingerprint from base64 image (no filename, no size)
+  const calculateFingerprintFromBase64 = async (base64Image: string): Promise<string> => {
+    try {
+      const img = new Image();
+      img.src = base64Image;
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+      });
+      
+      const width = img.naturalWidth;
+      const height = img.naturalHeight;
+      
+      // Sample only first pixel
+      const canvas = document.createElement('canvas');
+      canvas.width = 1;
+      canvas.height = 1;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return `${width}_${height}`;
+      
+      ctx.drawImage(img, 0, 0, 1, 1);
+      const imageData = ctx.getImageData(0, 0, 1, 1);
+      const data = imageData.data;
+      
+      const firstPixel = data.length >= 3 
+        ? `${data[0]},${data[1]},${data[2]}` 
+        : '0,0,0';
+      
+      // Same format as calculateImageFingerprint: width_height_firstPixel
+      return `${width}_${height}_${firstPixel}`;
+    } catch (error) {
+      console.error('Error calculating fingerprint from base64:', error);
+      return `unknown`;
+    }
+  };
   
   // Drag and drop state
   const [isDragging, setIsDragging] = useState(false);
@@ -451,28 +527,48 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     const noteWidth = 256; // standard note width
     const noteHeight = 256;
     const spacing = 50;
+    const aspectRatioThreshold = 2.5; // If width/height > 2.5, start a new row
     
     let boardX = 100; // Default position
     let boardY = 100;
     
-    // Calculate position to the right of existing notes, aligned to top
+    // Calculate position to the right of existing notes, or start new row if too wide
     const boardNotes = notes.filter(n => n.boardX !== undefined && n.boardY !== undefined);
     if (boardNotes.length > 0) {
+      let minX = Infinity;
       let minY = Infinity;
       let maxX = -Infinity;
+      let maxY = -Infinity;
       
       boardNotes.forEach(note => {
         const existingNoteWidth = (note.variant === 'compact') ? 180 : 256;
-        const noteRight = note.boardX + existingNoteWidth;
+        const existingNoteHeight = (note.variant === 'compact') ? 180 : 256;
+        const noteLeft = note.boardX;
+        const noteRight = noteLeft + existingNoteWidth;
         const noteTop = note.boardY;
+        const noteBottom = noteTop + existingNoteHeight;
         
+        if (noteLeft < minX) minX = noteLeft;
         if (noteTop < minY) minY = noteTop;
         if (noteRight > maxX) maxX = noteRight;
+        if (noteBottom > maxY) maxY = noteBottom;
       });
       
       if (maxX !== -Infinity && minY !== Infinity) {
-        boardX = maxX + spacing;
-        boardY = minY;
+        const contentWidth = maxX - minX;
+        const contentHeight = maxY - minY;
+        const aspectRatio = contentHeight > 0 ? contentWidth / contentHeight : 0;
+        
+        // If aspect ratio is too wide, start a new row
+        if (aspectRatio > aspectRatioThreshold) {
+          // Start new row: go to left edge, below existing content
+          boardX = minX;
+          boardY = maxY + spacing;
+        } else {
+          // Continue current row: add to the right, aligned to top
+          boardX = maxX + spacing;
+          boardY = minY;
+        }
       }
     }
     
@@ -505,6 +601,19 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     onToggleEditor(true);
   };
 
+  // Handle cluster marker click - set up cluster navigation
+  const handleClusterClick = (clusterNotes: Note[]) => {
+    // Sort notes: from south to north, from west to east
+    const sortedClusterNotes = sortNotes(clusterNotes);
+    const firstNote = sortedClusterNotes[0];
+    
+    setCurrentClusterNotes(sortedClusterNotes);
+    setCurrentNoteIndex(0);
+    setEditingNote(firstNote);
+    setIsEditorOpen(true);
+    onToggleEditor(true);
+  };
+
   // Move to next pin
   const moveToNextPin = () => {
     if (!mapInstance || mapNotes.length === 0) return;
@@ -523,6 +632,20 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     }
   };
   
+  // Save current note without closing editor
+  const saveCurrentNoteWithoutClose = (noteData: Partial<Note>) => {
+    if (noteData.id && notes.some(n => n.id === noteData.id)) {
+      onUpdateNote(noteData as Note);
+      // Update the note in currentClusterNotes to reflect changes
+      const updatedClusterNotes = currentClusterNotes.map(note => 
+        note.id === noteData.id ? { ...note, ...noteData } as Note : note
+      );
+      setCurrentClusterNotes(updatedClusterNotes);
+    } else {
+      onAddNote(noteData as Note);
+    }
+  };
+
   // Switch to next marker (swipe right)
   const switchToNextNote = () => {
     if (currentClusterNotes.length > 1 && currentNoteIndex < currentClusterNotes.length - 1) {
@@ -552,6 +675,9 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const closeEditor = () => {
       setIsEditorOpen(false);
       onToggleEditor(false);
+      setEditingNote(null);
+      setCurrentClusterNotes([]);
+      setCurrentNoteIndex(0);
   };
 
   // Handle image import
@@ -570,6 +696,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       lat: number;
       lng: number;
       error?: string;
+      isDuplicate?: boolean;
+      imageFingerprint?: string;
     }> = [];
     
     for (const file of fileArray) {
@@ -671,11 +799,64 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           continue;
         }
         
+        // Calculate image fingerprint
+        const imageUrl = URL.createObjectURL(file);
+        const imageFingerprint = await calculateImageFingerprint(file, imageUrl);
+        
+        // Check if this image has already been imported (lightweight comparison, no filename)
+        let isDuplicate = false;
+        
+        for (const note of notes) {
+          if (!note.images || note.images.length === 0) continue;
+          
+          for (const existingImage of note.images) {
+            try {
+              const existingFingerprint = await calculateFingerprintFromBase64(existingImage);
+              
+              // Debug: log fingerprints for comparison
+              console.log('Comparing fingerprints:', {
+                new: imageFingerprint,
+                existing: existingFingerprint,
+                match: imageFingerprint === existingFingerprint
+              });
+              
+              if (imageFingerprint === existingFingerprint) {
+                isDuplicate = true;
+                console.log('Duplicate detected: exact fingerprint match');
+                break;
+              }
+              
+              // Fallback: compare by width and height only (without pixel)
+              const currentParts = imageFingerprint.split('_');
+              const existingParts = existingFingerprint.split('_');
+              
+              // Fingerprint format: width_height_firstPixel
+              // So indices are: [0]=width, [1]=height, [2]=firstPixel
+              if (currentParts.length >= 2 && existingParts.length >= 2) {
+                // Compare width and height (first 2 parts)
+                const currentBase = currentParts.slice(0, 2).join('_');
+                const existingBase = existingParts.slice(0, 2).join('_');
+                
+                if (currentBase === existingBase) {
+                  isDuplicate = true;
+                  console.log('Duplicate detected: width and height match');
+                  break;
+                }
+              }
+            } catch (error) {
+              console.error('Error comparing fingerprints:', error);
+            }
+          }
+          if (isDuplicate) break;
+        }
+        
         previews.push({
           file,
-          imageUrl: URL.createObjectURL(file),
+          imageUrl: imageUrl,
           lat: lat,
-          lng: lng
+          lng: lng,
+          isDuplicate: isDuplicate,
+          imageFingerprint: imageFingerprint
         });
       } catch (error) {
         console.error('Error reading EXIF data from:', file.name, error);
@@ -703,33 +884,55 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
   // Confirm import
   const handleConfirmImport = async () => {
-    const validPreviews = importPreview.filter(p => !p.error);
+    // Filter out errors and duplicates
+    const validPreviews = importPreview.filter(p => !p.error && !p.isDuplicate);
+    const duplicateCount = importPreview.filter(p => !p.error && p.isDuplicate).length;
     
     // Calculate board position for imported notes (same logic as handleLongPress)
     const boardNotes = notes.filter(n => n.boardX !== undefined && n.boardY !== undefined);
     const noteWidth = 256; // Default width for standard notes
     const noteHeight = 256; // Default height for standard notes
     const spacing = 50;
+    const aspectRatioThreshold = 8; // If width/height > 8, start a new row
     
     let spawnX = 100;
     let spawnY = 100;
     
     if (boardNotes.length > 0) {
+      let minX = Infinity;
       let minY = Infinity;
       let maxX = -Infinity;
+      let maxY = -Infinity;
       
       boardNotes.forEach(note => {
         const existingNoteWidth = (note.variant === 'compact') ? 180 : 256;
-        const noteRight = (note.boardX || 0) + existingNoteWidth;
+        const existingNoteHeight = (note.variant === 'compact') ? 180 : 256;
+        const noteLeft = note.boardX || 0;
+        const noteRight = noteLeft + existingNoteWidth;
         const noteTop = note.boardY || 0;
+        const noteBottom = noteTop + existingNoteHeight;
         
+        if (noteLeft < minX) minX = noteLeft;
         if (noteTop < minY) minY = noteTop;
         if (noteRight > maxX) maxX = noteRight;
+        if (noteBottom > maxY) maxY = noteBottom;
       });
       
       if (maxX !== -Infinity && minY !== Infinity) {
-        spawnX = maxX + spacing;
-        spawnY = minY;
+        const contentWidth = maxX - minX;
+        const contentHeight = maxY - minY;
+        const aspectRatio = contentHeight > 0 ? contentWidth / contentHeight : 0;
+        
+        // If aspect ratio is too wide, start a new row
+        if (aspectRatio > aspectRatioThreshold) {
+          // Start new row: go to left edge, below existing content
+          spawnX = minX;
+          spawnY = maxY + spacing;
+        } else {
+          // Continue current row: add to the right, aligned to top
+          spawnX = maxX + spacing;
+          spawnY = minY;
+        }
       } else {
         spawnX = 100;
         spawnY = 100;
@@ -778,6 +981,11 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       } catch (error) {
         console.error('Failed to import image:', error);
       }
+    }
+    
+    // Show message if there were duplicates
+    if (duplicateCount > 0) {
+      alert(`Successfully imported ${validPreviews.length} new image(s). ${duplicateCount} duplicate(s) were skipped.`);
     }
     
     // Clear preview
@@ -927,31 +1135,46 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       let content = '';
       let backgroundColor = 'white';
       
+      // Use yellow as background for all cases to fill the pin shape
+      backgroundColor = '#FFDD00';
+      
       if (note.images && note.images.length > 0) {
-        // Show photo, larger to fill pin
-        content = `<img src="${note.images[0]}" style="
-          width: 36px;
-          height: 36px;
-          border-radius: 50%;
-          object-fit: cover;
+        // Show photo with pin-shaped mask
+        content = `<div style="
+          position: absolute;
+          inset: 0;
+          border-radius: 50% 50% 50% 0;
+          overflow: hidden;
           transform: rotate(45deg);
-        " />`;
+        ">
+          <img src="${note.images[0]}" style="
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scale(1.2);
+            transform-origin: center;
+          " />
+        </div>`;
       } else if (note.sketch) {
-        // Show sketch, larger to fill pin
-        content = `<img src="${note.sketch}" style="
-          width: 36px;
-          height: 36px;
-          border-radius: 50%;
-          object-fit: cover;
+        // Show sketch with pin-shaped mask
+        content = `<div style="
+          position: absolute;
+          inset: 0;
+          border-radius: 50% 50% 50% 0;
+          overflow: hidden;
           transform: rotate(45deg);
-        " />`;
+        ">
+          <img src="${note.sketch}" style="
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scale(1.2);
+            transform-origin: center;
+          " />
+        </div>`;
       } else if (note.emoji) {
         // Show emoji, background is yellow
-        backgroundColor = '#FFDD00';
-        content = `<span style="transform: rotate(45deg); font-size: 20px; line-height: 1;">${note.emoji}</span>`;
-      } else {
-        // None, show pure yellow
-        backgroundColor = '#FFDD00';
+        content = `<span style="transform: rotate(45deg); font-size: 20px; line-height: 1; z-index: 1; position: relative;">${note.emoji}</span>`;
       }
       
       return L.divIcon({
@@ -991,8 +1214,24 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     });
   }, []);
   
+  // Pin clustering distance threshold (in screen pixels)
+  const CLUSTER_DISTANCE_THRESHOLD = 25;
+  
+  // Calculate distance between two pins on the map (in screen pixels)
+  // Returns null if calculation fails
+  const calculatePinDistance = useCallback((map: L.Map, note1: Note, note2: Note): number | null => {
+    try {
+      const point1 = map.latLngToContainerPoint([note1.coords.lat, note1.coords.lng]);
+      const point2 = map.latLngToContainerPoint([note2.coords.lat, note2.coords.lng]);
+      return point1.distanceTo(point2);
+    } catch (e) {
+      console.warn('Failed to calculate pin distance:', e);
+      return null;
+    }
+  }, []);
+  
   // Detect if markers overlap (based on screen pixel distance)
-  const detectClusters = useCallback((notes: Note[], map: L.Map, threshold: number = 50): Array<{ notes: Note[], position: [number, number] }> => {
+  const detectClusters = useCallback((notes: Note[], map: L.Map, threshold: number = CLUSTER_DISTANCE_THRESHOLD): Array<{ notes: Note[], position: [number, number] }> => {
     if (!map || notes.length === 0) return [];
     
     // Check if map is initialized
@@ -1013,44 +1252,31 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     sortedNotes.forEach((note) => {
       if (processed.has(note.id)) return;
       
-      try {
-        const notePoint = map.latLngToContainerPoint([note.coords.lat, note.coords.lng]);
-        const cluster: Note[] = [note];
-        processed.add(note.id);
+      const cluster: Note[] = [note];
+      processed.add(note.id);
+      
+      // Find nearby markers using unified distance calculation
+      sortedNotes.forEach((otherNote) => {
+        if (processed.has(otherNote.id)) return;
         
-        // Find nearby markers
-        sortedNotes.forEach((otherNote) => {
-          if (processed.has(otherNote.id)) return;
-          
-          try {
-            const otherPoint = map.latLngToContainerPoint([otherNote.coords.lat, otherNote.coords.lng]);
-            const distance = notePoint.distanceTo(otherPoint);
-            
-            if (distance < threshold) {
-              cluster.push(otherNote);
-              processed.add(otherNote.id);
-            }
-          } catch (e) {
-            // If conversion fails, skip this marker
-            console.warn('Failed to convert note to container point:', e);
-          }
-        });
-        
-        // Use bottommost marker position (first after sorting)
-        const clusterNotes = sortNotes(cluster);
-        const bottomNote = clusterNotes[0];
-        clusters.push({
-          notes: clusterNotes,
-          position: [bottomNote.coords.lat, bottomNote.coords.lng]
-        });
-      } catch (e) {
-        // If conversion fails, skip this marker
-        console.warn('Failed to convert note to container point:', e);
-      }
+        const distance = calculatePinDistance(map, note, otherNote);
+        if (distance !== null && distance < threshold) {
+          cluster.push(otherNote);
+          processed.add(otherNote.id);
+        }
+      });
+      
+      // Use bottommost marker position (first after sorting)
+      const clusterNotes = sortNotes(cluster);
+      const bottomNote = clusterNotes[0];
+      clusters.push({
+        notes: clusterNotes,
+        position: [bottomNote.coords.lat, bottomNote.coords.lng]
+      });
     });
     
     return clusters;
-  }, [sortNotes]);
+  }, [sortNotes, calculatePinDistance]);
   
   // Update clustered markers
   useEffect(() => {
@@ -1225,7 +1451,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                   icon={createCustomIcon(cluster.notes[0], cluster.notes.length)}
                   eventHandlers={{ 
                     click: () => {
-                      handleMarkerClick(cluster.notes[0]);
+                      handleClusterClick(cluster.notes);
                     }
                   }}
                 />
@@ -1270,13 +1496,21 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 overflow: hidden;
                 opacity: 0.7;
               ">
-                <img src="${preview.imageUrl}" style="
-                  width: 36px;
-                  height: 36px;
-                  border-radius: 50%;
-                  object-fit: cover;
+                <div style="
+                  position: absolute;
+                  inset: 0;
+                  border-radius: 50% 50% 50% 0;
+                  overflow: hidden;
                   transform: rotate(45deg);
-                " />
+                ">
+                  <img src="${preview.imageUrl}" style="
+                    width: 100%;
+                    height: 100%;
+                    object-fit: cover;
+                    transform: scale(1.2);
+                    transform-origin: center;
+                  " />
+                </div>
               </div>`,
               iconSize: [40, 40],
               iconAnchor: [20, 40]
@@ -1354,6 +1588,11 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             onSave={handleSaveNote}
             onDelete={onDeleteNote}
             initialNote={editingNote || {}}
+            clusterNotes={currentClusterNotes.length > 1 ? currentClusterNotes : []}
+            currentIndex={currentNoteIndex}
+            onNext={switchToNextNote}
+            onPrev={switchToPrevNote}
+            onSaveWithoutClose={saveCurrentNoteWithoutClose}
         />
       )}
 
@@ -1386,7 +1625,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             <div className="p-4">
               <h3 className="text-lg font-bold text-gray-800">Import Photo Preview</h3>
               <div className="mt-1 text-sm text-gray-600">
-                Importable: {importPreview.filter(p => !p.error).length} | 
+                Importable: {importPreview.filter(p => !p.error && !p.isDuplicate).length} | 
+                Already imported: {importPreview.filter(p => !p.error && p.isDuplicate).length} | 
                 Cannot import: {importPreview.filter(p => p.error).length}
               </div>
             </div>
@@ -1405,6 +1645,13 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                         <div className="text-center text-red-600 text-xs px-2">
                           <X size={16} className="mx-auto mb-1" />
                           <span className="font-bold">{preview.error}</span>
+                        </div>
+                      </div>
+                    ) : preview.isDuplicate ? (
+                      <div className="absolute inset-0 bg-yellow-500/20 rounded-lg flex items-center justify-center">
+                        <div className="text-center text-yellow-700 text-xs px-2">
+                          <Check size={16} className="mx-auto mb-1" />
+                          <span className="font-bold">Already imported</span>
                         </div>
                       </div>
                     ) : (
@@ -1431,10 +1678,10 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               </button>
               <button
                 onClick={handleConfirmImport}
-                disabled={importPreview.filter(p => !p.error).length === 0}
+                disabled={importPreview.filter(p => !p.error && !p.isDuplicate).length === 0}
                 className="px-6 py-2 bg-[#FFDD00] hover:bg-[#E6C700] disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg text-gray-900 font-medium transition-colors"
               >
-                Confirm Import ({importPreview.filter(p => !p.error).length})
+                Confirm Import ({importPreview.filter(p => !p.error && !p.isDuplicate).length})
               </button>
             </div>
           </div>

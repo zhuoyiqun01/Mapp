@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { Note, Tag } from '../types';
 import { EMOJI_LIST, EMOJI_CATEGORIES, TAG_COLORS } from '../constants';
 import { createTag, fileToBase64, generateId } from '../utils';
-import { X, Camera, Plus, Check, PenTool, Minus, Bold, Image as ImageIcon, Trash2 } from 'lucide-react';
+import { X, Camera, Plus, Check, PenTool, Minus, Bold, Image as ImageIcon, Trash2, ArrowLeft, ArrowRight } from 'lucide-react';
 import { DrawingCanvas } from './DrawingCanvas';
 import { motion } from 'framer-motion';
 
@@ -18,6 +18,7 @@ interface NoteEditorProps {
   currentIndex?: number;
   onNext?: () => void;
   onPrev?: () => void;
+  onSaveWithoutClose?: (note: Partial<Note>) => void;
 }
 
 const DEFAULT_BG = '#FFFDF5';
@@ -39,7 +40,8 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   clusterNotes = [],
   currentIndex = 0,
   onNext,
-  onPrev
+  onPrev,
+  onSaveWithoutClose
 }) => {
   const [emoji, setEmoji] = useState(initialNote?.emoji || '');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -198,13 +200,8 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     setSketch(undefined);
   };
 
-  const handleSave = () => {
-    if (isTextMode && !text.trim()) {
-        onClose();
-        return;
-    }
-
-    onSave({
+  const getCurrentNoteData = (): Partial<Note> => {
+    return {
       ...initialNote,
       emoji: isCompactMode ? '' : emoji,
       text,
@@ -214,8 +211,23 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       tags: isCompactMode ? [] : tags,
       images,
       sketch: sketch === '' ? undefined : sketch
-    });
+    };
+  };
+
+  const handleSave = () => {
+    if (isTextMode && !text.trim()) {
+        onClose();
+        return;
+    }
+
+    onSave(getCurrentNoteData());
     onClose();
+  };
+
+  const handleSaveWithoutClose = () => {
+    if (onSaveWithoutClose) {
+      onSaveWithoutClose(getCurrentNoteData());
+    }
   };
 
   const handleDelete = () => {
@@ -269,22 +281,23 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         }}
       />
       
-      <motion.div 
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-        // Explicit width w-[500px] to prevent auto-growing behavior. min-h-[500px] added when sketching to ensure full canvas.
-        className={`${isTextMode ? 'w-auto max-w-[95vw]' : 'w-[500px] max-w-[95vw]'} flex flex-col relative z-10 transition-colors duration-300 ${isTextMode ? 'max-h-[60vh]' : 'max-h-[90vh]'} ${isTextMode ? 'min-h-0' : 'min-h-[300px]'} ${isSketching ? 'min-h-[500px]' : ''}`}
-        style={{ 
-            backgroundColor: isTextMode ? 'transparent' : color,
-            boxShadow: isTextMode ? 'none' : '0 25px 50px 12px rgba(0, 0, 0, 0.15)',
-            border: isTextMode ? '2px solid #FFDD00' : 'none',
-            borderRadius: isTextMode ? '12px' : undefined,
-            padding: isTextMode ? '6px' : '4px',
-            overflow: isTextMode ? 'visible' : 'hidden'
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="relative z-10 flex flex-col items-end">
+        <motion.div 
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0.9, opacity: 0 }}
+          // Explicit width w-[500px] to prevent auto-growing behavior. min-h-[500px] added when sketching to ensure full canvas.
+          className={`${isTextMode ? 'w-auto max-w-[95vw]' : 'w-[500px] max-w-[95vw]'} flex flex-col relative transition-colors duration-300 ${isTextMode ? 'max-h-[60vh]' : 'max-h-[90vh]'} ${isTextMode ? 'min-h-0' : 'min-h-[300px]'} ${isSketching ? 'min-h-[500px]' : ''}`}
+          style={{ 
+              backgroundColor: isTextMode ? 'transparent' : color,
+              boxShadow: isTextMode ? 'none' : '0 25px 50px 12px rgba(0, 0, 0, 0.15)',
+              border: isTextMode ? '2px solid #FFDD00' : 'none',
+              borderRadius: isTextMode ? '12px' : undefined,
+              padding: isTextMode ? '6px' : '4px',
+              overflow: isTextMode ? 'visible' : 'hidden'
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
         {isSketching && (
           <div className="absolute inset-0 z-50" onPointerDown={(e) => e.stopPropagation()}>
             <DrawingCanvas 
@@ -564,7 +577,57 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
             )}
             
         </div>
-      </motion.div>
+        </motion.div>
+        
+        {/* Cluster Navigation Buttons - Outside card, below, right-aligned */}
+        {clusterNotes.length > 1 && (
+          <div className="mt-4 flex items-center gap-2 pointer-events-auto">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onPrev && currentIndex > 0) {
+                handleSaveWithoutClose();
+                onPrev();
+              }
+            }}
+            disabled={currentIndex === 0}
+            className={`p-2 rounded-full transition-all ${
+              currentIndex === 0
+                ? 'text-gray-400 cursor-not-allowed'
+                : 'text-white hover:text-[#FFDD00]'
+            }`}
+            title="Previous note"
+          >
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 18 L9 12 L15 6" />
+            </svg>
+          </button>
+          <div className="px-3 py-1 text-base font-bold text-white">
+            {currentIndex + 1} / {clusterNotes.length}
+          </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onNext && currentIndex < clusterNotes.length - 1) {
+                handleSaveWithoutClose();
+                onNext();
+              }
+            }}
+            disabled={currentIndex === clusterNotes.length - 1}
+            className={`p-2 rounded-full transition-all ${
+              currentIndex === clusterNotes.length - 1
+                ? 'text-gray-400 cursor-not-allowed'
+                : 'text-white hover:text-[#FFDD00]'
+            }`}
+            title="Next note"
+          >
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 18 L15 12 L9 6" />
+            </svg>
+          </button>
+        </div>
+      )}
+      </div>
     </div>
   );
 };

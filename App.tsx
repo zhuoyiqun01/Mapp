@@ -354,10 +354,10 @@ export default function App() {
                exit={{ opacity: 0 }}
              />
              <motion.div 
-               className="relative h-full w-[80%] z-[2001] overflow-hidden"
-               initial={{ x: '-80%' }}
+               className="relative h-full w-[62%] z-[2001] overflow-hidden"
+               initial={{ x: '-62%' }}
                animate={{ x: 0 }}
-               exit={{ x: '-80%' }}
+               exit={{ x: '-62%' }}
                transition={{ type: "spring", damping: 25, stiffness: 200 }}
              >
               <ProjectManager 
@@ -440,8 +440,8 @@ export default function App() {
                  sidebarButtonDragRef.current.isDragging = false;
                }, 10);
              }}
-             className="absolute left-0 z-[900] pl-3 pr-4 py-2 bg-[#FFDD00] hover:bg-[#E6C700] rounded-r-xl shadow-lg text-yellow-950 transition-none cursor-move"
-             style={{ top: `${sidebarButtonY}px` }}
+             className="absolute left-0 z-[900] pl-3 pr-4 bg-[#FFDD00] hover:bg-[#E6C700] rounded-r-xl shadow-lg text-yellow-950 transition-none cursor-move"
+             style={{ top: `${sidebarButtonY}px`, paddingTop: '12.8px', paddingBottom: '12.8px' }}
           >
              <Menu size={18} />
           </button>
