@@ -71,7 +71,7 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({ onSave, onCancel, 
   // Load Initial Data
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (canvas && initialData) {
+    if (canvas && initialData && initialData !== '') {
       const ctx = canvas.getContext('2d');
       const img = new Image();
       img.src = initialData;
@@ -147,10 +147,69 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({ onSave, onCancel, 
     }
   };
 
+  // Check if canvas is empty (only background color)
+  const isCanvasEmpty = (canvas: HTMLCanvasElement): boolean => {
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return true;
+      
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+      
+      // Parse background color
+      const bgColor = backgroundColor.toLowerCase();
+      let bgR = 255, bgG = 255, bgB = 255;
+      if (bgColor.startsWith('#')) {
+          const hex = bgColor.slice(1);
+          if (hex.length === 3) {
+              bgR = parseInt(hex[0] + hex[0], 16);
+              bgG = parseInt(hex[1] + hex[1], 16);
+              bgB = parseInt(hex[2] + hex[2], 16);
+          } else if (hex.length === 6) {
+              bgR = parseInt(hex.slice(0, 2), 16);
+              bgG = parseInt(hex.slice(2, 4), 16);
+              bgB = parseInt(hex.slice(4, 6), 16);
+          }
+      } else if (bgColor.startsWith('rgb')) {
+          const matches = bgColor.match(/\d+/g);
+          if (matches && matches.length >= 3) {
+              bgR = parseInt(matches[0]);
+              bgG = parseInt(matches[1]);
+              bgB = parseInt(matches[2]);
+          }
+      }
+      
+      // Check if all pixels match background color (with small tolerance for anti-aliasing)
+      const tolerance = 5;
+      for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          const a = data[i + 3];
+          
+          // Skip transparent pixels
+          if (a < 128) continue;
+          
+          // Check if pixel differs from background
+          if (Math.abs(r - bgR) > tolerance || 
+              Math.abs(g - bgG) > tolerance || 
+              Math.abs(b - bgB) > tolerance) {
+              return false; // Found a non-background pixel
+          }
+      }
+      
+      return true; // All pixels match background
+  };
+
   const handleDone = (e: React.MouseEvent) => {
       e.stopPropagation();
       if (canvasRef.current) {
-          onSave(canvasRef.current.toDataURL());
+          // Check if canvas is empty before saving
+          if (isCanvasEmpty(canvasRef.current)) {
+              // Pass empty string to indicate empty canvas
+              onSave('');
+          } else {
+              onSave(canvasRef.current.toDataURL());
+          }
       }
   };
 

@@ -213,7 +213,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       color,
       tags: isCompactMode ? [] : tags,
       images,
-      sketch
+      sketch: sketch === '' ? undefined : sketch
     });
     onClose();
   };
@@ -290,17 +290,21 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
             <DrawingCanvas 
                 initialData={sketch}
                 backgroundColor={color}
-                onSave={(data) => { setSketch(data); setIsSketching(false); }}
+                onSave={(data) => { 
+                  // If data is empty string, set to undefined (empty canvas)
+                  setSketch(data === '' ? undefined : data); 
+                  setIsSketching(false); 
+                }}
                 onCancel={() => setIsSketching(false)}
             />
           </div>
         )}
         
         {/* Font Control buttons - topmost z-20 */}
-        <div 
-          className="absolute right-4 flex justify-center items-center gap-2 pointer-events-auto"
+        <div
+          className="absolute left-3 flex justify-center items-center gap-2 pointer-events-auto"
           style={{ 
-            bottom: isTextMode ? '4px' : isCompactMode ? '64px' : '154px',
+            top: isTextMode ? '-54px' : isCompactMode ? '8px' : '12px',
             zIndex: 20
           }}
         >
@@ -494,10 +498,10 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                         className="w-20 h-20 bg-white/60 hover:bg-white shadow-sm rounded-2xl flex items-center justify-center transition-colors relative overflow-hidden group"
                         style={{ border: 'none' }}
                       >
-                          {sketch ? (
+                          {sketch && sketch !== '' ? (
                               <img src={sketch} className="w-full h-full object-cover" />
                           ) : <PenTool size={24} className="text-gray-500"/>}
-                          {sketch && <div onClick={(e) => {e.stopPropagation(); setShowEmojiPicker(false); removeSketch(e); }} className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><X size={12}/></div>}
+                          {sketch && sketch !== '' && <div onClick={(e) => {e.stopPropagation(); setShowEmojiPicker(false); removeSketch(e); }} className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><X size={12}/></div>}
                       </button>
                   </div>
                 )}

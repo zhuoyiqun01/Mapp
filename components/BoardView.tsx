@@ -2786,10 +2786,19 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                           }}
                       >
                           <div className={`w-full h-full flex flex-col relative ${isCompact ? 'p-4 gap-1' : 'p-6 gap-2'}`}>
-                              {!isCompact && (note.sketch || (note.images && note.images.length > 0)) && (
+                              {!isCompact && (note.sketch && note.sketch !== '') && (note.images && note.images.length > 0) && (
                                   <div className="absolute inset-0 opacity-20 pointer-events-none z-0">
                                       <img 
                                           src={note.sketch || note.images[0]} 
+                                          className="w-full h-full object-cover grayscale opacity-50" 
+                                          alt="bg" 
+                                      />
+                                  </div>
+                              )}
+                              {!isCompact && !note.sketch && (note.images && note.images.length > 0) && (
+                                  <div className="absolute inset-0 opacity-20 pointer-events-none z-0">
+                                      <img 
+                                          src={note.images[0]} 
                                           className="w-full h-full object-cover grayscale opacity-50" 
                                           alt="bg" 
                                       />
