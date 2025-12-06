@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Project } from '../types';
 import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check, Upload } from 'lucide-react';
-import { generateId, fileToBase64, formatDate, exportToJpeg, exportToJpegCentered } from '../utils';
+import { generateId, fileToBase64, formatDate, exportToJpeg, exportToJpegCentered, compressImageFromBase64 } from '../utils';
 import { getLastSyncTime, type SyncStatus } from '../utils/sync';
 
 // Menu dropdown component that adjusts position to avoid going off-screen
@@ -11,9 +11,10 @@ const MenuDropdown: React.FC<{
   onRename: (project: Project) => void;
   onExportData: (project: Project) => void;
   onExportFullProject: (project: Project) => void;
+  onCompressImages: (project: Project) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
-}> = ({ project, onRename, onExportData, onExportFullProject, onDelete, onClose }) => {
+}> = ({ project, onRename, onExportData, onExportFullProject, onCompressImages, onDelete, onClose }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<'bottom' | 'top'>('bottom');
 
@@ -64,6 +65,13 @@ const MenuDropdown: React.FC<{
         className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
       >
         <Download size={16} /> Export Full Project (JSON)
+      </button>
+      <div className="h-px bg-gray-100 my-1" />
+      <button 
+        onClick={() => { onCompressImages(project); onClose(); }}
+        className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+      >
+        <ImageIcon size={16} /> Compress Images
       </button>
       <div className="h-px bg-gray-100 my-1" />
       <button 
@@ -272,6 +280,89 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     link.click();
     
     setOpenMenuId(null);
+  };
+
+  // Compress all images in the project
+  const handleCompressImages = async (project: Project) => {
+    if (!onUpdateProject) {
+      alert('Cannot compress images: project update function not available');
+      return;
+    }
+
+    const confirmCompress = confirm(`This will compress all images in "${project.name}". This may take a while. Continue?`);
+    if (!confirmCompress) return;
+
+    try {
+      let compressedCount = 0;
+      let errorCount = 0;
+      const updatedNotes = await Promise.all(
+        project.notes.map(async (note) => {
+          const updatedNote = { ...note };
+          
+          // Compress images array
+          if (note.images && note.images.length > 0) {
+            const compressedImages = await Promise.all(
+              note.images.map(async (image) => {
+                try {
+                  const compressed = await compressImageFromBase64(image);
+                  compressedCount++;
+                  return compressed;
+                } catch (error) {
+                  console.error('Error compressing image:', error);
+                  errorCount++;
+                  return image; // Return original if compression fails
+                }
+              })
+            );
+            updatedNote.images = compressedImages;
+          }
+          
+          // Compress sketch
+          if (note.sketch) {
+            try {
+              const compressed = await compressImageFromBase64(note.sketch);
+              updatedNote.sketch = compressed;
+              compressedCount++;
+            } catch (error) {
+              console.error('Error compressing sketch:', error);
+              errorCount++;
+            }
+          }
+          
+          return updatedNote;
+        })
+      );
+
+      // Compress background image if exists
+      let compressedBackground = project.backgroundImage;
+      if (project.backgroundImage) {
+        try {
+          compressedBackground = await compressImageFromBase64(project.backgroundImage);
+          compressedCount++;
+        } catch (error) {
+          console.error('Error compressing background image:', error);
+          errorCount++;
+        }
+      }
+
+      const updatedProject: Project = {
+        ...project,
+        notes: updatedNotes,
+        backgroundImage: compressedBackground
+      };
+
+      onUpdateProject(updatedProject);
+      
+      let message = `Compression complete! ${compressedCount} image(s) compressed.`;
+      if (errorCount > 0) {
+        message += ` ${errorCount} image(s) failed to compress.`;
+      }
+      alert(message);
+      setOpenMenuId(null);
+    } catch (error) {
+      console.error('Error compressing images:', error);
+      alert('Failed to compress images. Please try again.');
+    }
   };
 
   // Check if two notes are duplicates (same location and content)
@@ -815,6 +906,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                         onRename={handleRename}
                         onExportData={handleExportData}
                         onExportFullProject={handleExportFullProject}
+                        onCompressImages={handleCompressImages}
                         onDelete={onDeleteProject}
                         onClose={() => setOpenMenuId(null)}
                       />
@@ -843,6 +935,13 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                         className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
                       >
                           <Download size={16} /> Export Full Project (JSON)
+                      </button>
+                      <div className="h-px bg-gray-100 my-1" />
+                      <button 
+                          onClick={() => handleCompressImages(p)}
+                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                      >
+                          <ImageIcon size={16} /> Compress Images
                       </button>
                       <div className="h-px bg-gray-100 my-1" />
                       <button 

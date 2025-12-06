@@ -995,13 +995,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     for (let i = 0; i < validPreviews.length; i++) {
       const preview = validPreviews[i];
       try {
-        // Convert image to base64
-        const base64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(preview.file);
-        });
+        // Convert image to base64 (with compression)
+        const base64 = await fileToBase64(preview.file);
         
         // Calculate board position for this note (offset by index)
         const currentBoardX = spawnX + i * (noteWidth + spacing);
