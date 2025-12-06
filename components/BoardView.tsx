@@ -3,7 +3,7 @@ import { Note, Frame, Connection } from '../types';
 import { motion } from 'framer-motion';
 import { NoteEditor } from './NoteEditor';
 import { ZoomSlider } from './ZoomSlider';
-import { Type, StickyNote, X, Pencil, Check, Minus, Move, ArrowUp, Hash, Plus, Image as ImageIcon, FileJson } from 'lucide-react';
+import { Type, StickyNote, X, Pencil, Check, Minus, Move, ArrowUp, Hash, Plus, Image as ImageIcon, FileJson, Locate } from 'lucide-react';
 import exifr from 'exifr';
 import { generateId, fileToBase64 } from '../utils';
 
@@ -31,13 +31,15 @@ interface BoardViewProps {
   onUpdateConnections?: (connections: Connection[]) => void;
   frames?: Frame[];
   onUpdateFrames?: (frames: Frame[]) => void;
-  project?: { notes: Note[] };
-  onUpdateProject?: (project: { notes: Note[] }) => void;
-  onSwitchToMapView?: () => void;
-  onSwitchToBoardView?: () => void;
+  project?: { notes: Note[]; standardSizeScale?: number };
+  onUpdateProject?: (project: { notes: Note[]; standardSizeScale?: number }) => void;
+  onSwitchToMapView?: (coords?: { lat: number; lng: number }) => void;
+  onSwitchToBoardView?: (coords?: { x: number; y: number }) => void;
+  navigateToCoords?: { x: number; y: number } | null;
+  onNavigateComplete?: () => void;
 }
 
-export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onToggleEditor, onAddNote, onDeleteNote, onEditModeChange, connections = [], onUpdateConnections, frames = [], onUpdateFrames, project, onUpdateProject, onSwitchToMapView, onSwitchToBoardView, mapViewFileInputRef }) => {
+export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onToggleEditor, onAddNote, onDeleteNote, onEditModeChange, connections = [], onUpdateConnections, frames = [], onUpdateFrames, project, onUpdateProject, onSwitchToMapView, onSwitchToBoardView, navigateToCoords, onNavigateComplete, mapViewFileInputRef }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
   
@@ -47,6 +49,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   
   // Edit Mode State
   const [isEditMode, setIsEditMode] = useState(false);
+  
+  // Layout state: global standard size scale is stored in project.standardSizeScale
   
   // Dragging State
   const [draggingNoteId, setDraggingNoteId] = useState<string | null>(null);
@@ -88,6 +92,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
   const [editingFrameId, setEditingFrameId] = useState<string | null>(null);
   const [editingFrameTitle, setEditingFrameTitle] = useState('');
+  const frameTitleInputRef = useRef<HTMLInputElement | null>(null);
+  const frameTitleSaveButtonRef = useRef<HTMLButtonElement | null>(null);
   const [resizingFrame, setResizingFrame] = useState<{ id: string; corner: 'tl' | 'tr' | 'bl' | 'br'; startX: number; startY: number; originalFrame: Frame } | null>(null);
   const [draggingFrameId, setDraggingFrameId] = useState<string | null>(null);
   const [draggingFrameOffset, setDraggingFrameOffset] = useState<{ x: number; y: number } | null>(null);
@@ -271,6 +277,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
 
   useEffect(() => {
     onEditModeChange?.(isEditMode);
+    
+    // Layout scale is now managed globally via project.standardSizeScale
     
     // 退出编辑模式时清除所有连接相关状态和长按状态
     if (!isEditMode) {
@@ -865,6 +873,54 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEditMode]);
+
+  // Navigate to specific coordinates when navigateToCoords is set
+  useEffect(() => {
+    if (navigateToCoords && containerRef.current) {
+      const { width, height } = containerRef.current.getBoundingClientRect();
+      const targetX = navigateToCoords.x;
+      const targetY = navigateToCoords.y;
+      
+      // Calculate scale to fit the target note (assuming 256x256 note size)
+      const noteSize = 256;
+      const padding = 100;
+      const targetScale = Math.min(
+        (width - padding * 2) / noteSize,
+        (height - padding * 2) / noteSize,
+        2 // Max scale
+      );
+      
+      // Center the target note in view
+      const newX = width / 2 - targetX * targetScale;
+      const newY = height / 2 - targetY * targetScale;
+      
+      // Animate to target position
+      const startTransform = { ...transform };
+      const endTransform = { x: newX, y: newY, scale: targetScale };
+      const duration = 400;
+      const startTime = Date.now();
+      
+      const animate = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        
+        setTransform({
+          x: startTransform.x + (endTransform.x - startTransform.x) * eased,
+          y: startTransform.y + (endTransform.y - startTransform.y) * eased,
+          scale: startTransform.scale + (endTransform.scale - startTransform.scale) * eased
+        });
+        
+        if (progress < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          onNavigateComplete?.();
+        }
+      };
+      
+      requestAnimationFrame(animate);
+    }
+  }, [navigateToCoords, containerRef, transform, onNavigateComplete]);
 
   const closeEditor = () => {
     setEditingNote(null);
@@ -2055,10 +2111,42 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
           selectedNoteIds.forEach(id => {
             const selectedNote = notes.find(n => n.id === id);
             if (selectedNote) {
+              // 计算新的位置
+              const newBoardX = selectedNote.boardX + multiSelectDragOffset.x;
+              const newBoardY = selectedNote.boardY + multiSelectDragOffset.y;
+              
+              // 检查新位置是否在任何frame内
+              const isText = selectedNote.variant === 'text';
+              const isCompact = selectedNote.variant === 'compact';
+              let width = isCompact ? 180 : 256;
+              let height = isText ? 100 : isCompact ? 180 : 256;
+              
+              if (isText) {
+                const measured = textMeasureRefs.current.get(selectedNote.id);
+                if (measured) {
+                  width = measured.width;
+                  height = measured.height;
+                }
+              }
+              
+              const centerX = newBoardX + width / 2;
+              const centerY = newBoardY + height / 2;
+              
+              // 找到包含新位置的Frame
+              const containingFrame = frames.find(frame => 
+                centerX >= frame.x && 
+                centerX <= frame.x + frame.width && 
+                centerY >= frame.y && 
+                centerY <= frame.y + frame.height
+              );
+              
+              // 更新便签，包括位置和frame关系
               onUpdateNote({
                 ...selectedNote,
-                boardX: selectedNote.boardX + multiSelectDragOffset.x,
-                boardY: selectedNote.boardY + multiSelectDragOffset.y
+                boardX: newBoardX,
+                boardY: newBoardY,
+                groupId: containingFrame?.id,
+                groupName: containingFrame?.title
               });
             }
           });
@@ -2089,10 +2177,42 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
 
               if (dragOffset.x !== 0 || dragOffset.y !== 0) {
+                  // 计算新的位置
+                  const newBoardX = note.boardX + dragOffset.x;
+                  const newBoardY = note.boardY + dragOffset.y;
+                  
+                  // 检查新位置是否在任何frame内
+                  const isText = note.variant === 'text';
+                  const isCompact = note.variant === 'compact';
+                  let width = isCompact ? 180 : 256;
+                  let height = isText ? 100 : isCompact ? 180 : 256;
+                  
+                  if (isText) {
+                    const measured = textMeasureRefs.current.get(note.id);
+                    if (measured) {
+                      width = measured.width;
+                      height = measured.height;
+                    }
+                  }
+                  
+                  const centerX = newBoardX + width / 2;
+                  const centerY = newBoardY + height / 2;
+                  
+                  // 找到包含新位置的Frame
+                  const containingFrame = frames.find(frame => 
+                    centerX >= frame.x && 
+                    centerX <= frame.x + frame.width && 
+                    centerY >= frame.y && 
+                    centerY <= frame.y + frame.height
+                  );
+                  
+                  // 更新便签，包括位置和frame关系
                   onUpdateNote({
                       ...note,
-                      boardX: note.boardX + dragOffset.x,
-                      boardY: note.boardY + dragOffset.y
+                      boardX: newBoardX,
+                      boardY: newBoardY,
+                      groupId: containingFrame?.id,
+                      groupName: containingFrame?.title
                   });
               }
               setDraggingNoteId(null);
@@ -2140,6 +2260,11 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
       notePressStartPosRef.current = null;
   };
 
+  // Track click timing to distinguish single vs double click
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastClickNoteIdRef = useRef<string | null>(null);
+  const lastClickTimeRef = useRef<number>(0);
+
   const handleNoteClick = (e: React.MouseEvent, note: Note) => {
       e.stopPropagation();
       
@@ -2150,36 +2275,73 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
         setEditingNote(note);
         onToggleEditor(true);
       } else {
-        // 在编辑模式下，点击选中便利贴
-        if (isShiftPressed || e.shiftKey) {
-          // Multi-select mode: toggle selection (add or remove from selection)
-          setSelectedNoteIds(prev => {
-            const newSet = new Set(prev);
-            if (newSet.has(note.id)) {
-              newSet.delete(note.id);
-              // If removing the last selected note, clear single selection too
-              if (newSet.size === 0) {
-                setSelectedNoteId(null);
-              } else {
-                // Keep the first remaining note as single selection
-                setSelectedNoteId(Array.from(newSet)[0]);
-              }
-            } else {
-              newSet.add(note.id);
-              // Update single selection to the clicked note
-              setSelectedNoteId(note.id);
-            }
-            return newSet;
-          });
-        } else {
-          // Single select mode: clear multi-select and select only this note
-          setSelectedNoteId(note.id);
-          setSelectedNoteIds(new Set([note.id]));
+        // 在编辑模式下，单击选中便利贴
+        const now = Date.now();
+        const timeSinceLastClick = now - lastClickTimeRef.current;
+        const isSameNote = lastClickNoteIdRef.current === note.id;
+        
+        // 如果距离上次点击时间很短（小于300ms）且是同一个便签，可能是双击的开始
+        // 但我们先处理单击逻辑，双击会在onDoubleClick中处理
+        if (clickTimerRef.current) {
+          clearTimeout(clickTimerRef.current);
         }
-        setConnectingFrom(null);
-        setConnectingTo(null);
-        setHoveringConnectionPoint(null);
-        resetBlankClickCount();
+        
+        // 延迟执行单击逻辑，等待可能的双击
+        // 捕获当前的shift状态
+        const wasShiftPressed = isShiftPressed || e.shiftKey;
+        clickTimerRef.current = setTimeout(() => {
+          if (wasShiftPressed) {
+            // Multi-select mode: toggle selection (add or remove from selection)
+            setSelectedNoteIds(prev => {
+              const newSet = new Set(prev);
+              if (newSet.has(note.id)) {
+                newSet.delete(note.id);
+                // If removing the last selected note, clear single selection too
+                if (newSet.size === 0) {
+                  setSelectedNoteId(null);
+                } else {
+                  // Keep the first remaining note as single selection
+                  setSelectedNoteId(Array.from(newSet)[0]);
+                }
+              } else {
+                newSet.add(note.id);
+                // Update single selection to the clicked note
+                setSelectedNoteId(note.id);
+              }
+              return newSet;
+            });
+          } else {
+            // Single select mode: clear multi-select and select only this note
+            setSelectedNoteId(note.id);
+            setSelectedNoteIds(new Set([note.id]));
+          }
+          setConnectingFrom(null);
+          setConnectingTo(null);
+          setHoveringConnectionPoint(null);
+          resetBlankClickCount();
+        }, 300); // Wait 300ms to see if it's a double click
+        
+        lastClickNoteIdRef.current = note.id;
+        lastClickTimeRef.current = now;
+      }
+  };
+
+  const handleNoteDoubleClick = (e: React.MouseEvent, note: Note) => {
+      e.stopPropagation();
+      
+      // 如果正在缩放，不触发点击
+      if (isZooming) return;
+      
+      // 清除单击的延迟执行
+      if (clickTimerRef.current) {
+        clearTimeout(clickTimerRef.current);
+        clickTimerRef.current = null;
+      }
+      
+      // 在编辑模式下，双击打开编辑器
+      if (isEditMode) {
+        setEditingNote(note);
+        onToggleEditor(true);
       }
   };
   
@@ -2402,12 +2564,23 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                 width: `${frame.width}px`,
                 height: `${frame.height}px`,
                 backgroundColor: selectedFrameId === frame.id ? 'rgba(255, 221, 0, 0.2)' : frame.color,
-                border: selectedFrameId === frame.id ? '4px solid #FFDD00' : '4px solid rgba(156, 163, 175, 0.3)',
                 borderRadius: '12px',
-                zIndex: -1,
+                zIndex: selectedFrameId === frame.id ? 500 : -1,
                 pointerEvents: 'none',
               }}
             >
+              {/* Fixed border that doesn't scale */}
+              <div
+                className="absolute inset-0 pointer-events-none"
+                style={{
+                  border: selectedFrameId === frame.id ? '4px solid #FFDD00' : '4px solid rgba(156, 163, 175, 0.3)',
+                  borderRadius: '12px',
+                  transform: `scale(${1 / transform.scale})`,
+                  transformOrigin: 'top left',
+                  width: `${frame.width * transform.scale}px`,
+                  height: `${frame.height * transform.scale}px`,
+                }}
+              />
               {/* Frame中间区域，也当作空白处 - 让事件冒泡到背景 */}
               <div
                 className="absolute pointer-events-auto"
@@ -2594,6 +2767,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                       backgroundColor: 'white',
                       border: '2px solid #FFDD00',
                       borderRadius: '2px',
+                      transform: `scale(${1 / transform.scale})`,
+                      transformOrigin: 'top left',
                     }}
                     onPointerDown={(e) => {
                       e.stopPropagation();
@@ -2617,6 +2792,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                       backgroundColor: 'white',
                       border: '2px solid #FFDD00',
                       borderRadius: '2px',
+                      transform: `scale(${1 / transform.scale})`,
+                      transformOrigin: 'top right',
                     }}
                     onPointerDown={(e) => {
                       e.stopPropagation();
@@ -2640,6 +2817,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                       backgroundColor: 'white',
                       border: '2px solid #FFDD00',
                       borderRadius: '2px',
+                      transform: `scale(${1 / transform.scale})`,
+                      transformOrigin: 'bottom left',
                     }}
                     onPointerDown={(e) => {
                       e.stopPropagation();
@@ -2663,6 +2842,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                       backgroundColor: 'white',
                       border: '2px solid #FFDD00',
                       borderRadius: '2px',
+                      transform: `scale(${1 / transform.scale})`,
+                      transformOrigin: 'bottom right',
                     }}
                     onPointerDown={(e) => {
                       e.stopPropagation();
@@ -2683,12 +2864,15 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
           {frames.map((frame) => (
             <div
               key={`title-${frame.id}`}
-              className="absolute -top-8 left-0 px-3 py-1 bg-gray-500/50 text-white text-sm font-bold rounded-lg shadow-md flex items-center gap-2 pointer-events-auto"
+              className="absolute -top-8 left-0 px-3 py-1 bg-gray-500/50 text-white text-sm font-bold rounded-lg shadow-md flex items-center gap-2 pointer-events-auto whitespace-nowrap"
               style={{ 
                 left: `${frame.x}px`,
                 top: `${frame.y - 32}px`,
-                zIndex: 450,
-                cursor: draggingFrameId === frame.id ? 'grabbing' : 'grab' 
+                zIndex: selectedFrameId === frame.id ? 501 : 450,
+                cursor: draggingFrameId === frame.id ? 'grabbing' : 'grab',
+                transform: `scale(${1 / transform.scale})`,
+                transformOrigin: 'top left',
+                wordBreak: 'keep-all',
               }}
               onDoubleClick={(e) => {
                 e.stopPropagation();
@@ -2728,17 +2912,45 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               {editingFrameId === frame.id ? (
                 <>
                   <input
-                    autoFocus
+                    ref={(input) => {
+                      frameTitleInputRef.current = input;
+                      // Auto focus when editing starts
+                      if (input && editingFrameId === frame.id) {
+                        setTimeout(() => input.focus(), 0);
+                      }
+                    }}
                     value={editingFrameTitle}
                     onChange={(e) => setEditingFrameTitle(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
-                        onUpdateFrames?.(frames.map(f => 
-                          f.id === frame.id ? { ...f, title: editingFrameTitle || 'Frame' } : f
-                        ));
-                        setEditingFrameId(null);
+                        e.preventDefault();
+                        // Save title
+                        const saveTitle = () => {
+                          onUpdateFrames?.(frames.map(f => 
+                            f.id === frame.id ? { ...f, title: editingFrameTitle || 'Frame' } : f
+                          ));
+                          setEditingFrameId(null);
+                        };
+                        saveTitle();
                       } else if (e.key === 'Escape') {
+                        // Cancel editing, restore original title
+                        setEditingFrameTitle(frame.title);
                         setEditingFrameId(null);
+                      }
+                    }}
+                    onBlur={(e) => {
+                      // Save title when clicking outside, but not when clicking the save button
+                      const relatedTarget = e.relatedTarget as HTMLElement;
+                      if (!relatedTarget || !frameTitleSaveButtonRef.current?.contains(relatedTarget)) {
+                        // Use setTimeout to allow button click to process first
+                        setTimeout(() => {
+                          if (editingFrameId === frame.id) {
+                            onUpdateFrames?.(frames.map(f => 
+                              f.id === frame.id ? { ...f, title: editingFrameTitle || 'Frame' } : f
+                            ));
+                            setEditingFrameId(null);
+                          }
+                        }, 200);
                       }
                     }}
                     className="bg-transparent text-white px-2 py-0.5 rounded outline-none text-sm"
@@ -2746,9 +2958,16 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                     onPointerDown={(e) => e.stopPropagation()}
                   />
                   <button
+                    ref={(button) => {
+                      frameTitleSaveButtonRef.current = button;
+                    }}
                     onPointerDown={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => {
+                      e.preventDefault(); // Prevent input blur
+                    }}
                     onClick={(e) => {
                       e.stopPropagation();
+                      // Save title
                       onUpdateFrames?.(frames.map(f => 
                         f.id === frame.id ? { ...f, title: editingFrameTitle || 'Frame' } : f
                       ));
@@ -2760,7 +2979,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                   </button>
                 </>
               ) : (
-                frame.title
+                <span className="whitespace-nowrap" style={{ wordBreak: 'keep-all' }}>{frame.title}</span>
               )}
               {isEditMode && selectedFrameId === frame.id && editingFrameId !== frame.id && (
                 <button
@@ -2902,11 +3121,11 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               
               const isSelected = selectedConnectionId === conn.id;
               
-              // 在编辑模式下，未选中的连接线透明度为30%，退出编辑模式后恢复为80%
+              // 在编辑模式下，未选中的连接线透明度减小30%，退出编辑模式后完全不透明
               const getOpacity = () => {
                 if (isSelected) return 1;
-                if (isEditMode) return 0.2; // 编辑模式下未选中：30%
-                return 0.8; // 非编辑模式下未选中：80%
+                if (isEditMode) return 0.2 * 0.7; // 编辑模式下未选中：减小30%（0.2 * 0.7 = 0.14）
+                return 1; // 非编辑模式下：完全不透明
               };
               
               return (
@@ -2916,7 +3135,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                     <path
                       d={pathData.pathD}
                       stroke="rgba(255, 221, 0, 0.3)"
-                      strokeWidth={CONNECTION_LINE_CLICKABLE_WIDTH}
+                      strokeWidth={CONNECTION_LINE_CLICKABLE_WIDTH / transform.scale}
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       fill="none"
@@ -2926,7 +3145,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                   <path
                     d={pathData.pathD}
                     stroke="#FFDD00"
-                    strokeWidth={isSelected ? CONNECTION_LINE_WIDTH + 2 : CONNECTION_LINE_WIDTH}
+                    strokeWidth={(isSelected ? CONNECTION_LINE_WIDTH + 2 : CONNECTION_LINE_WIDTH) / transform.scale}
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     fill="none"
@@ -2939,7 +3158,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                   <path
                     d={pathData.pathD}
                     stroke="transparent"
-                    strokeWidth={CONNECTION_LINE_CLICKABLE_WIDTH}
+                    strokeWidth={CONNECTION_LINE_CLICKABLE_WIDTH / transform.scale}
                     fill="none"
                     className="pointer-events-auto cursor-pointer"
                     onClick={handleConnectionClick}
@@ -2971,7 +3190,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                 <path
                   d={pathD}
                   stroke="#FFDD00"
-                  strokeWidth={CONNECTION_LINE_WIDTH}
+                  strokeWidth={CONNECTION_LINE_WIDTH / transform.scale}
                   strokeLinecap="round"
                   strokeOpacity={strokeOpacity}
                   fill="none"
@@ -3010,6 +3229,9 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                   else clampClass = 'line-clamp-4';
               }
 
+              // Get global standard size scale, default to 1
+              const standardSizeScale = project?.standardSizeScale || 1;
+              
               return (
                 <motion.div
                   key={note.id}
@@ -3024,6 +3246,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                       height: noteHeight,
                       minWidth: isText ? '100px' : undefined,
                       maxWidth: isText ? '800px' : undefined,
+                      transform: `scale(${standardSizeScale})`,
+                      transformOrigin: 'center',
                   }}
                   className={`pointer-events-auto ${isEditMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer hover:scale-105 transition-transform'}`}
                   onPointerDown={(e) => {
@@ -3033,6 +3257,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                   onPointerMove={handleNotePointerMove}
                   onPointerUp={(e) => handleNotePointerUp(e, note)}
                   onClick={(e) => handleNoteClick(e, note)}
+                  onDoubleClick={(e) => handleNoteDoubleClick(e, note)}
                 >
                   {isEditMode && (
                       <>
@@ -3193,11 +3418,46 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                                   >
                                       {note.text || <span className="text-gray-400 italic font-normal text-base">Empty...</span>}
                                   </p>
+                                  {isCompact && (
+                                    <div className="mt-auto flex items-center justify-end">
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                // Upgrade compact note to standard note
+                                                const upgradedNote: Note = {
+                                                    ...note,
+                                                    variant: 'standard',
+                                                    // Keep text and color, but coords will be empty (0, 0)
+                                                    coords: { lat: 0, lng: 0 }
+                                                };
+                                                onUpdateNote(upgradedNote);
+                                            }}
+                                            className="p-1.5 rounded-full bg-white/80 hover:bg-white shadow-sm transition-colors opacity-0 group-hover:opacity-100 pointer-events-auto"
+                                            title="升级为标准便签"
+                                        >
+                                            <ArrowUp size={14} className="text-gray-700" />
+                                        </button>
+                                    </div>
+                                  )}
                                   {!isCompact && (
-                                    <div className="mt-auto flex flex-wrap gap-1">
-                                        {note.tags.map(t => (
-                                            <span key={t.id} className="flex-shrink-0 h-6 px-2.5 rounded-full text-xs font-bold text-white shadow-sm flex items-center gap-1" style={{ backgroundColor: t.color }}>{t.label}</span>
-                                        ))}
+                                    <div className="mt-auto flex flex-wrap gap-1 items-center justify-between">
+                                        <div className="flex flex-wrap gap-1">
+                                            {note.tags.map(t => (
+                                                <span key={t.id} className="flex-shrink-0 h-6 px-2.5 rounded-full text-xs font-bold text-white shadow-sm flex items-center gap-1" style={{ backgroundColor: t.color }}>{t.label}</span>
+                                            ))}
+                                        </div>
+                                        {note.coords && note.coords.lat !== 0 && note.coords.lng !== 0 && onSwitchToMapView && (
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onSwitchToMapView(note.coords);
+                                                }}
+                                                className="p-1.5 rounded-full bg-white/80 hover:bg-white shadow-sm transition-colors opacity-0 group-hover:opacity-100 pointer-events-auto"
+                                                title="定位到地图视图"
+                                            >
+                                                <Locate size={14} className="text-gray-700" />
+                                            </button>
+                                        )}
                                     </div>
                                   )}
                               </div>
@@ -3367,10 +3627,101 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
 
         {/* Edit Toolbar: Unified White Buttons at Top Left */}
         <div 
-            className={`fixed top-4 z-[500] pointer-events-auto animate-in fade-in flex items-center ${isEditMode ? 'left-1/2 -translate-x-1/2' : 'left-4 slide-in-from-left-4'}`}
+            className={`fixed top-4 z-[500] pointer-events-auto animate-in fade-in flex items-center gap-2 ${isEditMode ? 'left-1/2 -translate-x-1/2' : 'left-4 slide-in-from-left-4'}`}
             style={{ height: '40px' }}
             onPointerDown={(e) => e.stopPropagation()} 
         >
+            {/* Layout Buttons: L+ and L- */}
+            {isEditMode && (
+                <div className="bg-white rounded-xl shadow-lg border border-gray-100 flex gap-2 h-full items-center p-1">
+                    <button
+                        onClick={() => {
+                            if (!onUpdateProject || !project) return;
+                            
+                            // Get current global standard size scale, default to 1
+                            const currentScale = project.standardSizeScale || 1;
+                            const newScale = currentScale * 2;
+                            
+                            // Update all notes to use new standard size scale
+                            notes.forEach(note => {
+                                // Calculate note dimensions (original, unscaled standard sizes)
+                                const noteWidth = note.variant === 'compact' ? 180 : note.variant === 'text' ? 500 : 256;
+                                const noteHeight = note.variant === 'compact' ? 180 : note.variant === 'text' ? 100 : 256;
+                                
+                                // Calculate current center position (using current scale)
+                                const currentCenterX = (note.boardX || 0) + (noteWidth * currentScale) / 2;
+                                const currentCenterY = (note.boardY || 0) + (noteHeight * currentScale) / 2;
+                                
+                                // Calculate new boardX/boardY to keep the center fixed (using new scale)
+                                const newBoardX = currentCenterX - (noteWidth * newScale) / 2;
+                                const newBoardY = currentCenterY - (noteHeight * newScale) / 2;
+                                
+                                // Update note position
+                                const updatedNote: Note = {
+                                    ...note,
+                                    boardX: newBoardX,
+                                    boardY: newBoardY
+                                };
+                                
+                                onUpdateNote(updatedNote);
+                            });
+                            
+                            // Update project with new standard size scale
+                            onUpdateProject({
+                                ...project,
+                                standardSizeScale: newScale
+                            });
+                        }}
+                        className="p-3 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
+                        title="放大布局"
+                    >
+                        <span className="text-lg">L+</span>
+                    </button>
+                    <button
+                        onClick={() => {
+                            if (!onUpdateProject || !project) return;
+                            
+                            // Get current global standard size scale, default to 1
+                            const currentScale = project.standardSizeScale || 1;
+                            const newScale = currentScale * 0.5;
+                            
+                            // Update all notes to use new standard size scale
+                            notes.forEach(note => {
+                                // Calculate note dimensions (original, unscaled standard sizes)
+                                const noteWidth = note.variant === 'compact' ? 180 : note.variant === 'text' ? 500 : 256;
+                                const noteHeight = note.variant === 'compact' ? 180 : note.variant === 'text' ? 100 : 256;
+                                
+                                // Calculate current center position (using current scale)
+                                const currentCenterX = (note.boardX || 0) + (noteWidth * currentScale) / 2;
+                                const currentCenterY = (note.boardY || 0) + (noteHeight * currentScale) / 2;
+                                
+                                // Calculate new boardX/boardY to keep the center fixed (using new scale)
+                                const newBoardX = currentCenterX - (noteWidth * newScale) / 2;
+                                const newBoardY = currentCenterY - (noteHeight * newScale) / 2;
+                                
+                                // Update note position
+                                const updatedNote: Note = {
+                                    ...note,
+                                    boardX: newBoardX,
+                                    boardY: newBoardY
+                                };
+                                
+                                onUpdateNote(updatedNote);
+                            });
+                            
+                            // Update project with new standard size scale
+                            onUpdateProject({
+                                ...project,
+                                standardSizeScale: newScale
+                            });
+                        }}
+                        className="p-3 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
+                        title="缩小布局"
+                    >
+                        <span className="text-lg">L-</span>
+                    </button>
+                </div>
+            )}
             <div className={`bg-white rounded-xl shadow-lg border border-gray-100 flex gap-2 h-full items-center ${isEditMode ? 'p-1' : ''}`}>
                 {!isEditMode ? (
                     // 非编辑模式：显示进入编辑模式的按钮
@@ -3502,6 +3853,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               onClose={closeEditor}
               initialNote={editingNote}
               onDelete={onDeleteNote}
+              onSwitchToMapView={onSwitchToMapView}
+              onSwitchToBoardView={onSwitchToBoardView}
               onSave={(updated) => {
                   if (!updated.text && updated.variant === 'text') return;
                   if (updated.id && notes.some(n => n.id === updated.id)) {

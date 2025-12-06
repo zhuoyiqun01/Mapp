@@ -33,6 +33,9 @@ export interface Note {
   // Group/Frame membership
   groupId?: string; // Frame ID if note is in a frame
   groupName?: string; // Frame name for export
+  
+  // Layout scale for board view
+  layoutScale?: number; // Scale factor for layout (default 1)
 }
 
 export interface Connection {
@@ -63,6 +66,7 @@ export interface Project {
   notes: Note[];
   connections?: Connection[]; // Connections between notes in board view
   frames?: Frame[]; // Frames for grouping notes in board view
+  standardSizeScale?: number; // Global scale factor for standard note sizes (default 1)
 }
 
 export type ViewMode = 'map' | 'board' | 'table';

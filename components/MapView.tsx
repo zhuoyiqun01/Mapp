@@ -25,6 +25,9 @@ interface MapViewProps {
   onToggleEditor: (isOpen: boolean) => void;
   onImportDialogChange?: (isOpen: boolean) => void;
   onUpdateProject?: (project: Project) => void;
+  navigateToCoords?: { lat: number; lng: number } | null;
+  onNavigateComplete?: () => void;
+  onSwitchToBoardView?: (coords?: { x: number; y: number }) => void;
 }
 
 const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinates) => void }) => {
@@ -220,6 +223,65 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
   return null;
 };
 
+// Component to handle navigation to specific coordinates
+const MapNavigationHandler = ({ coords, onComplete }: { coords: { lat: number; lng: number } | null; onComplete?: () => void }) => {
+  const map = useMap();
+  
+  useEffect(() => {
+    if (coords && map) {
+      // Use maximum zoom (19) to avoid merging with other markers
+      const targetZoom = 19;
+      const targetCenter: [number, number] = [coords.lat, coords.lng];
+      
+      // Use setView to ensure both center and zoom are set correctly
+      map.setView(targetCenter, targetZoom, {
+        animate: true,
+        duration: 1.0
+      });
+      
+      // Ensure center and zoom are correct after animation
+      const handleMoveEnd = () => {
+        const currentCenter = map.getCenter();
+        const currentZoom = map.getZoom();
+        
+        // Check if center is close enough (within 0.0001 degrees) and zoom is correct
+        const latDiff = Math.abs(currentCenter.lat - targetCenter[0]);
+        const lngDiff = Math.abs(currentCenter.lng - targetCenter[1]);
+        
+        if (latDiff > 0.0001 || lngDiff > 0.0001 || currentZoom < targetZoom) {
+          map.setView(targetCenter, targetZoom, {
+            animate: false
+          });
+        }
+        
+        map.off('moveend', handleMoveEnd);
+        onComplete?.();
+      };
+      
+      map.on('moveend', handleMoveEnd);
+      
+      // Fallback: ensure center and zoom are correct
+      setTimeout(() => {
+        const currentCenter = map.getCenter();
+        const currentZoom = map.getZoom();
+        const latDiff = Math.abs(currentCenter.lat - targetCenter[0]);
+        const lngDiff = Math.abs(currentCenter.lng - targetCenter[1]);
+        
+        if (latDiff > 0.0001 || lngDiff > 0.0001 || currentZoom < targetZoom) {
+          map.setView(targetCenter, targetZoom, {
+            animate: false
+          });
+        }
+        
+        map.off('moveend', handleMoveEnd);
+        onComplete?.();
+      }, 1100);
+    }
+  }, [coords, map, onComplete]);
+  
+  return null;
+};
+
 const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange, onNextPin }: { 
     onImportPhotos: () => void;
     onImportData: () => void;
@@ -372,7 +434,7 @@ const MapCenterHandler = ({ center, zoom }: { center: [number, number], zoom: nu
     return null;
 };
 
-export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef }) => {
+export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, onNavigateComplete, onSwitchToBoardView }) => {
   const notes = project.notes;
   const [editingNote, setEditingNote] = useState<Partial<Note> | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
@@ -1489,6 +1551,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         ref={setMapInstance}
         doubleClickZoom={false}
       >
+        <MapNavigationHandler coords={navigateToCoords} onComplete={onNavigateComplete} />
         {isMapMode ? (
            <TileLayer 
              attribution={MAP_ATTRIBUTION} 
@@ -1682,6 +1745,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             onNext={switchToNextNote}
             onPrev={switchToPrevNote}
             onSaveWithoutClose={saveCurrentNoteWithoutClose}
+            onSwitchToBoardView={onSwitchToBoardView}
         />
       )}
 

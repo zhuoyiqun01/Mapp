@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { Note, Tag } from '../types';
 import { EMOJI_LIST, EMOJI_CATEGORIES, TAG_COLORS } from '../constants';
 import { createTag, fileToBase64, generateId } from '../utils';
-import { X, Camera, Plus, Check, PenTool, Minus, Bold, Image as ImageIcon, Trash2, ArrowLeft, ArrowRight } from 'lucide-react';
+import { X, Camera, Plus, Check, PenTool, Minus, Bold, Image as ImageIcon, Trash2, ArrowLeft, ArrowRight, Locate, ArrowUp } from 'lucide-react';
 import { DrawingCanvas } from './DrawingCanvas';
 import { motion } from 'framer-motion';
 
@@ -19,6 +19,8 @@ interface NoteEditorProps {
   onNext?: () => void;
   onPrev?: () => void;
   onSaveWithoutClose?: (note: Partial<Note>) => void;
+  onSwitchToMapView?: (coords?: { lat: number; lng: number }) => void;
+  onSwitchToBoardView?: (coords?: { x: number; y: number }) => void;
 }
 
 const DEFAULT_BG = '#FFFDF5';
@@ -41,7 +43,9 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   currentIndex = 0,
   onNext,
   onPrev,
-  onSaveWithoutClose
+  onSaveWithoutClose,
+  onSwitchToMapView,
+  onSwitchToBoardView
 }) => {
   const [emoji, setEmoji] = useState(initialNote?.emoji || '');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -356,6 +360,57 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                             <Trash2 size={24} />
                         </button>
                     )}
+                    {/* Upgrade button for compact notes */}
+                    {isCompactMode && initialNote?.id && (
+                        <button 
+                            onClick={() => { 
+                                setShowEmojiPicker(false); 
+                                // Upgrade compact note to standard note
+                                const upgradedNote = {
+                                    ...getCurrentNoteData(),
+                                    variant: 'standard' as const,
+                                    coords: { lat: 0, lng: 0 } // Empty coords for upgraded note
+                                };
+                                onSave(upgradedNote);
+                                onClose();
+                            }}
+                            className="text-green-400 hover:text-green-600 hover:bg-green-50 rounded-full p-1 transition-colors active:scale-90"
+                            title="升级为标准便签"
+                        >
+                            <ArrowUp size={24} />
+                        </button>
+                    )}
+                    {/* Show navigate to board button when in map view (only if onSwitchToMapView doesn't exist) */}
+                    {initialNote?.boardX !== undefined && initialNote?.boardY !== undefined && onSwitchToBoardView && !onSwitchToMapView && (
+                        <button 
+                            onClick={() => { 
+                                setShowEmojiPicker(false); 
+                                // Calculate center coordinates of the note
+                                const noteWidth = initialNote.variant === 'compact' ? 180 : 256;
+                                const noteHeight = initialNote.variant === 'compact' ? 180 : 256;
+                                const centerX = initialNote.boardX! + noteWidth / 2;
+                                const centerY = initialNote.boardY! + noteHeight / 2;
+                                onSwitchToBoardView({ x: centerX, y: centerY }); 
+                            }}
+                            className="text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-full p-1 transition-colors active:scale-90"
+                            title="定位到board视图"
+                        >
+                            <Locate size={24} />
+                        </button>
+                    )}
+                    {/* Show navigate to map button when in board view (only if onSwitchToBoardView doesn't exist or both exist) */}
+                    {initialNote?.coords && initialNote.coords.lat !== 0 && initialNote.coords.lng !== 0 && onSwitchToMapView && (
+                        <button 
+                            onClick={() => { 
+                                setShowEmojiPicker(false); 
+                                onSwitchToMapView(initialNote.coords); 
+                            }}
+                            className="text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-full p-1 transition-colors active:scale-90"
+                            title="定位到地图视图"
+                        >
+                            <Locate size={24} />
+                        </button>
+                    )}
                 <button 
                     onClick={() => { setShowEmojiPicker(false); handleSave(); }}
                         className="text-gray-400 hover:text-gray-600 hover:bg-black/5 rounded-full p-1 transition-colors active:scale-90"
@@ -467,12 +522,19 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                               onClick={(e) => e.stopPropagation()}
                             >
                               {/* Category Tabs */}
-                              <div className="flex gap-1 p-1.5 border-b border-gray-100 overflow-x-auto scrollbar-hide">
+                              <div 
+                                className="flex gap-1 p-1.5 border-b border-gray-100 overflow-x-auto scrollbar-hide"
+                                style={{
+                                  scrollbarWidth: 'none',
+                                  msOverflowStyle: 'none',
+                                  WebkitOverflowScrolling: 'touch'
+                                }}
+                              >
                                 {Object.keys(EMOJI_CATEGORIES).map(category => (
                                   <button
                                     key={category}
                                     onClick={() => setSelectedEmojiCategory(category as keyof typeof EMOJI_CATEGORIES)}
-                                    className={`px-2 py-1 text-xs font-medium rounded-lg whitespace-nowrap transition-colors ${
+                                    className={`px-2 py-1 text-xs font-medium rounded-lg whitespace-nowrap transition-colors flex-shrink-0 ${
                                       selectedEmojiCategory === category
                                         ? 'bg-[#FFDD00] text-gray-900'
                                         : 'bg-gray-100 text-gray-600 hover:bg-gray-200'

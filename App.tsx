@@ -26,6 +26,10 @@ export default function App() {
   const [sidebarButtonY, setSidebarButtonY] = useState(96); // 初始位置 top-24 = 96px
   const sidebarButtonDragRef = useRef({ isDragging: false, startY: 0, startButtonY: 0 });
   
+  // Navigation state for cross-view positioning
+  const [navigateToMapCoords, setNavigateToMapCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [navigateToBoardCoords, setNavigateToBoardCoords] = useState<{ x: number; y: number } | null>(null);
+  
   // Project State
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -462,6 +466,14 @@ export default function App() {
               ));
             }}
             fileInputRef={mapViewFileInputRef}
+            navigateToCoords={navigateToMapCoords}
+            onNavigateComplete={() => setNavigateToMapCoords(null)}
+            onSwitchToBoardView={(coords) => {
+              if (coords) {
+                setNavigateToBoardCoords(coords);
+              }
+              setViewMode('board');
+            }}
           />
         ) : viewMode === 'board' ? (
           <BoardView 
@@ -492,20 +504,28 @@ export default function App() {
               }));
             }}
             project={activeProject}
-            onUpdateProject={(project) => {
+            onUpdateProject={(projectUpdate) => {
               if (!currentProjectId) return;
               setProjects(prev => prev.map(p => 
-                p.id === currentProjectId ? project : p
+                p.id === currentProjectId ? { ...p, ...projectUpdate } : p
               ));
             }}
-            onSwitchToMapView={() => {
+            navigateToCoords={navigateToBoardCoords}
+            onNavigateComplete={() => setNavigateToBoardCoords(null)}
+            onSwitchToMapView={(coords?: { lat: number; lng: number }) => {
+              if (coords) {
+                setNavigateToMapCoords(coords);
+              }
               setViewMode('map');
               // Trigger MapView's file input after a short delay
               setTimeout(() => {
                 mapViewFileInputRef.current?.click();
               }, 300);
             }}
-            onSwitchToBoardView={() => {
+            onSwitchToBoardView={(coords?: { x: number; y: number }) => {
+              if (coords) {
+                setNavigateToBoardCoords(coords);
+              }
               setViewMode('board');
             }}
             mapViewFileInputRef={mapViewFileInputRef}
