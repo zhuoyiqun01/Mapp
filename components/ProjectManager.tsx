@@ -1,9 +1,80 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Project } from '../types';
-import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check } from 'lucide-react';
+import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check, Upload } from 'lucide-react';
 import { generateId, fileToBase64, formatDate, exportToJpeg, exportToJpegCentered } from '../utils';
 import { getLastSyncTime, type SyncStatus } from '../utils/sync';
+
+// Menu dropdown component that adjusts position to avoid going off-screen
+const MenuDropdown: React.FC<{
+  project: Project;
+  onRename: (project: Project) => void;
+  onExportData: (project: Project) => void;
+  onExportFullProject: (project: Project) => void;
+  onDelete: (id: string) => void;
+  onClose: () => void;
+}> = ({ project, onRename, onExportData, onExportFullProject, onDelete, onClose }) => {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<'bottom' | 'top'>('bottom');
+
+  useEffect(() => {
+    if (menuRef.current) {
+      // Find the button that triggered this menu (previous sibling)
+      const buttonElement = menuRef.current.parentElement?.querySelector('button[class*="rounded-full"]') as HTMLElement;
+      
+      if (buttonElement) {
+        const buttonRect = buttonElement.getBoundingClientRect();
+        const estimatedMenuHeight = 220; // Approximate menu height
+        const spaceBelow = window.innerHeight - buttonRect.bottom;
+        const spaceAbove = buttonRect.top;
+        
+        // If not enough space below but enough space above, show above
+        if (spaceBelow < estimatedMenuHeight + 20 && spaceAbove > spaceBelow) {
+          setPosition('top');
+        } else {
+          setPosition('bottom');
+        }
+      }
+    }
+  }, []);
+
+  return (
+    <div 
+      ref={menuRef}
+      className={`absolute right-0 w-48 max-h-[60vh] overflow-auto bg-white rounded-xl shadow-xl z-50 border border-gray-100 py-1 animate-in fade-in zoom-in-95 origin-top-right ${
+        position === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'
+      }`}
+    >
+      <button 
+        onClick={() => { onRename(project); onClose(); }}
+        className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+      >
+        <Edit2 size={16} /> Rename
+      </button>
+      <div className="h-px bg-gray-100 my-1" />
+      <button 
+        onClick={() => { onExportData(project); onClose(); }}
+        className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+      >
+        <Download size={16} /> Export Data (CSV)
+      </button>
+      <div className="h-px bg-gray-100 my-1" />
+      <button 
+        onClick={() => { onExportFullProject(project); onClose(); }}
+        className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+      >
+        <Download size={16} /> Export Full Project (JSON)
+      </button>
+      <div className="h-px bg-gray-100 my-1" />
+      <button 
+        onClick={(e) => { e.stopPropagation(); onDelete(project.id); onClose(); }}
+        className="w-full text-left px-4 py-2.5 text-sm hover:bg-red-50 text-red-500 flex items-center gap-2"
+      >
+        <Trash2 size={16} /> Delete Project
+      </button>
+    </div>
+  );
+};
 
 interface ProjectManagerProps {
   projects: Project[];
@@ -43,6 +114,10 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingProjectName, setEditingProjectName] = useState('');
+  const [showImportDialog, setShowImportDialog] = useState(false);
+  const [isImportingFromData, setIsImportingFromData] = useState(false);
+  const importFileInputRef = React.useRef<HTMLInputElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   const handleCreate = () => {
     if (!newProjectName.trim()) return;
@@ -62,7 +137,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     setBgImage(null);
     setNewProjectType('map');
     
-    // 如果是侧边栏模式，创建后关闭侧边栏
+    // If in sidebar mode, close sidebar after creation
     if (isSidebar && onCloseSidebar) {
       onCloseSidebar();
     }
@@ -81,11 +156,11 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
 
   const handleExportCurrentView = () => {
     if (!activeProject) {
-      alert("请先打开一个项目");
+      alert("Please open a project first");
       return;
     }
 
-    // Table视图导出CSV，其他视图导出图片
+    // Table view exports CSV, other views export images
     if (viewMode === 'table') {
       if (onExportCSV) {
         onExportCSV(activeProject);
@@ -119,58 +194,415 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   };
 
   const handleExportData = (project: Project) => {
-    // 只导出标准便签（不包括小便签和纯文本）
+    // Only export standard notes (excluding compact and text-only notes)
     const standardNotes = project.notes.filter(note => 
       note.variant !== 'text' && note.variant !== 'compact'
     );
     
     if (standardNotes.length === 0) {
-      alert("该项目没有标准便签数据");
+      alert("This project has no standard note data");
       setOpenMenuId(null);
       return;
     }
 
-    // 根据项目类型决定坐标格式
+    // Determine coordinate format based on project type
     const isMapProject = project.type === 'map';
-    const coordHeader = isMapProject ? '经纬度坐标' : 'XY坐标';
+    const coordHeader = isMapProject ? 'Latitude, Longitude' : 'X, Y';
     
-    // 创建CSV内容
-    const headers = [coordHeader, '文本内容', 'Tag1', 'Tag2', 'Tag3', '分组'];
+    // Create CSV content
+    const headers = [coordHeader, 'Text Content', 'Tag1', 'Tag2', 'Tag3', 'Group'];
     const rows = standardNotes.map(note => {
-      // 坐标：根据项目类型选择
+      // Coordinates: select based on project type
       const coords = isMapProject 
         ? `${note.coords.lat.toFixed(6)}, ${note.coords.lng.toFixed(6)}`
         : `${note.boardX.toFixed(2)}, ${note.boardY.toFixed(2)}`;
       
-      // 文本内容
+      // Text content
       const text = note.text || '';
       
-      // 标签
+      // Tags
       const tags = note.tags || [];
       const tag1 = tags[0]?.label || '';
       const tag2 = tags[1]?.label || '';
       const tag3 = tags[2]?.label || '';
       
-      // 分组
+      // Group
       const group = note.groupName || '';
       
       return [coords, text, tag1, tag2, tag3, group];
     });
 
-    // 转换为CSV格式
+    // Convert to CSV format
     const csvContent = [
       headers.join(','),
       ...rows.map(row => row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(','))
     ].join('\n');
 
-    // 创建下载链接
+    // Create download link
     const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `${project.name}-数据.csv`;
+    link.download = `${project.name}-data.csv`;
     link.click();
     
     setOpenMenuId(null);
+  };
+
+  // Export full project data for cross-device sharing
+  const handleExportFullProject = (project: Project) => {
+    // Export complete project data as JSON
+    const exportData = {
+      version: '1.0',
+      project: {
+        id: project.id,
+        name: project.name,
+        type: project.type,
+        backgroundImage: project.backgroundImage,
+        createdAt: project.createdAt,
+        notes: project.notes,
+        frames: project.frames || [],
+        connections: project.connections || []
+      }
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${project.name}-project.json`;
+    link.click();
+    
+    setOpenMenuId(null);
+  };
+
+  // Check if two notes are duplicates (same location and content)
+  const isDuplicateNote = (note1: any, note2: any, projectType: 'map' | 'image'): boolean => {
+    // Compare text content
+    if (note1.text !== note2.text) return false;
+    
+    if (projectType === 'map') {
+      // For map projects: compare coordinates (within 0.0001 degree tolerance)
+      const latDiff = Math.abs(note1.coords?.lat - note2.coords?.lat);
+      const lngDiff = Math.abs(note1.coords?.lng - note2.coords?.lng);
+      return latDiff < 0.0001 && lngDiff < 0.0001;
+    } else {
+      // For board projects: compare board positions (within 10px tolerance)
+      const xDiff = Math.abs(note1.boardX - note2.boardX);
+      const yDiff = Math.abs(note1.boardY - note2.boardY);
+      return xDiff < 10 && yDiff < 10;
+    }
+  };
+
+  // Import project from JSON data
+  const handleImportProject = async (file: File) => {
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      
+      if (!data.project || !data.project.name) {
+        alert('Invalid project file format');
+        return;
+      }
+
+      const importedProject = data.project;
+      
+      // Generate new ID to avoid conflicts
+      const newProjectId = generateId();
+      const newProject: Project = {
+        id: newProjectId,
+        name: `${importedProject.name} (Imported)`,
+        type: importedProject.type || 'map',
+        backgroundImage: importedProject.backgroundImage,
+        createdAt: Date.now(),
+        notes: importedProject.notes || [],
+        frames: importedProject.frames || [],
+        connections: importedProject.connections || []
+      };
+
+      // If importing into existing project (merge mode)
+      if (isImportingFromData && activeProject) {
+        // Create ID mapping for notes, frames, and connections
+        const noteIdMap = new Map<string, string>();
+        const frameIdMap = new Map<string, string>();
+        
+        // Generate new IDs for imported notes
+        const importedNotes = (newProject.notes || []).map(note => {
+          const newId = generateId();
+          noteIdMap.set(note.id, newId);
+          return { ...note, id: newId };
+        });
+        
+        // Generate new IDs for imported frames
+        const importedFrames = (newProject.frames || []).map(frame => {
+          const newId = generateId();
+          frameIdMap.set(frame.id, newId);
+          return { ...frame, id: newId };
+        });
+        
+        // Update note groupId references to new frame IDs
+        importedNotes.forEach(note => {
+          if (note.groupId && frameIdMap.has(note.groupId)) {
+            note.groupId = frameIdMap.get(note.groupId)!;
+          }
+        });
+        
+        // For map projects: merge notes with duplicate detection
+        if (activeProject.type === 'map' && newProject.type === 'map') {
+          // Filter out duplicate notes
+          const uniqueImportedNotes = importedNotes.filter(importedNote => {
+            return !activeProject.notes.some(existingNote => 
+              isDuplicateNote(importedNote, existingNote, 'map')
+            );
+          });
+          
+          const mergedNotes = [...activeProject.notes, ...uniqueImportedNotes];
+          const updatedProject = { ...activeProject, notes: mergedNotes };
+          
+          if (onUpdateProject) {
+            onUpdateProject(updatedProject);
+          }
+          
+          const duplicateCount = importedNotes.length - uniqueImportedNotes.length;
+          if (duplicateCount > 0) {
+            alert(`Successfully merged ${uniqueImportedNotes.length} new notes. ${duplicateCount} duplicate(s) were skipped.`);
+          } else {
+            alert(`Successfully merged ${uniqueImportedNotes.length} new note(s).`);
+          }
+        }
+        // For board projects: offset board positions to the right, aligned to top
+        else if (activeProject.type === 'image' && newProject.type === 'image') {
+          // Calculate rightmost position and topmost position of existing notes
+          // Use same logic as BoardView's createNoteAtCenter
+          let maxX = -Infinity;
+          let minY = Infinity;
+          const spacing = 50; // Same spacing as BoardView
+          
+          if (activeProject.notes.length > 0) {
+            // Calculate maxX and minY considering actual note widths
+            activeProject.notes.forEach(n => {
+              // Use actual note width (must match rendered sizes)
+              // compact: 180px, text/standard: 256px
+              const noteWidth = (n.variant === 'compact') ? 180 : 256;
+              const noteRight = n.boardX + noteWidth;
+              const noteTop = n.boardY;
+              
+              if (noteRight > maxX) maxX = noteRight;
+              if (noteTop < minY) minY = noteTop;
+            });
+          }
+          
+          // Calculate topmost position of imported notes (before offset)
+          let importedMinY = Infinity;
+          if (importedNotes.length > 0) {
+            importedMinY = Math.min(...importedNotes.map(n => n.boardY));
+          }
+          
+          // Calculate offset: place imported notes to the right with spacing, aligned to top
+          let offsetX = 100; // Default if no existing notes
+          let offsetY = 0;
+          
+          if (maxX !== -Infinity && minY !== Infinity) {
+            // Position to the right of existing content with spacing
+            offsetX = maxX + spacing;
+            // Align to top of existing content
+            offsetY = (importedMinY !== Infinity) ? minY - importedMinY : 0;
+          } else if (importedMinY !== Infinity) {
+            // If no existing notes, keep imported notes at their original Y position
+            offsetY = 0;
+          }
+          
+          console.log('Board import offset calculation:', {
+            maxX,
+            minY,
+            importedMinY,
+            offsetX,
+            offsetY,
+            spacing,
+            existingNotesCount: activeProject.notes.length,
+            importedNotesCount: importedNotes.length
+          });
+          
+          const offsetNotes = importedNotes.map(note => ({
+            ...note,
+            boardX: note.boardX + offsetX,
+            boardY: note.boardY + offsetY,
+            createdAt: Date.now() + Math.random() // Ensure new timestamps
+          }));
+          
+          // Update connection IDs and note references
+          const importedConnections = (newProject.connections || []).map(conn => {
+            const newId = generateId();
+            return {
+              ...conn,
+              id: newId,
+              fromNoteId: noteIdMap.get(conn.fromNoteId) || conn.fromNoteId,
+              toNoteId: noteIdMap.get(conn.toNoteId) || conn.toNoteId
+            };
+          });
+          
+          // Filter out duplicate notes before merging
+          const uniqueImportedNotes = offsetNotes.filter(importedNote => {
+            return !activeProject.notes.some(existingNote => 
+              isDuplicateNote(importedNote, existingNote, 'image')
+            );
+          });
+          
+          // Filter duplicate frames (by name and position)
+          const uniqueImportedFrames = importedFrames.filter(importedFrame => {
+            return !(activeProject.frames || []).some(existingFrame => 
+              existingFrame.title === importedFrame.title &&
+              Math.abs(existingFrame.x - importedFrame.x) < 10 &&
+              Math.abs(existingFrame.y - importedFrame.y) < 10
+            );
+          });
+          
+          const mergedNotes = [...activeProject.notes, ...uniqueImportedNotes];
+          const mergedFrames = [
+            ...(activeProject.frames || []),
+            ...uniqueImportedFrames
+          ];
+          const mergedConnections = [
+            ...(activeProject.connections || []),
+            ...importedConnections
+          ];
+          
+          const updatedProject = {
+            ...activeProject,
+            notes: mergedNotes,
+            frames: mergedFrames,
+            connections: mergedConnections
+          };
+          
+          if (onUpdateProject) {
+            onUpdateProject(updatedProject);
+          }
+          
+          const duplicateNoteCount = offsetNotes.length - uniqueImportedNotes.length;
+          const duplicateFrameCount = importedFrames.length - uniqueImportedFrames.length;
+          
+          let message = `Successfully merged `;
+          const parts = [];
+          if (uniqueImportedNotes.length > 0) {
+            parts.push(`${uniqueImportedNotes.length} note(s)`);
+          }
+          if (uniqueImportedFrames.length > 0) {
+            parts.push(`${uniqueImportedFrames.length} frame(s)`);
+          }
+          if (importedConnections.length > 0) {
+            parts.push(`${importedConnections.length} connection(s)`);
+          }
+          
+          if (parts.length > 0) {
+            message += parts.join(', ') + '.';
+          } else {
+            message += 'data.';
+          }
+          
+          if (duplicateNoteCount > 0 || duplicateFrameCount > 0) {
+            const duplicateParts = [];
+            if (duplicateNoteCount > 0) {
+              duplicateParts.push(`${duplicateNoteCount} note(s)`);
+            }
+            if (duplicateFrameCount > 0) {
+              duplicateParts.push(`${duplicateFrameCount} frame(s)`);
+            }
+            message += ` ${duplicateParts.join(' and ')} were skipped as duplicates.`;
+          }
+          
+          alert(message);
+        }
+      } else {
+        // Create as new project - regenerate all IDs
+        const regeneratedNotes = (newProject.notes || []).map(note => ({
+          ...note,
+          id: generateId()
+        }));
+        const regeneratedFrames = (newProject.frames || []).map(frame => ({
+          ...frame,
+          id: generateId()
+        }));
+        const regeneratedConnections = (newProject.connections || []).map(conn => ({
+          ...conn,
+          id: generateId()
+        }));
+        
+        onCreateProject({
+          ...newProject,
+          notes: regeneratedNotes,
+          frames: regeneratedFrames,
+          connections: regeneratedConnections
+        });
+        
+        const itemCounts = [];
+        if (regeneratedNotes.length > 0) itemCounts.push(`${regeneratedNotes.length} note(s)`);
+        if (regeneratedFrames.length > 0) itemCounts.push(`${regeneratedFrames.length} frame(s)`);
+        if (regeneratedConnections.length > 0) itemCounts.push(`${regeneratedConnections.length} connection(s)`);
+        
+        const message = itemCounts.length > 0 
+          ? `Successfully created new project "${newProject.name}" with ${itemCounts.join(', ')}.`
+          : `Successfully created new project "${newProject.name}".`;
+        alert(message);
+      }
+      
+      setShowImportDialog(false);
+      setIsImportingFromData(false);
+      if (importFileInputRef.current) {
+        importFileInputRef.current.value = '';
+      }
+    } catch (error) {
+      console.error('Failed to import project:', error);
+      alert('Failed to import project. Please check the file format.');
+    }
+  };
+
+  const handleImportFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      handleImportProject(e.target.files[0]);
+    }
+  };
+
+  // Drag and drop handlers for JSON import
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.types.includes('Files')) {
+      setIsDragging(true);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.types.includes('Files')) {
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.currentTarget === e.target) {
+      setIsDragging(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      const fileArray = Array.from(files);
+      const jsonFile = fileArray.find((file) => 
+        file.type === 'application/json' || file.name.endsWith('.json')
+      ) as File | undefined;
+      
+      if (jsonFile) {
+        // Always merge when dragging (import data mode)
+        setIsImportingFromData(true);
+        handleImportProject(jsonFile);
+      }
+    }
   };
 
   const containerClass = isSidebar 
@@ -182,7 +614,24 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     : "text-6xl md:text-8xl font-black text-white tracking-tighter mb-12 text-center drop-shadow-sm leading-[0.9] flex flex-col";
 
   return (
-    <div className={containerClass}>
+    <div 
+      className={`${containerClass} ${isDragging ? 'ring-4 ring-[#FFDD00] ring-offset-2' : ''}`}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {isDragging && (
+        <div className="fixed inset-0 z-[4000] bg-[#FFDD00]/20 backdrop-blur-sm flex items-center justify-center pointer-events-none">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 border-4 border-[#FFDD00]">
+            <div className="text-center">
+              <div className="text-4xl mb-4">📁</div>
+              <div className="text-xl font-bold text-gray-800">Drop JSON file to merge project</div>
+              <div className="text-sm text-gray-600 mt-2">Duplicate data will be automatically skipped</div>
+            </div>
+          </div>
+        </div>
+      )}
       {isSidebar && (
         <>
           <button 
@@ -200,11 +649,11 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           </button>
           {activeProject && (
             <>
-              {/* 云图标 - 在导出按钮左侧 */}
+              {/* Cloud icon - to the left of export button */}
               {syncStatus === 'idle' && getLastSyncTime() && (
                 <div
                   className="absolute top-4 right-20 flex items-center justify-center w-8 h-8 text-yellow-800 hover:text-white transition-colors z-[2010] cursor-help"
-                  title={`已同步: ${new Date(getLastSyncTime()!).toLocaleString('zh-CN')}`}
+                  title={`Synced: ${new Date(getLastSyncTime()!).toLocaleString('en-US')}`}
                 >
                   <Cloud size={20} />
                 </div>
@@ -212,7 +661,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
               <button 
                 onClick={handleExportCurrentView}
                 className="absolute top-4 right-12 text-yellow-800 hover:text-white transition-colors z-[2010]"
-                title="导出当前视图"
+                title="Export Current View"
               >
                 <Download size={24} />
               </button>
@@ -224,13 +673,6 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           >
           <X size={24} />
         </button>
-          <button 
-            onClick={() => setIsCreating(true)}
-            disabled={isCreating}
-            className="absolute top-14 left-4 right-4 px-4 py-3 bg-white text-yellow-900 rounded-2xl font-bold shadow-lg hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2 transition-all z-[2010] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-          >
-            <Plus size={20} /> New Project
-          </button>
         </>
       )}
 
@@ -349,7 +791,16 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
 
               <div className="relative">
                 <button 
-                  onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === p.id ? null : p.id); }}
+                  ref={(el) => {
+                    if (el && openMenuId === p.id) {
+                      // Store button reference for position calculation
+                      (el as any).__menuButton = true;
+                    }
+                  }}
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    setOpenMenuId(openMenuId === p.id ? null : p.id); 
+                  }}
                   className={`p-2 rounded-full transition-colors ${p.id === currentProjectId ? 'text-yellow-700 hover:bg-[#FFDD00]/10' : 'text-yellow-800/60 hover:text-yellow-900 hover:bg-[#FFDD00]/20'}`}
                 >
                   <MoreHorizontal size={20} />
@@ -359,28 +810,14 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                   <>
                     <div className="fixed inset-0 z-[45] bg-black/20" onClick={() => setOpenMenuId(null)} />
                     {isSidebar ? (
-                      <div className="absolute right-0 top-full mt-2 w-48 max-h-[60vh] overflow-auto bg-white rounded-xl shadow-xl z-50 border border-gray-100 py-1 animate-in fade-in zoom-in-95 origin-top-right">
-                      <button 
-                          onClick={() => handleRename(p)}
-                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
-                      >
-                          <Edit2 size={16} /> 重命名
-                        </button>
-                        <div className="h-px bg-gray-100 my-1" />
-                      <button 
-                          onClick={() => handleExportData(p)}
-                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
-                      >
-                          <Download size={16} /> 导出数据
-                        </button>
-                        <div className="h-px bg-gray-100 my-1" />
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); onDeleteProject(p.id); }}
-                          className="w-full text-left px-4 py-2.5 text-sm hover:bg-red-50 text-red-500 flex items-center gap-2"
-                        >
-                          <Trash2 size={16} /> Delete Project
-                      </button>
-                      </div>
+                      <MenuDropdown 
+                        project={p}
+                        onRename={handleRename}
+                        onExportData={handleExportData}
+                        onExportFullProject={handleExportFullProject}
+                        onDelete={onDeleteProject}
+                        onClose={() => setOpenMenuId(null)}
+                      />
                     ) : (
                       <div className="fixed inset-x-4 bottom-6 z-[50] bg-white rounded-3xl shadow-2xl border border-gray-200 py-2 animate-in slide-in-from-bottom-4" onClick={(e) => e.stopPropagation()}>
                         <div className="px-4 pt-2 pb-1">
@@ -391,14 +828,21 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                           onClick={() => handleRename(p)}
                         className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
                       >
-                          <Edit2 size={16} /> 重命名
+                          <Edit2 size={16} /> Rename
                       </button>
                       <div className="h-px bg-gray-100 my-1" />
                       <button 
                           onClick={() => handleExportData(p)}
                         className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
                       >
-                          <Download size={16} /> 导出数据
+                          <Download size={16} /> Export Data (CSV)
+                      </button>
+                      <div className="h-px bg-gray-100 my-1" />
+                      <button 
+                          onClick={() => handleExportFullProject(p)}
+                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                      >
+                          <Download size={16} /> Export Full Project (JSON)
                       </button>
                       <div className="h-px bg-gray-100 my-1" />
                       <button 
@@ -484,6 +928,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
               )}
             </div>
 
+
             <div className="flex gap-3 mt-8">
               <button 
                 onClick={() => setIsCreating(false)} 
@@ -497,6 +942,46 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                 className="flex-1 py-3 bg-[#FFDD00] text-yellow-950 font-bold rounded-xl shadow-lg hover:bg-[#E6C700] disabled:opacity-50 disabled:shadow-none"
               >
                 Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Import Dialog */}
+      {showImportDialog && (
+        <div className="fixed inset-0 z-[3000] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 animate-in zoom-in-95">
+            <h2 className="text-2xl font-black text-gray-800 mb-6">
+              {isImportingFromData ? 'Import from Data' : 'Import Project'}
+            </h2>
+            <p className="text-sm text-gray-600 mb-6">
+              {isImportingFromData 
+                ? 'Import project data into the current project. Map notes will be added directly, board notes will be placed to the right.'
+                : 'Select a project JSON file to import as a new project.'}
+            </p>
+            <input
+              ref={importFileInputRef}
+              type="file"
+              accept=".json,application/json"
+              onChange={handleImportFileSelect}
+              className="hidden"
+            />
+            <div className="flex gap-3">
+              <button 
+                onClick={() => {
+                  setShowImportDialog(false);
+                  setIsImportingFromData(false);
+                }} 
+                className="flex-1 py-3 text-gray-500 font-bold hover:bg-gray-100 rounded-xl"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={() => importFileInputRef.current?.click()}
+                className="flex-1 py-3 bg-[#FFDD00] text-yellow-950 font-bold rounded-xl shadow-lg hover:bg-[#E6C700]"
+              >
+                Select File
               </button>
             </div>
           </div>

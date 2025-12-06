@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Marker, ImageOverlay, useMap, useMapEvents } f
 import L from 'leaflet';
 import { Note, Coordinates, Project } from '../types';
 import { MAP_TILE_URL, MAP_TILE_URL_FALLBACK, MAP_SATELLITE_URL, MAP_ATTRIBUTION } from '../constants';
-import { Search, Locate, Loader2, X, Check, Satellite, ArrowRight, Plus } from 'lucide-react';
+import { Search, Locate, Loader2, X, Check, Satellite, ArrowRight, Plus, Image as ImageIcon, FileJson } from 'lucide-react';
 import exifr from 'exifr';
 import { NoteEditor } from './NoteEditor';
 import { generateId } from '../utils';
@@ -23,6 +23,8 @@ interface MapViewProps {
   onUpdateNote: (note: Note) => void;
   onDeleteNote?: (noteId: string) => void;
   onToggleEditor: (isOpen: boolean) => void;
+  onImportDialogChange?: (isOpen: boolean) => void;
+  onUpdateProject?: (project: Project) => void;
 }
 
 const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinates) => void }) => {
@@ -31,13 +33,13 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
   const startPosRef = useRef<{ x: number, y: number } | null>(null);
   const touchCountRef = useRef<number>(0);
   
-  // 检查目标元素是否是 UI 元素或标记
+  // Check if target element is a UI element or marker
   const isUIElement = (target: EventTarget | null): boolean => {
     if (!target || !(target instanceof Element)) return false;
     
     const element = target as HTMLElement;
     
-    // 检查是否是 Leaflet 标记元素
+    // Check if it's a Leaflet marker element
     if (element.classList.contains('leaflet-marker-icon') || 
         element.closest('.leaflet-marker-icon') ||
         element.classList.contains('custom-icon') ||
@@ -45,29 +47,29 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
       return true;
     }
     
-    // 检查是否是交互元素（button, input, select, textarea 等）
+    // Check if it's an interactive element (button, input, select, textarea, etc.)
     const interactiveTags = ['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'A'];
     if (interactiveTags.includes(element.tagName)) {
       return true;
     }
     
-    // 检查是否在 UI 容器内（通过检查 z-index 或特定的类名）
+    // Check if it's inside a UI container (by checking z-index or specific class names)
     let current: HTMLElement | null = element;
     while (current) {
-      // 检查是否有 pointer-events-auto 类（UI 元素通常有这个类）
+      // Check if it has pointer-events-auto class (UI elements usually have this)
       if (current.classList.contains('pointer-events-auto')) {
         return true;
       }
       
-      // 检查是否在高 z-index 的容器内（UI 元素通常在 z-[400] 或 z-[500] 的容器内）
+      // Check if it's inside a high z-index container (UI elements are usually in z-[400] or z-[500] containers)
       const zIndex = window.getComputedStyle(current).zIndex;
       if (zIndex && (zIndex === '400' || zIndex === '500' || parseInt(zIndex) >= 400)) {
         return true;
       }
       
-      // 检查是否在特定的容器内
+      // Check if it's inside a specific container
       if (current.id === 'map-view-container' && current !== element) {
-        // 如果已经到达 map-view-container，说明不在 UI 层
+        // If we've reached map-view-container, we're not in the UI layer
         break;
       }
       
@@ -83,18 +85,18 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
     const handleStart = (e: TouchEvent | MouseEvent) => {
       if (e instanceof MouseEvent && e.button !== 0) return;
       
-      // 检查是否点击在 UI 元素上
+      // Check if clicked on UI element
       if (isUIElement(e.target)) {
         return;
       }
       
-      // 清除任何已存在的计时器
+      // Clear any existing timer
       if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
       
-      // 如果是多指触摸（双指缩放），不启动长按计时器
+      // If multi-touch (pinch zoom), don't start long press timer
       if ('touches' in e) {
         touchCountRef.current = e.touches.length;
         if (e.touches.length > 1) {
@@ -110,14 +112,14 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
       startPosRef.current = { x: clientX, y: clientY };
 
       timerRef.current = setTimeout(() => {
-        // 再次检查触摸点数量，防止在等待期间变成多指
+        // Check touch count again to prevent multi-touch during wait
         if (touchCountRef.current > 1) {
           timerRef.current = null;
           startPosRef.current = null;
           return;
         }
         
-        // 再次检查是否在 UI 元素上（防止在等待期间鼠标移动到 UI 元素上）
+        // Check again if on UI element (prevent mouse moving to UI element during wait)
         if (document.elementFromPoint(clientX, clientY) && isUIElement(document.elementFromPoint(clientX, clientY))) {
           timerRef.current = null;
           startPosRef.current = null;
@@ -138,12 +140,12 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
     const handleMove = (e: TouchEvent | MouseEvent) => {
        if (!startPosRef.current || !timerRef.current) return;
        
-       // 更新触摸点数量
+       // Update touch count
        if ('touches' in e) {
          touchCountRef.current = e.touches.length;
        }
        
-       // 如果变成多指触摸（双指缩放），取消长按计时器
+       // If becomes multi-touch (pinch zoom), cancel long press timer
        if ('touches' in e && e.touches.length > 1) {
          clearTimeout(timerRef.current);
          timerRef.current = null;
@@ -154,7 +156,7 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
        const clientX = 'touches' in e ? e.touches[0].clientX : (e as MouseEvent).clientX;
        const clientY = 'touches' in e ? e.touches[0].clientY : (e as MouseEvent).clientY;
        
-       // 检查是否移动到 UI 元素上
+       // Check if moved to UI element
        if (isUIElement(e.target) || (document.elementFromPoint(clientX, clientY) && isUIElement(document.elementFromPoint(clientX, clientY)))) {
          clearTimeout(timerRef.current);
          timerRef.current = null;
@@ -173,16 +175,16 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
     };
 
     const handleEnd = (e?: TouchEvent | MouseEvent) => {
-       // 更新触摸点数量
+       // Update touch count
        if (e && 'touches' in e) {
          touchCountRef.current = e.touches.length;
        } else {
          touchCountRef.current = 0;
        }
        
-       // 如果点击在标记上，不要清除计时器（让标记的点击事件处理）
+       // If clicked on marker, don't clear timer (let marker click event handle it)
        if (e && isUIElement(e.target)) {
-         // 标记点击，不处理长按逻辑
+         // Marker click, don't handle long press logic
          if (timerRef.current) {
            clearTimeout(timerRef.current);
            timerRef.current = null;
@@ -218,18 +220,36 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
   return null;
 };
 
-const MapControls = ({ onImportClick, mapStyle, onMapStyleChange, onNextPin }: { 
-    onImportClick: () => void;
+const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange, onNextPin }: { 
+    onImportPhotos: () => void;
+    onImportData: () => void;
     mapStyle: 'standard' | 'satellite';
     onMapStyleChange: (style: 'standard' | 'satellite') => void;
     onNextPin: () => void;
 }) => {
     const map = useMap();
+    const [showImportMenu, setShowImportMenu] = useState(false);
+    const menuRef = useRef<HTMLDivElement>(null);
+    
     const locate = () => {
         map.locate().on("locationfound", function (e) {
             map.flyTo(e.latlng, 16);
         });
     };
+    
+    // Close menu when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+                setShowImportMenu(false);
+            }
+        };
+        if (showImportMenu) {
+            document.addEventListener('mousedown', handleClickOutside);
+            return () => document.removeEventListener('mousedown', handleClickOutside);
+        }
+    }, [showImportMenu]);
+    
     return (
         <div 
             className="flex flex-col gap-2 pointer-events-auto"
@@ -264,13 +284,43 @@ const MapControls = ({ onImportClick, mapStyle, onMapStyleChange, onNextPin }: {
             >
                 <ArrowRight size={20} />
             </button>
-            <button 
-                onClick={(e) => { e.stopPropagation(); onImportClick(); }}
-                className="bg-white p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors"
-                title="Import Photos"
-            >
-                <Plus size={20} />
-            </button>
+            <div className="relative" ref={menuRef}>
+                <button 
+                    onClick={(e) => { 
+                        e.stopPropagation(); 
+                        setShowImportMenu(!showImportMenu);
+                    }}
+                    className="bg-white p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors"
+                    title="Import"
+                >
+                    <Plus size={20} />
+                </button>
+                {showImportMenu && (
+                    <div className="absolute left-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-[2000]">
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onImportPhotos();
+                                setShowImportMenu(false);
+                            }}
+                            className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                        >
+                            <ImageIcon size={16} /> Import from Photos
+                        </button>
+                        <div className="h-px bg-gray-100 my-1" />
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onImportData();
+                                setShowImportMenu(false);
+                            }}
+                            className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                        >
+                            <FileJson size={16} /> Import from Data
+                        </button>
+                    </div>
+                )}
+            </div>
         </div>
     );
 }
@@ -286,7 +336,7 @@ const MapZoomController = ({min, max, step = 1}: {min: number, max: number, step
     );
 };
 
-// 确保地图在初始化后正确居中（仅执行一次）
+// Ensure map is properly centered after initialization (only once)
 const MapCenterHandler = ({ center, zoom }: { center: [number, number], zoom: number }) => {
     const map = useMap();
     const hasCenteredRef = useRef(false);
@@ -316,7 +366,7 @@ const MapCenterHandler = ({ center, zoom }: { center: [number, number], zoom: nu
     return null;
 };
 
-export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor }) => {
+export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef }) => {
   const notes = project.notes;
   const [editingNote, setEditingNote] = useState<Partial<Note> | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
@@ -329,12 +379,12 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const [imageDimensions, setImageDimensions] = useState<[number, number] | null>(null);
   const [minImageZoom, setMinImageZoom] = useState(-20);
   
-  // 标记聚合相关状态
+  // Marker clustering related state
   const [clusteredMarkers, setClusteredMarkers] = useState<Array<{ notes: Note[], position: [number, number] }>>([]);
   const [currentNoteIndex, setCurrentNoteIndex] = useState(0);
   const [currentClusterNotes, setCurrentClusterNotes] = useState<Note[]>([]);
   
-  // 图片导入相关状态
+  // Image import related state
   const [importPreview, setImportPreview] = useState<Array<{
     file: File;
     imageUrl: string;
@@ -344,11 +394,15 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   }>>([]);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dataImportInputRef = useRef<HTMLInputElement>(null);
   
-  // 地图风格状态
+  // Drag and drop state
+  const [isDragging, setIsDragging] = useState(false);
+  
+  // Map style state
   const [mapStyle, setMapStyle] = useState<'standard' | 'satellite'>('standard');
   
-  // 当前查看的标记索引
+  // Current marker index being viewed
   const [currentPinIndex, setCurrentPinIndex] = useState(0);
 
   const defaultCenter: [number, number] = [28.1847, 112.9467];
@@ -392,28 +446,49 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       : [[0, 0], [1000, 1000]];
 
   const handleLongPress = (coords: Coordinates) => {
-    let nextBoardX = 20 + (Math.random() * 30);
-    let nextBoardY = 20 + (Math.random() * 30);
-
-    if (notes.length > 0) {
-        const lastNote = [...notes].sort((a, b) => b.createdAt - a.createdAt)[0];
-        if (lastNote) {
-            nextBoardX = lastNote.boardX + 30;
-            nextBoardY = lastNote.boardY + 30;
-            if (nextBoardX > 400) nextBoardX = 50;
-            if (nextBoardY > 400) nextBoardY = 50;
-        }
+    // Calculate boardX and boardY for board view placement
+    // Use same logic as BoardView's createNoteAtCenter to avoid overlap
+    const noteWidth = 256; // standard note width
+    const noteHeight = 256;
+    const spacing = 50;
+    
+    let boardX = 100; // Default position
+    let boardY = 100;
+    
+    // Calculate position to the right of existing notes, aligned to top
+    const boardNotes = notes.filter(n => n.boardX !== undefined && n.boardY !== undefined);
+    if (boardNotes.length > 0) {
+      let minY = Infinity;
+      let maxX = -Infinity;
+      
+      boardNotes.forEach(note => {
+        const existingNoteWidth = (note.variant === 'compact') ? 180 : 256;
+        const noteRight = note.boardX + existingNoteWidth;
+        const noteTop = note.boardY;
+        
+        if (noteTop < minY) minY = noteTop;
+        if (noteRight > maxX) maxX = noteRight;
+      });
+      
+      if (maxX !== -Infinity && minY !== Infinity) {
+        boardX = maxX + spacing;
+        boardY = minY;
+      }
     }
-
+    
     const newNote: Partial<Note> = {
       id: generateId(),
       createdAt: Date.now(),
       coords: coords,
-      fontSize: 3, 
-      boardX: nextBoardX,
-      boardY: nextBoardY,
+      fontSize: 3,
+      emoji: '', // No default emoji
+      text: '',
+      images: [],
+      tags: [],
       variant: 'standard',
-      color: '#FFFDF5'
+      color: '#FFFDF5',
+      boardX: boardX,
+      boardY: boardY
     };
     setEditingNote(newNote);
     setIsEditorOpen(true);
@@ -421,7 +496,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   };
 
   const handleMarkerClick = (note: Note) => {
-    // 点击标记时，总是编辑传入的note（聚合标记传入的是最下面那个）
+    // When clicking marker, always edit the passed note (for clustered markers, pass the bottommost one)
     console.log('Marker clicked:', note.id);
     setCurrentClusterNotes([]);
     setCurrentNoteIndex(0);
@@ -430,11 +505,11 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     onToggleEditor(true);
   };
 
-  // 移动到下一个pin
+  // Move to next pin
   const moveToNextPin = () => {
     if (!mapInstance || mapNotes.length === 0) return;
     
-    // 如果当前索引超出范围，重置为0
+    // If current index is out of range, reset to 0
     if (currentPinIndex >= mapNotes.length) {
       setCurrentPinIndex(0);
     }
@@ -448,7 +523,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     }
   };
   
-  // 切换到下一个标记（右滑）
+  // Switch to next marker (swipe right)
   const switchToNextNote = () => {
     if (currentClusterNotes.length > 1 && currentNoteIndex < currentClusterNotes.length - 1) {
       const nextIndex = currentNoteIndex + 1;
@@ -457,7 +532,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     }
   };
   
-  // 切换到上一个标记（左滑）
+  // Switch to previous marker (swipe left)
   const switchToPrevNote = () => {
     if (currentClusterNotes.length > 1 && currentNoteIndex > 0) {
       const prevIndex = currentNoteIndex - 1;
@@ -479,11 +554,16 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       onToggleEditor(false);
   };
 
-  // 处理图片导入
-  const handleImageImport = async (files: FileList | null) => {
+  // Handle image import
+  const handleImageImport = async (files: FileList | null, showLimitMessage = false) => {
     if (!files || files.length === 0) return;
     
-    const fileArray = Array.from(files).slice(0, 9); // 最多9张
+    const fileArray = Array.from(files).slice(0, 9); // Maximum 9 images
+    
+    // Show message if more than 9 files
+    if (showLimitMessage && files.length > 9) {
+      alert(`Only the first 9 images will be imported (${files.length} files selected)`);
+    }
     const previews: Array<{
       file: File;
       imageUrl: string;
@@ -494,7 +574,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     
     for (const file of fileArray) {
       try {
-        // 读取EXIF数据
+        // Read EXIF data
         const exifData = await exifr.parse(file, {
           gps: true,
           translateKeys: false,
@@ -508,7 +588,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             imageUrl: URL.createObjectURL(file),
             lat: 0,
             lng: 0,
-            error: '缺少位置信息'
+            error: 'Missing location data'
           });
           continue;
         }
@@ -525,15 +605,16 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           imageUrl: URL.createObjectURL(file),
           lat: 0,
           lng: 0,
-          error: '无法读取图片或位置信息'
+          error: 'Unable to read image or location data'
         });
       }
     }
     
     setImportPreview(previews);
     setShowImportDialog(true);
+    onImportDialogChange?.(true);
     
-    // 如果有有效的位置信息，飞到此位置
+    // If there's valid location data, fly to that position
     const validPreviews = previews.filter(p => !p.error);
     if (validPreviews.length > 0 && mapInstance) {
       const firstValid = validPreviews[0];
@@ -541,13 +622,48 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     }
   };
 
-  // 确认导入
+  // Confirm import
   const handleConfirmImport = async () => {
     const validPreviews = importPreview.filter(p => !p.error);
     
-    for (const preview of validPreviews) {
+    // Calculate board position for imported notes (same logic as handleLongPress)
+    const boardNotes = notes.filter(n => n.boardX !== undefined && n.boardY !== undefined);
+    const noteWidth = 256; // Default width for standard notes
+    const noteHeight = 256; // Default height for standard notes
+    const spacing = 50;
+    
+    let spawnX = 100;
+    let spawnY = 100;
+    
+    if (boardNotes.length > 0) {
+      let minY = Infinity;
+      let maxX = -Infinity;
+      
+      boardNotes.forEach(note => {
+        const existingNoteWidth = (note.variant === 'compact') ? 180 : 256;
+        const noteRight = (note.boardX || 0) + existingNoteWidth;
+        const noteTop = note.boardY || 0;
+        
+        if (noteTop < minY) minY = noteTop;
+        if (noteRight > maxX) maxX = noteRight;
+      });
+      
+      if (maxX !== -Infinity && minY !== Infinity) {
+        spawnX = maxX + spacing;
+        spawnY = minY;
+      } else {
+        spawnX = 100;
+        spawnY = 100;
+      }
+    } else {
+      spawnX = 100;
+      spawnY = 100;
+    }
+    
+    for (let i = 0; i < validPreviews.length; i++) {
+      const preview = validPreviews[i];
       try {
-        // 将图片转换为base64
+        // Convert image to base64
         const base64 = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = () => resolve(reader.result as string);
@@ -555,7 +671,11 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           reader.readAsDataURL(preview.file);
         });
         
-        // 创建新的note
+        // Calculate board position for this note (offset by index)
+        const currentBoardX = spawnX + i * (noteWidth + spacing);
+        const currentBoardY = spawnY;
+        
+        // Create new note
         const newNote: Note = {
           id: generateId(),
           text: '',
@@ -569,34 +689,97 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           emoji: '',
           tags: [],
           fontSize: 3,
-          boardX: 0,
-          boardY: 0,
+          boardX: currentBoardX,
+          boardY: currentBoardY,
           groupName: undefined,
           groupId: undefined
         };
         
         onAddNote(newNote);
       } catch (error) {
-        console.error('导入图片失败:', error);
+        console.error('Failed to import image:', error);
       }
     }
     
-    // 清理预览
+    // Clear preview
     importPreview.forEach(p => URL.revokeObjectURL(p.imageUrl));
     setImportPreview([]);
     setShowImportDialog(false);
+    onImportDialogChange?.(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
   };
 
-  // 取消导入
+  // Cancel import
   const handleCancelImport = () => {
     importPreview.forEach(p => URL.revokeObjectURL(p.imageUrl));
     setImportPreview([]);
     setShowImportDialog(false);
+    onImportDialogChange?.(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
+    }
+  };
+
+  // Handle data import (JSON file with map notes)
+  const handleDataImport = async (file: File) => {
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      
+      if (!data.project || !data.project.notes) {
+        alert('Invalid project file format');
+        return;
+      }
+
+      const importedNotes = (data.project.notes || []).filter((note: Note) => 
+        note.coords && note.coords.lat && note.coords.lng
+      );
+
+      if (importedNotes.length === 0) {
+        alert('No notes with location data found in the imported file');
+        return;
+      }
+
+      // Check for duplicates and merge
+      const existingNotes = project.notes || [];
+      const isDuplicateNote = (note1: Note, note2: Note): boolean => {
+        if (!note1.coords || !note2.coords) return false;
+        const latDiff = Math.abs(note1.coords.lat - note2.coords.lat);
+        const lngDiff = Math.abs(note1.coords.lng - note2.coords.lng);
+        const textMatch = (note1.text || '').trim() === (note2.text || '').trim();
+        return latDiff < 0.0001 && lngDiff < 0.0001 && textMatch;
+      };
+
+      const uniqueImportedNotes = importedNotes.filter((importedNote: Note) => {
+        return !existingNotes.some((existingNote: Note) => 
+          isDuplicateNote(importedNote, existingNote)
+        );
+      });
+
+      // Generate new IDs for imported notes
+      const newNotes = uniqueImportedNotes.map((note: Note) => ({
+        ...note,
+        id: generateId(),
+        createdAt: Date.now() + Math.random()
+      }));
+
+      const mergedNotes = [...existingNotes, ...newNotes];
+      
+      if (onUpdateProject) {
+        onUpdateProject({ ...project, notes: mergedNotes });
+      }
+
+      const duplicateCount = importedNotes.length - uniqueImportedNotes.length;
+      if (duplicateCount > 0) {
+        alert(`Successfully imported ${uniqueImportedNotes.length} new notes. ${duplicateCount} duplicate(s) were skipped.`);
+      } else {
+        alert(`Successfully imported ${uniqueImportedNotes.length} note(s).`);
+      }
+    } catch (error) {
+      console.error('Failed to import data:', error);
+      alert('Failed to import data. Please check the file format.');
     }
   };
 
@@ -661,12 +844,12 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         </div>
       ` : '';
       
-      // 优先级：照片 > 涂鸦 > emoji，都没有则纯黄色
+      // Priority: photo > sketch > emoji, if none then pure yellow
       let content = '';
       let backgroundColor = 'white';
       
       if (note.images && note.images.length > 0) {
-        // 显示照片，更大以撑满pin
+        // Show photo, larger to fill pin
         content = `<img src="${note.images[0]}" style="
           width: 36px;
           height: 36px;
@@ -675,7 +858,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           transform: rotate(45deg);
         " />`;
       } else if (note.sketch) {
-        // 显示涂鸦，更大以撑满pin
+        // Show sketch, larger to fill pin
         content = `<img src="${note.sketch}" style="
           width: 36px;
           height: 36px;
@@ -684,11 +867,11 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           transform: rotate(45deg);
         " />`;
       } else if (note.emoji) {
-        // 显示emoji，背景为黄色
+        // Show emoji, background is yellow
         backgroundColor = '#FFDD00';
         content = `<span style="transform: rotate(45deg); font-size: 20px; line-height: 1;">${note.emoji}</span>`;
       } else {
-        // 都没有，显示纯黄色
+        // None, show pure yellow
         backgroundColor = '#FFDD00';
       }
       
@@ -717,25 +900,25 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       });
   };
   
-  // 对标记进行排序：从下往上、从左往右
+  // Sort markers: bottom to top, left to right
   const sortNotes = useCallback((notes: Note[]): Note[] => {
     return [...notes].sort((a, b) => {
-      // 先按纬度（从下往上，纬度小的在下）
+      // First by latitude (bottom to top, smaller latitude is below)
       if (Math.abs(a.coords.lat - b.coords.lat) > 0.0001) {
         return a.coords.lat - b.coords.lat;
       }
-      // 再按经度（从左往右，经度小的在左）
+      // Then by longitude (left to right, smaller longitude is on left)
       return a.coords.lng - b.coords.lng;
     });
   }, []);
   
-  // 检测标记是否重叠（基于屏幕像素距离）
+  // Detect if markers overlap (based on screen pixel distance)
   const detectClusters = useCallback((notes: Note[], map: L.Map, threshold: number = 50): Array<{ notes: Note[], position: [number, number] }> => {
     if (!map || notes.length === 0) return [];
     
-    // 检查地图是否已经初始化
+    // Check if map is initialized
     try {
-      // 尝试获取地图容器，如果失败说明地图还没准备好
+      // Try to get map container, if fails then map is not ready
       const container = map.getContainer();
       if (!container || !container.offsetParent) {
         return [];
@@ -756,7 +939,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         const cluster: Note[] = [note];
         processed.add(note.id);
         
-        // 查找附近的标记
+        // Find nearby markers
         sortedNotes.forEach((otherNote) => {
           if (processed.has(otherNote.id)) return;
           
@@ -769,12 +952,12 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               processed.add(otherNote.id);
             }
           } catch (e) {
-            // 如果转换失败，跳过这个标记
+            // If conversion fails, skip this marker
             console.warn('Failed to convert note to container point:', e);
           }
         });
         
-        // 使用最下方的标记位置（排序后的第一个）
+        // Use bottommost marker position (first after sorting)
         const clusterNotes = sortNotes(cluster);
         const bottomNote = clusterNotes[0];
         clusters.push({
@@ -782,7 +965,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           position: [bottomNote.coords.lat, bottomNote.coords.lng]
         });
       } catch (e) {
-        // 如果转换失败，跳过这个标记
+        // If conversion fails, skip this marker
         console.warn('Failed to convert note to container point:', e);
       }
     });
@@ -790,7 +973,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     return clusters;
   }, [sortNotes]);
   
-  // 更新聚合标记
+  // Update clustered markers
   useEffect(() => {
     if (!isMapMode || !mapInstance || mapNotes.length === 0) {
       setClusteredMarkers([]);
@@ -800,7 +983,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     const updateClusters = () => {
       if (!mapInstance) return;
       
-      // 确保地图已经准备好
+      // Ensure map is ready
       mapInstance.whenReady(() => {
         try {
           const clusters = detectClusters(mapNotes, mapInstance);
@@ -811,12 +994,12 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       });
     };
     
-    // 延迟执行，确保地图完全初始化
+    // Delay execution to ensure map is fully initialized
     const timeoutId = setTimeout(() => {
       updateClusters();
     }, 100);
     
-    // 监听地图缩放和移动事件
+    // Listen to map zoom and move events
     mapInstance.on('zoomend', updateClusters);
     mapInstance.on('moveend', updateClusters);
     
@@ -829,8 +1012,77 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     };
   }, [mapInstance, mapNotes, isMapMode, detectClusters]);
 
+  // Drag and drop handlers
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.types.includes('Files')) {
+      setIsDragging(true);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.types.includes('Files')) {
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Only set to false if we're leaving the container itself
+    if (e.currentTarget === e.target) {
+      setIsDragging(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      // Filter image and JSON files
+      const imageFiles = Array.from(files).filter((file: File) => file.type.startsWith('image/'));
+      const jsonFiles = Array.from(files).filter((file: File) => 
+        file.type === 'application/json' || file.name.endsWith('.json')
+      );
+
+      if (imageFiles.length > 0) {
+        // Create a FileList-like object
+        const dataTransfer = new DataTransfer();
+        imageFiles.forEach((file: File) => dataTransfer.items.add(file));
+        handleImageImport(dataTransfer.files, true);
+      } else if (jsonFiles.length > 0 && jsonFiles[0]) {
+        // For JSON, import directly
+        handleDataImport(jsonFiles[0] as File);
+      }
+    }
+  };
+
   return (
-    <div id="map-view-container" className="relative w-full h-full z-0 bg-gray-100">
+    <div 
+      id="map-view-container" 
+      className={`relative w-full h-full z-0 bg-gray-100 ${isDragging ? 'ring-4 ring-[#FFDD00] ring-offset-2' : ''}`}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {isDragging && (
+        <div className="absolute inset-0 z-[4000] bg-[#FFDD00]/20 backdrop-blur-sm flex items-center justify-center pointer-events-none">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 border-4 border-[#FFDD00]">
+            <div className="text-center">
+              <div className="text-4xl mb-4">📷</div>
+              <div className="text-xl font-bold text-gray-800">Drop images or JSON files here to import</div>
+              <div className="text-sm text-gray-600 mt-2">Maximum 9 images</div>
+            </div>
+          </div>
+        </div>
+      )}
       <MapContainer 
         key={project.id} 
         center={isMapMode ? defaultCenter : [0, 0]} 
@@ -868,10 +1120,10 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         )}
         
         {isMapMode && clusteredMarkers.length > 0 ? (
-          // 显示聚合标记（只显示有多个标记的聚合，单个标记单独显示）
+          // Show clustered markers (only show clusters with multiple markers, single markers shown separately)
           clusteredMarkers.map((cluster, index) => {
             if (cluster.notes.length === 1) {
-              // 单个标记，直接显示
+              // Single marker, display directly
               const note = cluster.notes[0];
               return (
                 <Marker 
@@ -886,7 +1138,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 />
               );
             } else {
-              // 多个标记，显示聚合
+              // Multiple markers, show cluster
               return (
                 <Marker 
                   key={`cluster-${index}`}
@@ -902,7 +1154,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             }
           })
         ) : (
-          // 显示单个标记（非地图模式或没有聚合时）
+          // Show single markers (non-map mode or when no clustering)
           mapNotes.map(note => (
             <Marker 
               key={note.id} 
@@ -917,7 +1169,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           ))
         )}
 
-        {/* 导入预览标记 */}
+        {/* Import preview markers */}
         {isMapMode && showImportDialog && importPreview.filter(p => !p.error).map((preview, index) => (
           <Marker
             key={`preview-${index}`}
@@ -955,6 +1207,13 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
         {isMapMode && (
           <div className="absolute top-4 left-4 right-4 z-[500] flex gap-2 pointer-events-none items-start">
+              <MapControls 
+                onImportPhotos={() => fileInputRef.current?.click()} 
+                onImportData={() => dataImportInputRef.current?.click()}
+                mapStyle={mapStyle}
+                onMapStyleChange={setMapStyle}
+                onNextPin={moveToNextPin}
+              />
               <div 
                   className="flex-1 max-w-md relative group pointer-events-auto"
                   onPointerDown={(e) => e.stopPropagation()}
@@ -986,12 +1245,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                       </div>
                   )}
               </div>
-              <MapControls 
-                onImportClick={() => fileInputRef.current?.click()} 
-                mapStyle={mapStyle}
-                onMapStyleChange={setMapStyle}
-                onNextPin={moveToNextPin}
-              />
           </div>
         )}
 
@@ -1034,16 +1287,28 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         style={{ display: 'none' }}
         onChange={(e) => handleImageImport(e.target.files)}
       />
+      <input
+        ref={dataImportInputRef}
+        type="file"
+        accept=".json,application/json"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          if (e.target.files && e.target.files[0]) {
+            handleDataImport(e.target.files[0]);
+            e.target.value = '';
+          }
+        }}
+      />
 
-      {/* 导入预览对话框 */}
+      {/* Import preview dialog */}
       {showImportDialog && (
         <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col">
             <div className="p-4">
-              <h3 className="text-lg font-bold text-gray-800">导入照片预览</h3>
+              <h3 className="text-lg font-bold text-gray-800">Import Photo Preview</h3>
               <div className="mt-1 text-sm text-gray-600">
-                可导入: {importPreview.filter(p => !p.error).length} 张 | 
-                无法导入: {importPreview.filter(p => p.error).length} 张
+                Importable: {importPreview.filter(p => !p.error).length} | 
+                Cannot import: {importPreview.filter(p => p.error).length}
               </div>
             </div>
             
@@ -1060,7 +1325,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                       <div className="absolute inset-0 bg-red-500/20 rounded-lg flex items-center justify-center">
                         <div className="text-center text-red-600 text-xs px-2">
                           <X size={16} className="mx-auto mb-1" />
-                          {preview.error}
+                          <span className="font-bold">{preview.error}</span>
                         </div>
                       </div>
                     ) : (
@@ -1083,14 +1348,14 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 onClick={handleCancelImport}
                 className="px-6 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700 font-medium transition-colors"
               >
-                取消
+                Cancel
               </button>
               <button
                 onClick={handleConfirmImport}
                 disabled={importPreview.filter(p => !p.error).length === 0}
                 className="px-6 py-2 bg-[#FFDD00] hover:bg-[#E6C700] disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg text-gray-900 font-medium transition-colors"
               >
-                确定导入 ({importPreview.filter(p => !p.error).length} 张)
+                Confirm Import ({importPreview.filter(p => !p.error).length})
               </button>
             </div>
           </div>

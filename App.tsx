@@ -22,6 +22,7 @@ export default function App() {
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [isBoardEditMode, setIsBoardEditMode] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const mapViewFileInputRef = useRef<HTMLInputElement | null>(null);
   const [sidebarButtonY, setSidebarButtonY] = useState(96); // 初始位置 top-24 = 96px
   const sidebarButtonDragRef = useRef({ isDragging: false, startY: 0, startButtonY: 0 });
   
@@ -34,12 +35,13 @@ export default function App() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [syncError, setSyncError] = useState<string | null>(null);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
 
   // Load Projects from IndexedDB and Cloud
   useEffect(() => {
     const loadProjects = async () => {
       try {
-        // 1. 先从本地 IndexedDB 加载（快速显示）
+        // 1. First load from local IndexedDB (quick display)
         const storedProjects = await get<Project[]>('mapp-projects');
         let localProjects: Project[] = [];
         
@@ -66,22 +68,22 @@ export default function App() {
         
         setIsLoading(false);
         
-        // 2. 然后从云端同步（后台进行）
+        // 2. Then sync from cloud (background process)
         try {
           setSyncStatus('syncing');
           const cloudResult = await loadProjectsFromCloud();
           
           if (cloudResult.success && cloudResult.projects) {
-            // 合并本地和云端数据
+            // Merge local and cloud data
             const merged = mergeProjects(localProjects, cloudResult.projects);
             
-            // 如果合并后的数据与本地不同，更新本地
+            // If merged data differs from local, update local
             if (JSON.stringify(merged) !== JSON.stringify(localProjects)) {
               setProjects(merged);
               await set('mapp-projects', merged);
             }
             
-            // 如果云端有更新，同步到云端
+            // If cloud has updates, sync to cloud
             if (!cloudResult.isNewDevice) {
               await syncProjectsToCloud(merged);
             }
@@ -89,7 +91,7 @@ export default function App() {
             setSyncStatus('success');
             setTimeout(() => setSyncStatus('idle'), 2000);
           } else if (cloudResult.error) {
-            console.warn('云端加载失败，使用本地数据:', cloudResult.error);
+            console.warn('Cloud load failed, using local data:', cloudResult.error);
             setSyncStatus('error');
             setSyncError(cloudResult.error);
             setTimeout(() => {
@@ -97,7 +99,7 @@ export default function App() {
               setSyncError(null);
             }, 3000);
           } else {
-            // 新设备，上传本地数据到云端
+            // New device, upload local data to cloud
             if (localProjects.length > 0) {
               await syncProjectsToCloud(localProjects);
             }
@@ -121,7 +123,7 @@ export default function App() {
     loadProjects();
   }, []);
   
-  // 禁用浏览器的双指缩放
+  // Disable browser two-finger zoom
   useEffect(() => {
     const preventZoom = (e: TouchEvent) => {
       if (e.touches.length > 1) {
@@ -299,10 +301,19 @@ export default function App() {
     }
   };
 
-  const handleUpdateProject = (id: string, updates: Partial<Project>) => {
-    setProjects(prev => prev.map(p => 
-      p.id === id ? { ...p, ...updates } : p
-    ));
+  const handleUpdateProject = (projectOrId: Project | string, updates?: Partial<Project>) => {
+    // Support both signatures: (project: Project) and (id: string, updates: Partial<Project>)
+    if (typeof projectOrId === 'string') {
+      // Old signature: (id: string, updates: Partial<Project>)
+      setProjects(prev => prev.map(p => 
+        p.id === projectOrId ? { ...p, ...updates } : p
+      ));
+    } else {
+      // New signature: (project: Project)
+      setProjects(prev => prev.map(p => 
+        p.id === projectOrId.id ? projectOrId : p
+      ));
+    }
   };
 
   if (isLoading) {
@@ -443,6 +454,14 @@ export default function App() {
             onUpdateNote={updateNote}
             onDeleteNote={deleteNote}
             onToggleEditor={setIsEditorOpen}
+            onImportDialogChange={setIsImportDialogOpen}
+            onUpdateProject={(project) => {
+              if (!currentProjectId) return;
+              setProjects(prev => prev.map(p => 
+                p.id === currentProjectId ? project : p
+              ));
+            }}
+            fileInputRef={mapViewFileInputRef}
           />
         ) : viewMode === 'board' ? (
           <BoardView 
@@ -472,6 +491,21 @@ export default function App() {
                 return p;
               }));
             }}
+            project={activeProject}
+            onUpdateProject={(project) => {
+              if (!currentProjectId) return;
+              setProjects(prev => prev.map(p => 
+                p.id === currentProjectId ? project : p
+              ));
+            }}
+            onSwitchToMapView={() => {
+              setViewMode('map');
+              // Trigger MapView's file input after a short delay
+              setTimeout(() => {
+                mapViewFileInputRef.current?.click();
+              }, 300);
+            }}
+            mapViewFileInputRef={mapViewFileInputRef}
           />
         ) : (
           <TableView 
@@ -493,36 +527,42 @@ export default function App() {
       {!isEditorOpen && !isBoardEditMode && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-white/90 backdrop-blur-md p-1.5 rounded-2xl shadow-xl border border-white/50 flex gap-1 animate-in slide-in-from-bottom-4 fade-in">
           <button
-            onClick={() => setViewMode('map')}
+            onClick={() => !isImportDialogOpen && setViewMode('map')}
+            disabled={isImportDialogOpen}
             className={`
               flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
               ${viewMode === 'map' 
                 ? 'bg-[#FFDD00] text-yellow-950 shadow-md scale-105' 
                 : 'hover:bg-gray-100 text-gray-500'}
+              ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
             `}
           >
             <Map size={20} />
             Mapping
           </button>
           <button
-            onClick={() => setViewMode('board')}
+            onClick={() => !isImportDialogOpen && setViewMode('board')}
+            disabled={isImportDialogOpen}
             className={`
               flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
               ${viewMode === 'board' 
                 ? 'bg-[#FFDD00] text-yellow-950 shadow-md scale-105' 
                 : 'hover:bg-gray-100 text-gray-500'}
+              ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
             `}
           >
             <Grid size={20} />
             Board
           </button>
           <button
-            onClick={() => setViewMode('table')}
+            onClick={() => !isImportDialogOpen && setViewMode('table')}
+            disabled={isImportDialogOpen}
             className={`
               flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
               ${viewMode === 'table' 
                 ? 'bg-[#FFDD00] text-yellow-950 shadow-md scale-105' 
                 : 'hover:bg-gray-100 text-gray-500'}
+              ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
             `}
           >
             <Table2 size={20} />

@@ -11,7 +11,7 @@ interface TableViewProps {
 }
 
 export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onUpdateFrames }) => {
-  const [tableLevel, setTableLevel] = useState<'一级' | '二级'>('一级');
+  const [tableLevel, setTableLevel] = useState<'Primary' | 'Secondary'>('Primary');
   const [draggedNoteId, setDraggedNoteId] = useState<string | null>(null);
   const [draggedOverGroup, setDraggedOverGroup] = useState<string | null>(null);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -22,39 +22,39 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
   const [newTagLabel, setNewTagLabel] = useState('');
   const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0]);
 
-  // 只显示标准便签
+  // Only show standard notes
   const standardNotes = useMemo(() => 
     project.notes.filter(note => note.variant !== 'text' && note.variant !== 'compact'),
     [project.notes]
   );
 
-  // 小便签（text和compact变体）
+  // Compact notes (text and compact variants)
   const compactNotes = useMemo(() => 
     project.notes.filter(note => note.variant === 'text' || note.variant === 'compact'),
     [project.notes]
   );
 
-  // 按分组整理小便签
+  // Group compact notes
   const groupedCompactNotes = useMemo(() => {
     const groups: { [key: string]: { notes: Note[], frameId?: string } } = {};
     
     compactNotes.forEach(note => {
-      const groupName = note.groupName || '未分组';
+      const groupName = note.groupName || 'Ungrouped';
       if (!groups[groupName]) {
         groups[groupName] = { notes: [], frameId: note.groupId };
       }
       groups[groupName].notes.push(note);
     });
     
-    // 按创建时间排序
+    // Sort by creation time
     Object.keys(groups).forEach(key => {
       groups[key].notes.sort((a, b) => a.createdAt - b.createdAt);
     });
     
-    // 未分组放第一位
+    // Put ungrouped first
     const sortedGroupNames = Object.keys(groups).sort((a, b) => {
-      if (a === '未分组') return -1;
-      if (b === '未分组') return 1;
+      if (a === 'Ungrouped') return -1;
+      if (b === 'Ungrouped') return 1;
       return 0;
     });
     
@@ -65,27 +65,27 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
     }));
   }, [compactNotes]);
 
-  // 按分组整理便签
+  // Group notes
   const groupedNotes = useMemo(() => {
     const groups: { [key: string]: { notes: Note[], frameId?: string } } = {};
     
     standardNotes.forEach(note => {
-      const groupName = note.groupName || '未分组';
+      const groupName = note.groupName || 'Ungrouped';
       if (!groups[groupName]) {
         groups[groupName] = { notes: [], frameId: note.groupId };
       }
       groups[groupName].notes.push(note);
     });
     
-    // 按创建时间排序
+    // Sort by creation time
     Object.keys(groups).forEach(key => {
       groups[key].notes.sort((a, b) => a.createdAt - b.createdAt);
     });
     
-    // 未分组放第一位
+    // Put ungrouped first
     const sortedGroupNames = Object.keys(groups).sort((a, b) => {
-      if (a === '未分组') return -1;
-      if (b === '未分组') return 1;
+      if (a === 'Ungrouped') return -1;
+      if (b === 'Ungrouped') return 1;
       return 0;
     });
     
@@ -117,18 +117,18 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
     const targetGroup = groupedNotes.find(g => g.name === groupName);
     if (!targetGroup) return;
     
-    // 在同组内重新排序
-    if (draggedNote.groupName === groupName || (!draggedNote.groupName && groupName === '未分组')) {
+    // Reorder within the same group
+    if (draggedNote.groupName === groupName || (!draggedNote.groupName && groupName === 'Ungrouped')) {
       const groupNotes = targetGroup.notes;
       const currentIndex = groupNotes.findIndex(n => n.id === draggedNoteId);
       
       if (currentIndex !== -1 && currentIndex !== targetIndex) {
-        // 重新计算createdAt以调整顺序
+        // Recalculate createdAt to adjust order
         const sortedNotes = [...groupNotes];
         const [removed] = sortedNotes.splice(currentIndex, 1);
         sortedNotes.splice(targetIndex, 0, removed);
         
-        // 更新所有受影响便签的createdAt
+        // Update createdAt for all affected notes
         sortedNotes.forEach((note, index) => {
           onUpdateNote({ ...note, createdAt: Date.now() + index });
         });
@@ -163,7 +163,7 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
     
     onUpdateFrames(updatedFrames);
     
-    // 更新所有该Frame中的notes的groupName
+    // Update groupName for all notes in this Frame
     const notesToUpdate = standardNotes.filter(note => note.groupId === editingFrameId);
     notesToUpdate.forEach(note => {
       onUpdateNote({ ...note, groupName: editingFrameName });
@@ -174,7 +174,7 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
 
   const handleAddTag = (note: Note) => {
     if (!newTagLabel.trim()) {
-      // 如果没有输入文字，取消添加
+      // If no text entered, cancel adding
       setNewTagLabel('');
       setNewTagColor(TAG_COLORS[0]);
       setAddingTagNoteId(null);
@@ -202,36 +202,36 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-6 flex justify-between items-center">
-          <h2 className="text-3xl font-black text-gray-800">数据表格</h2>
+          <h2 className="text-3xl font-black text-gray-800">Data Table</h2>
           
-          {/* 表格级别切换 */}
+          {/* Table level toggle */}
           <div className="flex gap-1 bg-gray-200 rounded-lg p-0.5">
             <button
-              onClick={() => setTableLevel('一级')}
+              onClick={() => setTableLevel('Primary')}
               className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
-                tableLevel === '一级'
+                tableLevel === 'Primary'
                   ? 'bg-white text-gray-900 shadow-sm'
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              一级
+              Primary
             </button>
             <button
-              onClick={() => setTableLevel('二级')}
+              onClick={() => setTableLevel('Secondary')}
               className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
-                tableLevel === '二级'
+                tableLevel === 'Secondary'
                   ? 'bg-white text-gray-900 shadow-sm'
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              二级
+              Secondary
             </button>
           </div>
         </div>
 
         {/* Groups */}
-        {tableLevel === '一级' ? (
-          // 一级表格：标准便签
+        {tableLevel === 'Primary' ? (
+          // Primary table: standard notes
           groupedNotes.map((group) => (
           <div key={group.name} className="mb-8">
             <h3 className="text-base font-bold text-gray-700 mb-3 flex items-center gap-2">
@@ -259,7 +259,7 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
                 <>
                   <span className="bg-gray-200 px-3 py-1 rounded-lg flex items-center gap-2 text-sm">
                     {group.name}
-                    {group.frameId && group.name !== '未分组' && (
+                    {group.frameId && group.name !== 'Ungrouped' && (
                       <button
                         onClick={() => handleFrameEdit(group.frameId!, group.name)}
                         className="p-0.5 text-gray-400 hover:text-[#FFDD00] transition-colors flex-shrink-0"
@@ -280,8 +280,8 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
                 <div onDragOver={(e) => handleDragOver(e, group.name)} style={{ width: '100%' }}>
                   {/* Table Header */}
                   <div className="flex gap-2 sm:gap-4 px-2 sm:px-4 py-2 bg-gray-100 font-bold text-sm text-gray-600 border-b border-gray-200 box-border" style={{ width: '100%' }}>
-                    <div className="flex-1 box-border">文本内容</div>
-                    <div className="tag-header-column flex-shrink-0">标签</div>
+                    <div className="flex-1 box-border">Text Content</div>
+                    <div className="tag-header-column flex-shrink-0">Tags</div>
                   </div>
                   
                   {/* Table Rows */}
@@ -320,7 +320,7 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
                         onClick={() => handleTextEdit(note)}
                         className="flex-1 text-gray-800 cursor-pointer hover:bg-yellow-50 p-1 rounded-lg transition-colors whitespace-nowrap overflow-hidden text-ellipsis"
                       >
-                        {note.text || <span className="text-gray-400 italic">点击编辑...</span>}
+                        {note.text || <span className="text-gray-400 italic">Click to edit...</span>}
                       </div>
                     )}
                   </div>
@@ -386,7 +386,7 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
               
               {group.notes.length === 0 && (
                 <div className="p-8 text-center text-gray-400 italic">
-                  该分组暂无数据
+                  No data in this group
                 </div>
               )}
                 </div>
@@ -395,7 +395,7 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
           </div>
           ))
         ) : (
-          // 二级表格：小便签（按分组显示）
+          // Secondary table: compact notes (grouped)
           groupedCompactNotes.map((group) => (
             <div key={group.name} className="mb-8">
               <h3 className="text-base font-bold text-gray-700 mb-3 flex items-center gap-2">
@@ -409,7 +409,7 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
                 <div className="w-full">
                   {/* Table Header */}
                   <div className="flex px-4 py-2 bg-gray-100 font-bold text-sm text-gray-600 border-b border-gray-200">
-                    <div className="flex-1">文本内容</div>
+                    <div className="flex-1">Text Content</div>
                   </div>
                   
                   {/* Table Rows */}
@@ -420,13 +420,13 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
                         className="flex px-4 py-3 border-b border-gray-100 hover:bg-gray-50 transition-colors"
                       >
                         <div className="flex-1 text-gray-800 whitespace-pre-wrap break-words">
-                          {note.text || <span className="text-gray-400 italic">空白便签</span>}
+                          {note.text || <span className="text-gray-400 italic">Empty note</span>}
                         </div>
                       </div>
                     ))
                   ) : (
                     <div className="p-8 text-center text-gray-400 italic">
-                      该分组暂无数据
+                      No data in this group
                     </div>
                   )}
                 </div>
@@ -435,15 +435,15 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
           ))
         )}
         
-        {tableLevel === '一级' && groupedNotes.length === 0 && (
+        {tableLevel === 'Primary' && groupedNotes.length === 0 && (
           <div className="text-center text-gray-400 italic py-12">
-            暂无标准便签数据
+            No standard note data
           </div>
         )}
         
-        {tableLevel === '二级' && groupedCompactNotes.length === 0 && (
+        {tableLevel === 'Secondary' && groupedCompactNotes.length === 0 && (
           <div className="text-center text-gray-400 italic py-12">
-            暂无小便签数据
+            No compact note data
           </div>
         )}
       </div>

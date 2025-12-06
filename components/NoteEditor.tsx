@@ -43,7 +43,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
 }) => {
   const [emoji, setEmoji] = useState(initialNote?.emoji || '');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [selectedEmojiCategory, setSelectedEmojiCategory] = useState<keyof typeof EMOJI_CATEGORIES>('最近');
+  const [selectedEmojiCategory, setSelectedEmojiCategory] = useState<keyof typeof EMOJI_CATEGORIES>('Recent');
   const [text, setText] = useState(initialNote?.text || '');
   const [fontSize, setFontSize] = useState<number>(initialNote?.fontSize || 3); 
   const [isBold, setIsBold] = useState(initialNote?.isBold || false);
@@ -69,7 +69,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const emojiButtonRef = useRef<HTMLButtonElement | null>(null);
   const [emojiPickerPosition, setEmojiPickerPosition] = useState<{ left: number; top: number } | null>(null);
   
-  const minSwipeDistance = 50; // 最小滑动距离
+  const minSwipeDistance = 50; // Minimum swipe distance
 
   const isTextMode = initialNote?.variant === 'text';
   const isCompactMode = initialNote?.variant === 'compact';
@@ -90,13 +90,13 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     const absDeltaX = Math.abs(deltaX);
     const absDeltaY = Math.abs(deltaY);
     
-    // 只处理水平滑动，且水平距离大于垂直距离
+    // Only handle horizontal swipes where horizontal distance is greater than vertical
     if (absDeltaX > minSwipeDistance && absDeltaX > absDeltaY) {
       if (deltaX > 0 && onNext) {
-        // 右滑 - 下一个
+        // Swipe right - next
         onNext();
       } else if (deltaX < 0 && onPrev) {
-        // 左滑 - 上一个
+        // Swipe left - previous
         onPrev();
       }
     }
@@ -165,7 +165,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       setNewTagLabel('');
       setIsAddingTag(false);
     } else {
-      // 如果没有输入文字，取消添加
+      // If no text entered, cancel adding
       setNewTagLabel('');
       setIsAddingTag(false);
     }
@@ -258,7 +258,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     >
       <div className="absolute inset-0" onClick={handleSave} style={{ zIndex: 1 }}></div>
       
-      {/* Blur overlay - 全屏遮罩，在卡片背后 z-5 */}
+      {/* Blur overlay - full screen mask, behind card z-5 */}
       <div 
         className="fixed inset-0 pointer-events-none"
         style={{ 
@@ -296,7 +296,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
           </div>
         )}
         
-        {/* Font Control buttons - 最顶层 z-20 */}
+        {/* Font Control buttons - topmost z-20 */}
         <div 
           className="absolute right-4 flex justify-center items-center gap-2 pointer-events-auto"
           style={{ 
@@ -313,7 +313,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         </div>
         
         <div className={`flex flex-col flex-1 h-full ${isSketching ? 'invisible' : ''}`} style={isTextMode ? { backgroundColor: 'transparent', zIndex: 10 } : { zIndex: 10 }}>
-            {/* Header - 中间层 z-10（继承父容器） */}
+            {/* Header - middle layer z-10 (inherits from parent) */}
             <div className={`flex justify-between items-start ${isTextMode ? 'hidden' : 'p-4 pb-2'} relative flex-shrink-0 ${isTextMode ? 'opacity-0 hover:opacity-100 transition-opacity' : ''}`} style={isTextMode ? { backgroundColor: 'transparent' } : {}}>
                 <div></div>
                 
@@ -380,7 +380,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                               const rect = emojiButtonRef.current.getBoundingClientRect();
                               const spaceBelow = window.innerHeight - rect.bottom;
                               const spaceAbove = rect.top;
-                              // 如果下方空间不足，显示在上方
+                              // If space below is insufficient, show above
                               if (spaceBelow < 400 && spaceAbove > spaceBelow) {
                                 setEmojiPickerPosition({
                                   left: rect.left,
@@ -456,17 +456,17 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                               {/* Emoji Grid */}
                               <div className="p-3 overflow-y-auto" style={{ maxHeight: '320px' }}>
                                 <div className="grid grid-cols-8 gap-1">
-                                  {(EMOJI_CATEGORIES[selectedEmojiCategory] || EMOJI_CATEGORIES['最近']).map(e => (
+                                  {(EMOJI_CATEGORIES[selectedEmojiCategory] || EMOJI_CATEGORIES['Recent']).map(e => (
                                     <button 
                                       key={e} 
                                       onClick={() => { 
                                         setEmoji(e); 
                                         setShowEmojiPicker(false);
                                         // Add to recent
-                                        if (selectedEmojiCategory !== '最近') {
-                                          const recent = EMOJI_CATEGORIES['最近'];
+                                        if (selectedEmojiCategory !== 'Recent') {
+                                          const recent = EMOJI_CATEGORIES['Recent'];
                                           if (!recent.includes(e)) {
-                                            EMOJI_CATEGORIES['最近'] = [e, ...recent.slice(0, 19)];
+                                            EMOJI_CATEGORIES['Recent'] = [e, ...recent.slice(0, 19)];
                                           }
                                         }
                                       }}

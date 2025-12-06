@@ -3,7 +3,8 @@ import { Note, Frame, Connection } from '../types';
 import { motion } from 'framer-motion';
 import { NoteEditor } from './NoteEditor';
 import { ZoomSlider } from './ZoomSlider';
-import { Type, StickyNote, X, Pencil, Check, Minus } from 'lucide-react';
+import { Type, StickyNote, X, Pencil, Check, Minus, Move, ArrowUp, Hash, Plus, Image as ImageIcon, FileJson } from 'lucide-react';
+import exifr from 'exifr';
 import { generateId } from '../utils';
 
 // 常量定义
@@ -30,9 +31,12 @@ interface BoardViewProps {
   onUpdateConnections?: (connections: Connection[]) => void;
   frames?: Frame[];
   onUpdateFrames?: (frames: Frame[]) => void;
+  project?: { notes: Note[] };
+  onUpdateProject?: (project: { notes: Note[] }) => void;
+  onSwitchToMapView?: () => void;
 }
 
-export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onToggleEditor, onAddNote, onDeleteNote, onEditModeChange, connections = [], onUpdateConnections, frames = [], onUpdateFrames }) => {
+export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onToggleEditor, onAddNote, onDeleteNote, onEditModeChange, connections = [], onUpdateConnections, frames = [], onUpdateFrames, project, onUpdateProject, onSwitchToMapView, mapViewFileInputRef }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
   
@@ -47,6 +51,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   const [draggingNoteId, setDraggingNoteId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 }); 
   const lastMousePos = useRef<{ x: number, y: number } | null>(null);
+  const panStartPos = useRef<{ x: number, y: number } | null>(null);
   
   // Long press state for notes
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -64,7 +69,13 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   
   // Connection state
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
+  const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(new Set()); // Multi-select state
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
+  
+  // Multi-select state
+  const [isShiftPressed, setIsShiftPressed] = useState(false);
+  const [isMultiSelectDragging, setIsMultiSelectDragging] = useState(false);
+  const [multiSelectDragOffset, setMultiSelectDragOffset] = useState({ x: 0, y: 0 });
   const [connectingFrom, setConnectingFrom] = useState<{ noteId: string; side: 'top' | 'right' | 'bottom' | 'left' } | null>(null);
   const [connectingTo, setConnectingTo] = useState<{ x: number; y: number } | null>(null);
   const [hoveringConnectionPoint, setHoveringConnectionPoint] = useState<{ noteId: string; side: 'top' | 'right' | 'bottom' | 'left' } | null>(null);
@@ -80,6 +91,23 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   const [draggingFrameId, setDraggingFrameId] = useState<string | null>(null);
   const [draggingFrameOffset, setDraggingFrameOffset] = useState<{ x: number; y: number } | null>(null);
   
+  // Import state
+  const [showImportMenu, setShowImportMenu] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const dataImportInputRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  
+  // Image import preview state
+  const [importPreview, setImportPreview] = useState<Array<{
+    file: File;
+    imageUrl: string;
+    lat: number;
+    lng: number;
+    error?: string;
+  }>>([]);
+  const [showImportDialog, setShowImportDialog] = useState(false);
+  
   // Text measurement refs
   const textMeasureRefs = useRef<Map<string, { width: number; height: number }>>(new Map());
 
@@ -92,6 +120,29 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
     }
   };
 
+  // Keyboard shift key support
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Shift' && isEditMode) {
+        setIsShiftPressed(true);
+      }
+    };
+    
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') {
+        setIsShiftPressed(false);
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [isEditMode]);
+
   useEffect(() => {
     onEditModeChange?.(isEditMode);
     
@@ -102,6 +153,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
       setHoveringConnectionPoint(null);
       setSelectedConnectionId(null);
       setSelectedFrameId(null); // 清除frame选中状态
+      setSelectedNoteIds(new Set()); // Clear multi-select
+      setIsShiftPressed(false);
       // 清空长按相关状态，确保下次单击可以正常打开编辑器
       if (longPressTimerRef.current) {
         clearTimeout(longPressTimerRef.current);
@@ -659,6 +712,299 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
     onToggleEditor(false);
   };
 
+  // Handle image import (from photos with GPS) - show preview in BoardView
+  const handleImageImport = async (files: FileList | null, showLimitMessage = false) => {
+    if (!files || files.length === 0) return;
+    
+    const fileArray = Array.from(files).slice(0, 9); // Maximum 9 images
+    
+    // Show message if more than 9 files
+    if (showLimitMessage && files.length > 9) {
+      alert(`Only the first 9 images will be imported (${files.length} files selected)`);
+    }
+    
+    const previews: Array<{
+      file: File;
+      imageUrl: string;
+      lat: number;
+      lng: number;
+      error?: string;
+    }> = [];
+    
+    for (const file of fileArray) {
+      try {
+        // Read EXIF data
+        const exifData = await exifr.parse(file, {
+          gps: true,
+          translateKeys: false,
+          translateValues: false,
+          reviveValues: true
+        });
+        
+        if (!exifData || !exifData.latitude || !exifData.longitude) {
+          previews.push({
+            file,
+            imageUrl: URL.createObjectURL(file),
+            lat: 0,
+            lng: 0,
+            error: 'Missing location data'
+          });
+          continue;
+        }
+        
+        previews.push({
+          file,
+          imageUrl: URL.createObjectURL(file),
+          lat: exifData.latitude,
+          lng: exifData.longitude
+        });
+      } catch (error) {
+        previews.push({
+          file,
+          imageUrl: URL.createObjectURL(file),
+          lat: 0,
+          lng: 0,
+          error: 'Unable to read image or location data'
+        });
+      }
+    }
+    
+    setImportPreview(previews);
+    setShowImportDialog(true);
+  };
+  
+  // Confirm import
+  const handleConfirmImport = async () => {
+    const validPreviews = importPreview.filter(p => !p.error);
+    
+    if (validPreviews.length === 0) {
+      alert('No valid images to import');
+      return;
+    }
+    
+    // Calculate board position for imported notes (same logic as createNoteAtCenter)
+    const boardNotes = notes.filter(n => n.boardX !== undefined && n.boardY !== undefined);
+    const noteWidth = 256; // Default width for standard notes
+    const noteHeight = 256; // Default height for standard notes
+    const spacing = 50;
+    
+    let spawnX = 100;
+    let spawnY = 100;
+    
+    if (boardNotes.length > 0) {
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let sumCenterY = 0;
+      let count = 0;
+      
+      boardNotes.forEach(note => {
+        const existingNoteWidth = (note.variant === 'compact') ? 180 : 256;
+        const existingNoteHeight = (note.variant === 'compact') ? 180 : 256;
+        const noteRight = (note.boardX || 0) + existingNoteWidth;
+        const noteTop = note.boardY || 0;
+        const noteCenterY = noteTop + existingNoteHeight / 2;
+        
+        if (noteTop < minY) minY = noteTop;
+        if (noteRight > maxX) maxX = noteRight;
+        sumCenterY += noteCenterY;
+        count++;
+      });
+      
+      if (maxX !== -Infinity && minY !== Infinity && count > 0) {
+        spawnX = maxX + spacing;
+        // Use average center Y position, then adjust to top of note
+        const avgCenterY = sumCenterY / count;
+        spawnY = avgCenterY - noteHeight / 2;
+      }
+    }
+    
+    // Create notes for each valid preview
+    for (let i = 0; i < validPreviews.length; i++) {
+      const preview = validPreviews[i];
+      const newNote: Note = {
+        id: generateId(),
+        createdAt: Date.now() + i,
+        coords: {
+          lat: preview.lat,
+          lng: preview.lng
+        },
+        fontSize: 3,
+        emoji: '',
+        text: '',
+        images: [preview.imageUrl],
+        tags: [],
+        variant: 'standard',
+        color: '#FFFDF5',
+        boardX: spawnX + (i * (noteWidth + spacing)),
+        boardY: spawnY
+      };
+      
+      onAddNote?.(newNote);
+    }
+    
+    // Clean up
+    importPreview.forEach(p => URL.revokeObjectURL(p.imageUrl));
+    setImportPreview([]);
+    setShowImportDialog(false);
+    
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+  
+  // Cancel import
+  const handleCancelImport = () => {
+    importPreview.forEach(p => URL.revokeObjectURL(p.imageUrl));
+    setImportPreview([]);
+    setShowImportDialog(false);
+    
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  // Handle data import (JSON)
+  const handleDataImport = async (file: File) => {
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      
+      if (!data.project || !data.project.notes) {
+        alert('Invalid project file format');
+        return;
+      }
+
+      const importedNotes = (data.project.notes || []).filter((note: Note) => 
+        note.boardX !== undefined && note.boardY !== undefined
+      );
+
+      if (importedNotes.length === 0) {
+        alert('No notes with board position data found in the imported file');
+        return;
+      }
+
+      // Check for duplicates and merge
+      const existingNotes = notes || [];
+      const isDuplicateNote = (note1: Note, note2: Note): boolean => {
+        if (note1.boardX === undefined || note2.boardX === undefined) return false;
+        if (note1.boardY === undefined || note2.boardY === undefined) return false;
+        const xDiff = Math.abs(note1.boardX - note2.boardX);
+        const yDiff = Math.abs(note1.boardY - note2.boardY);
+        const textMatch = (note1.text || '').trim() === (note2.text || '').trim();
+        return xDiff < 5 && yDiff < 5 && textMatch;
+      };
+
+      const uniqueImportedNotes = importedNotes.filter((importedNote: Note) => {
+        return !existingNotes.some((existingNote: Note) => 
+          isDuplicateNote(importedNote, existingNote)
+        );
+      });
+
+      // Calculate offset to place imported notes to the right
+      let offsetX = 0;
+      let offsetY = 0;
+      if (existingNotes.length > 0) {
+        let maxX = -Infinity;
+        let minY = Infinity;
+        existingNotes.forEach(note => {
+          const noteWidth = (note.variant === 'compact') ? 180 : 256;
+          const noteRight = (note.boardX || 0) + noteWidth;
+          const noteTop = note.boardY || 0;
+          if (noteRight > maxX) maxX = noteRight;
+          if (noteTop < minY) minY = noteTop;
+        });
+        offsetX = maxX + 50;
+        offsetY = minY;
+      }
+
+      // Generate new IDs and offset positions for imported notes
+      const newNotes = uniqueImportedNotes.map((note: Note) => ({
+        ...note,
+        id: generateId(),
+        createdAt: Date.now() + Math.random(),
+        boardX: (note.boardX || 0) + offsetX,
+        boardY: (note.boardY || 0) + (offsetY - (uniqueImportedNotes[0]?.boardY || 0))
+      }));
+
+      // Add all new notes
+      newNotes.forEach(note => onAddNote?.(note));
+
+      const duplicateCount = importedNotes.length - uniqueImportedNotes.length;
+      if (duplicateCount > 0) {
+        alert(`Successfully imported ${uniqueImportedNotes.length} new notes. ${duplicateCount} duplicate(s) were skipped.`);
+      } else {
+        alert(`Successfully imported ${uniqueImportedNotes.length} note(s).`);
+      }
+    } catch (error) {
+      console.error('Failed to import data:', error);
+      alert('Failed to import data. Please check the file format.');
+    }
+  };
+
+  // Close import menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setShowImportMenu(false);
+      }
+    };
+    if (showImportMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showImportMenu]);
+
+  // Drag and drop handlers
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.types.includes('Files')) {
+      setIsDragging(true);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.types.includes('Files')) {
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Only set to false if we're leaving the container itself
+    if (e.currentTarget === e.target) {
+      setIsDragging(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      // Filter image and JSON files
+      const imageFiles = Array.from(files).filter((file: File) => file.type.startsWith('image/'));
+      const jsonFiles = Array.from(files).filter((file: File) => 
+        file.type === 'application/json' || file.name.endsWith('.json')
+      );
+
+      if (imageFiles.length > 0) {
+        // For images, show import preview directly in BoardView
+        const dataTransfer = new DataTransfer();
+        imageFiles.forEach((file: File) => dataTransfer.items.add(file));
+        handleImageImport(dataTransfer.files, true);
+      } else if (jsonFiles.length > 0 && jsonFiles[0]) {
+        // For JSON, import directly
+        handleDataImport(jsonFiles[0] as File);
+      }
+    }
+  };
+
   const createNoteAtCenter = (variant: 'text' | 'compact') => {
      if (!containerRef.current) return;
      const { width, height } = containerRef.current.getBoundingClientRect();
@@ -667,15 +1013,58 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
      const centerX = (width / 2 - transform.x) / transform.scale;
      const centerY = (height / 2 - transform.y) / transform.scale;
 
-     let spawnX = centerX - (variant === 'compact' ? 90 : 250);
-     let spawnY = centerY - (variant === 'compact' ? 90 : 50);
+     // New note dimensions (must match actual rendered sizes)
+     // compact: 180px, text/standard: 256px
+     const noteWidth = variant === 'compact' ? 180 : 256;
+     const noteHeight = variant === 'compact' ? 180 : 256;
+     const spacing = 50; // Spacing between new note and existing content (reduced from 100)
 
+     let spawnX = centerX - noteWidth / 2;
+     let spawnY = centerY - noteHeight / 2;
+
+     // New logic: detect top and right edges of existing content, then add to the right with spacing, aligned to top
      if (notes.length > 0) {
-        const lastNote = [...notes].sort((a,b) => b.createdAt - a.createdAt)[0];
-        if (lastNote) {
-            spawnX = lastNote.boardX + 30;
-            spawnY = lastNote.boardY + 30;
+        // Calculate bounds of all existing notes
+        let minY = Infinity;
+        let maxX = -Infinity;
+        
+        notes.forEach(note => {
+          // Use actual note width based on variant (must match rendered sizes)
+          // compact: 180px, text/standard: 256px
+          const existingNoteWidth = (note.variant === 'compact') ? 180 : 256;
+          const noteRight = note.boardX + existingNoteWidth;
+          const noteTop = note.boardY;
+          
+          if (noteTop < minY) minY = noteTop;
+          if (noteRight > maxX) maxX = noteRight;
+        });
+        
+        // Ensure we have valid values before using them
+        if (maxX !== -Infinity && minY !== Infinity) {
+          // Position new note to the right of existing content with spacing
+          spawnX = maxX + spacing;
+          // Align to top of existing content
+          spawnY = minY;
         }
+        
+        console.log('createNoteAtCenter calculation:', {
+          variant,
+          noteWidth,
+          noteHeight,
+          maxX,
+          minY,
+          spacing,
+          spawnX,
+          spawnY,
+          existingNotesCount: notes.length,
+          notesPositions: notes.map(n => ({ 
+            id: n.id, 
+            boardX: n.boardX, 
+            boardY: n.boardY, 
+            variant: n.variant,
+            calculatedRight: n.boardX + ((n.variant === 'compact') ? 180 : 500)
+          }))
+        });
      }
 
      const newNote: Note = {
@@ -874,9 +1263,12 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
         // currentNotePressIdRef 会在 handleNotePointerUp 中根据移动距离判断是否清空
       }
       
-      if (e.button === 0 && !draggingNoteId && !isEditMode && !resizingFrame && !draggingFrameId) { 
+      // Allow panning in both edit and non-edit modes, but not when dragging notes or frames
+      if (e.button === 0 && !draggingNoteId && !resizingFrame && !draggingFrameId) { 
           setIsPanning(true);
-          lastMousePos.current = { x: e.clientX, y: e.clientY };
+          const startPos = { x: e.clientX, y: e.clientY };
+          panStartPos.current = startPos; // Save the initial pan position
+          lastMousePos.current = startPos;
           (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       }
   };
@@ -984,7 +1376,32 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
           return;
       }
       
+      // 检查是否有实际移动（点击 vs 拖动）
+      // 使用拖动开始时的位置来计算总移动距离
+      let hasMoved = false;
+      
+      if (isPanning && panStartPos.current) {
+          const dx = e.clientX - panStartPos.current.x;
+          const dy = e.clientY - panStartPos.current.y;
+          const totalMoveDistance = Math.sqrt(dx * dx + dy * dy);
+          hasMoved = totalMoveDistance > 5; // 如果总移动距离超过5px，认为是拖动
+      }
+      
+      // 结束panning状态
+      if (isPanning) {
+          setIsPanning(false);
+          lastMousePos.current = null;
+          panStartPos.current = null; // Clear pan start position
+          (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      }
+      
       // 点击空白处的退出逻辑（只在非拖动/非缩放状态下触发）
+      // 如果发生了拖动，不应该触发点击计数
+      if (hasMoved) {
+          resetBlankClickCount();
+          return;
+      }
+      
       // 如果正在绘制Frame，完成绘制（优先处理，不进行退出编辑模式的计数）
       if (isDrawingFrame && drawingFrameStart && drawingFrameEnd) {
           const minWidth = 100;
@@ -1015,7 +1432,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
           return;
       }
       
-      if (!isPanning && !isZooming) {
+      // 只有在没有拖动（点击）且没有缩放时才执行退出逻辑
+      if (!hasMoved && !isZooming) {
           // 1. 如果有编辑中的Frame标题，先退出标题编辑
           if (editingFrameId) {
               setEditingFrameId(null);
@@ -1024,9 +1442,14 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
           }
           
           // 2. 如果有选中状态，取消选中（Frame、Note或Connection）
-          if (selectedFrameId || selectedNoteId || selectedConnectionId) {
+          // 但如果按住 Shift 键且有多选，不清空多选
+          // 如果正在拖动页面（isPanning），不清空多选
+          if (selectedFrameId || selectedNoteId || selectedConnectionId || (selectedNoteIds.size > 0 && !isShiftPressed && !e.shiftKey && !isPanning)) {
               setSelectedFrameId(null);
               setSelectedNoteId(null);
+              if (!isShiftPressed && !e.shiftKey && !isPanning) {
+                setSelectedNoteIds(new Set());
+              }
               setSelectedConnectionId(null);
               resetBlankClickCount();
               return;
@@ -1074,12 +1497,6 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
         }
         return;
       }
-      
-      if (isPanning) {
-          setIsPanning(false);
-          lastMousePos.current = null;
-          (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-      }
   };
 
   const handleNotePointerDown = (e: React.PointerEvent, noteId: string, note: Note) => {
@@ -1099,11 +1516,20 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
           return;
       }
       
-      // 如果已经在编辑模式，直接开始拖动
+      // 如果已经在编辑模式，检查是否是多选拖动
       e.stopPropagation();
       e.preventDefault();
-      setDraggingNoteId(noteId);
-      setDragOffset({ x: 0, y: 0 });
+      
+      // Check if this note is part of multi-select
+      if (selectedNoteIds.has(noteId) && selectedNoteIds.size > 1) {
+        // Start multi-select drag
+        setIsMultiSelectDragging(true);
+        setMultiSelectDragOffset({ x: 0, y: 0 });
+      } else {
+        // Single note drag
+        setDraggingNoteId(noteId);
+        setDragOffset({ x: 0, y: 0 });
+      }
       lastMousePos.current = { x: e.clientX, y: e.clientY };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
@@ -1130,6 +1556,21 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               }
           }
           return;
+      }
+      
+      // Handle multi-select drag
+      if (isMultiSelectDragging && lastMousePos.current) {
+        e.stopPropagation();
+        e.preventDefault();
+        
+        const dx = e.clientX - lastMousePos.current.x;
+        const dy = e.clientY - lastMousePos.current.y;
+        const worldDx = dx / transform.scale;
+        const worldDy = dy / transform.scale;
+
+        setMultiSelectDragOffset(prev => ({ x: prev.x + worldDx, y: prev.y + worldDy }));
+        lastMousePos.current = { x: e.clientX, y: e.clientY };
+        return;
       }
       
       if (!draggingNoteId || !lastMousePos.current) return;
@@ -1161,6 +1602,31 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
         // 清理状态
         currentNotePressIdRef.current = null;
         notePressStartPosRef.current = null;
+        return;
+      }
+      
+      // Handle multi-select drag end
+      if (isMultiSelectDragging && !isZooming && isEditMode) {
+        e.stopPropagation();
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+        
+        if (multiSelectDragOffset.x !== 0 || multiSelectDragOffset.y !== 0) {
+          // Update all selected notes
+          selectedNoteIds.forEach(id => {
+            const selectedNote = notes.find(n => n.id === id);
+            if (selectedNote) {
+              onUpdateNote({
+                ...selectedNote,
+                boardX: selectedNote.boardX + multiSelectDragOffset.x,
+                boardY: selectedNote.boardY + multiSelectDragOffset.y
+              });
+            }
+          });
+        }
+        
+        setIsMultiSelectDragging(false);
+        setMultiSelectDragOffset({ x: 0, y: 0 });
+        lastMousePos.current = null;
         return;
       }
       
@@ -1245,7 +1711,31 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
         onToggleEditor(true);
       } else {
         // 在编辑模式下，点击选中便利贴
-        setSelectedNoteId(note.id);
+        if (isShiftPressed || e.shiftKey) {
+          // Multi-select mode: toggle selection (add or remove from selection)
+          setSelectedNoteIds(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(note.id)) {
+              newSet.delete(note.id);
+              // If removing the last selected note, clear single selection too
+              if (newSet.size === 0) {
+                setSelectedNoteId(null);
+              } else {
+                // Keep the first remaining note as single selection
+                setSelectedNoteId(Array.from(newSet)[0]);
+              }
+            } else {
+              newSet.add(note.id);
+              // Update single selection to the clicked note
+              setSelectedNoteId(note.id);
+            }
+            return newSet;
+          });
+        } else {
+          // Single select mode: clear multi-select and select only this note
+          setSelectedNoteId(note.id);
+          setSelectedNoteIds(new Set([note.id]));
+        }
         setConnectingFrom(null);
         setConnectingTo(null);
         setHoveringConnectionPoint(null);
@@ -1357,8 +1847,28 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
 
   const handleDeleteClick = (e: React.MouseEvent, id: string) => {
       e.stopPropagation();
-      // Directly delete without confirmation as requested
-      onDeleteNote?.(id);
+      e.preventDefault();
+      // Reset blank click count to prevent exiting edit mode
+      resetBlankClickCount();
+      
+      // If multiple notes are selected, delete all selected notes
+      if (selectedNoteIds.size > 1 && selectedNoteIds.has(id)) {
+        selectedNoteIds.forEach(selectedId => onDeleteNote?.(selectedId));
+        setSelectedNoteIds(new Set());
+        setSelectedNoteId(null);
+      } else {
+        // Single note deletion
+        onDeleteNote?.(id);
+        // Also remove from selection if it was selected
+        if (selectedNoteIds.has(id)) {
+          const newSet = new Set(selectedNoteIds);
+          newSet.delete(id);
+          setSelectedNoteIds(newSet);
+          if (selectedNoteId === id) {
+            setSelectedNoteId(newSet.size > 0 ? Array.from(newSet)[0] : null);
+          }
+        }
+      }
   };
 
   // Visuals
@@ -1378,16 +1888,27 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
     >
       <div 
         ref={containerRef}
-        className={`w-full h-full overflow-hidden bg-gray-50 relative touch-none select-none ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`}
+        className={`w-full h-full overflow-hidden bg-gray-50 relative touch-none select-none ${isPanning ? 'cursor-grabbing' : 'cursor-grab'} ${isDragging ? 'ring-4 ring-[#FFDD00] ring-offset-2' : ''}`}
         onWheel={handleWheel}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         onPointerDown={handleBoardPointerDown}
         onPointerMove={handleBoardPointerMove}
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         onPointerUp={handleBoardPointerUp}
         onContextMenu={(e) => e.preventDefault()}
       >
+        {isDragging && (
+          <div className="absolute inset-0 z-[4000] bg-[#FFDD00]/20 backdrop-blur-sm flex items-center justify-center pointer-events-none">
+            <div className="bg-white rounded-2xl shadow-2xl p-8 border-4 border-[#FFDD00]">
+              <p className="text-2xl font-bold text-gray-800">Drop images or JSON files here to import</p>
+            </div>
+          </div>
+        )}
         {/* Background */}
         <div 
           className="absolute inset-0 pointer-events-none z-0"
@@ -2012,8 +2533,9 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
           </svg>
           {notes.map((note) => {
               const isDragging = draggingNoteId === note.id;
-              const currentX = note.boardX + (isDragging ? dragOffset.x : 0);
-              const currentY = note.boardY + (isDragging ? dragOffset.y : 0);
+              const isInMultiSelect = selectedNoteIds.has(note.id);
+              const currentX = note.boardX + (isDragging ? dragOffset.x : 0) + (isMultiSelectDragging && isInMultiSelect ? multiSelectDragOffset.x : 0);
+              const currentY = note.boardY + (isDragging ? dragOffset.y : 0) + (isMultiSelectDragging && isInMultiSelect ? multiSelectDragOffset.y : 0);
               
               const isText = note.variant === 'text';
               const isCompact = note.variant === 'compact';
@@ -2049,7 +2571,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                       position: 'absolute', 
                       left: currentX, 
                       top: currentY,
-                      zIndex: isDragging ? 100 : 1,
+                      zIndex: (isDragging || (isMultiSelectDragging && isInMultiSelect)) ? 100 : 1,
                       width: isText ? 'fit-content' : noteWidth,
                       height: noteHeight,
                       minWidth: isText ? '100px' : undefined,
@@ -2084,8 +2606,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                       </button>
                         )}
                         
-                        {/* Connection points - show when selected or when connecting */}
-                        {(selectedNoteId === note.id || connectingFrom !== null) && (
+                        {/* Connection points - show when selected (single or multi) or when connecting */}
+                        {((selectedNoteId === note.id || selectedNoteIds.has(note.id)) || connectingFrom !== null) && (
                           <>
                             {(['top', 'right', 'bottom', 'left'] as const).map(side => {
                               const point = getConnectionPoint(note, side, isDragging, dragOffset);
@@ -2219,7 +2741,142 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                 </motion.div>
               );
           })}
+
+          {/* Multi-select bounding box */}
+          {isEditMode && selectedNoteIds.size > 1 && (() => {
+            const selectedNotes = notes.filter(n => selectedNoteIds.has(n.id));
+            if (selectedNotes.length === 0) return null;
+            
+            // Calculate bounding box
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            selectedNotes.forEach(note => {
+              const noteWidth = (note.variant === 'compact') ? 180 : 256;
+              const noteHeight = (note.variant === 'compact') ? 180 : 256;
+              const noteX = note.boardX + (isMultiSelectDragging ? multiSelectDragOffset.x : 0);
+              const noteY = note.boardY + (isMultiSelectDragging ? multiSelectDragOffset.y : 0);
+              
+              minX = Math.min(minX, noteX);
+              minY = Math.min(minY, noteY);
+              maxX = Math.max(maxX, noteX + noteWidth);
+              maxY = Math.max(maxY, noteY + noteHeight);
+            });
+            
+            const padding = 10;
+            return (
+              <div
+                className="absolute z-[100]"
+                style={{
+                  left: minX - padding,
+                  top: minY - padding,
+                  width: maxX - minX + padding * 2,
+                  height: maxY - minY + padding * 2,
+                  border: '6px dashed #FFDD00',
+                  borderRadius: '8px',
+                  pointerEvents: 'none',
+                }}
+              >
+                {/* Delete button at top-right */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    // Get current selected IDs before clearing state
+                    const idsToDelete = Array.from(selectedNoteIds);
+                    console.log('Multi-select delete clicked, selectedNoteIds:', idsToDelete);
+                    
+                    if (idsToDelete.length === 0) {
+                      console.warn('No notes to delete');
+                      return;
+                    }
+                    
+                    // Delete all selected notes immediately
+                    idsToDelete.forEach(id => {
+                      console.log('Deleting note:', id);
+                      if (onDeleteNote) {
+                        onDeleteNote(id);
+                      }
+                    });
+                    
+                    // Clear selection after deletion
+                    setSelectedNoteIds(new Set());
+                    setSelectedNoteId(null);
+                    resetBlankClickCount();
+                  }}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    // Mark that we're interacting with the delete button
+                    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                  }}
+                  onPointerUp={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+                  }}
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                  }}
+                  onMouseUp={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                  }}
+                  onTouchStart={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                  }}
+                  onTouchEnd={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                  }}
+                  className="absolute -top-3 -right-3 z-[500] bg-red-500 text-white rounded-full p-2 shadow-lg hover:scale-110 transition-transform cursor-pointer"
+                  style={{ 
+                    transform: `scale(${1 / transform.scale})`,
+                    pointerEvents: 'auto',
+                  }}
+                  title="Delete selected notes"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            );
+          })()}
         </div>
+
+        {/* Shift button for multi-select - above ZoomSlider */}
+        {isEditMode && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed bottom-[240px] left-4 z-[500] pointer-events-auto"
+          >
+            <button
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                setIsShiftPressed(true);
+              }}
+              onPointerUp={(e) => {
+                e.stopPropagation();
+                setIsShiftPressed(false);
+              }}
+              onPointerLeave={(e) => {
+                e.stopPropagation();
+                setIsShiftPressed(false);
+              }}
+              className={`w-8 h-12 rounded-full shadow-lg flex items-center justify-center transition-all ${
+                isShiftPressed 
+                  ? 'bg-[#FFDD00] text-yellow-950' 
+                  : 'bg-white text-gray-700 hover:bg-gray-50'
+              }`}
+              title="Hold for multi-select"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 4 L4 12 L9 12 L9 19 L16 19 L16 12 L21 12 Z" />
+              </svg>
+            </button>
+          </motion.div>
+        )}
 
         {/* ZoomSlider - Always Visible */}
         <motion.div 
@@ -2242,7 +2899,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                 onPointerDown={(e) => {
                   e.stopPropagation();
                 }}
-                className="flex items-center gap-2 px-2 py-2 bg-[#FFDD00] text-yellow-950 rounded-xl shadow-lg hover:bg-[#E6C700] font-bold h-full"
+                className="flex items-center gap-2 px-2 bg-[#FFDD00] text-yellow-950 rounded-xl shadow-lg hover:bg-[#E6C700] font-bold h-full"
+                style={{ paddingTop: '6px', paddingBottom: '6px' }}
               >
                   <Check size={18} /> Done
               </button>
@@ -2255,12 +2913,12 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
             style={{ height: '40px' }}
             onPointerDown={(e) => e.stopPropagation()} 
         >
-            <div className="bg-white px-2 py-6 rounded-xl shadow-lg border border-gray-100 flex gap-2 h-full items-center">
+            <div className={`bg-white rounded-xl shadow-lg border border-gray-100 flex gap-2 h-full items-center ${isEditMode ? 'p-1' : ''}`}>
                 {!isEditMode ? (
                     // 非编辑模式：显示进入编辑模式的按钮
                     <button
                         onClick={() => setIsEditMode(true)}
-                        className="px-3 py-2 rounded-lg bg-gray-50 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
+                        className="p-3 hover:bg-yellow-50 text-gray-700 transition-colors"
                         title="进入编辑模式"
                     >
                         <Pencil size={20} />
@@ -2270,14 +2928,14 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                     <>
                         <button
                             onClick={() => createNoteAtCenter('text')}
-                            className="px-2 py-2 rounded-lg bg-gray-50 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
+                            className="p-3 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
                             title="Add Text"
                         >
                             <Type size={20} />
                         </button>
                         <button
                             onClick={() => createNoteAtCenter('compact')}
-                            className="px-3 py-2 rounded-lg bg-gray-50 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
+                            className="p-3 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
                             title="Add Sticky Note"
                         >
                             <StickyNote size={20} />
@@ -2287,17 +2945,92 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                                 setIsDrawingFrame(true);
                                 setSelectedFrameId(null);
                             }}
-                            className={`px-3 py-2 rounded-lg flex items-center justify-center transition-colors active:scale-95 ${isDrawingFrame ? 'bg-[#FFDD00] text-yellow-900' : 'bg-gray-50 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700'}`}
+                            className={`p-3 flex items-center justify-center transition-colors active:scale-95 ${isDrawingFrame ? 'bg-[#FFDD00] text-yellow-900' : 'hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700'}`}
                             title="Add Frame"
                         >
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="4 4">
-                                <rect x="3" y="3" width="18" height="18" rx="2" />
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                {/* 左竖线 - 纵向出头更短，中间格子更大 */}
+                                <line x1="5" y1="2" x2="5" y2="22" />
+                                {/* 右竖线 - 纵向出头更短，中间格子更大 */}
+                                <line x1="19" y1="2" x2="19" y2="22" />
+                                {/* 上横线 - 出头更短 */}
+                                <line x1="3" y1="5" x2="21" y2="5" />
+                                {/* 下横线 - 出头更短 */}
+                                <line x1="3" y1="19" x2="21" y2="19" />
                             </svg>
                         </button>
                     </>
                 )}
             </div>
         </div>
+
+        {/* Import button below edit toolbar */}
+        {!isEditMode && (
+            <div 
+                className="fixed top-16 left-4 z-[500] pointer-events-auto flex flex-col gap-2"
+                ref={menuRef}
+                onPointerDown={(e) => e.stopPropagation()}
+            >
+                <div className="relative">
+                    <button 
+                        onClick={(e) => { 
+                            e.stopPropagation(); 
+                            setShowImportMenu(!showImportMenu);
+                        }}
+                        className="bg-white p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors"
+                        title="Import"
+                    >
+                        <Plus size={20} />
+                    </button>
+                        {showImportMenu && (
+                            <div className="absolute left-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-[2000]">
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        fileInputRef.current?.click();
+                                        setShowImportMenu(false);
+                                    }}
+                                    className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                                >
+                                    <ImageIcon size={16} /> Import from Photos
+                                </button>
+                                <div className="h-px bg-gray-100 my-1" />
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        dataImportInputRef.current?.click();
+                                        setShowImportMenu(false);
+                                    }}
+                                    className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                                >
+                                    <FileJson size={16} /> Import from Data
+                                </button>
+                            </div>
+                        )}
+                </div>
+            </div>
+        )}
+        
+        {/* Hidden file inputs */}
+        <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            style={{ display: 'none' }}
+            onChange={(e) => handleImageImport(e.target.files)}
+        />
+        <input
+            ref={dataImportInputRef}
+            type="file"
+            accept=".json"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+                if (e.target.files && e.target.files[0]) {
+                    handleDataImport(e.target.files[0]);
+                }
+            }}
+        />
 
         {editingNote && (
           <NoteEditor 
@@ -2314,6 +3047,68 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                   }
               }}
           />
+        )}
+
+        {/* Import preview dialog */}
+        {showImportDialog && (
+          <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col">
+              <div className="p-4">
+                <h3 className="text-lg font-bold text-gray-800">Import Photo Preview</h3>
+                <div className="mt-1 text-sm text-gray-600">
+                  Importable: {importPreview.filter(p => !p.error).length} | 
+                  Cannot import: {importPreview.filter(p => p.error).length}
+                </div>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto p-4">
+                <div className="grid grid-cols-3 gap-2">
+                  {importPreview.map((preview, index) => (
+                    <div key={index} className="relative aspect-square">
+                      <img 
+                        src={preview.imageUrl} 
+                        alt={`Preview ${index + 1}`}
+                        className="w-full h-full object-cover rounded-lg"
+                      />
+                      {preview.error ? (
+                        <div className="absolute inset-0 bg-red-500/20 rounded-lg flex items-center justify-center">
+                          <div className="text-center text-red-600 text-xs px-2">
+                            <X size={16} className="mx-auto mb-1" />
+                            <span className="font-bold">{preview.error}</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="absolute top-2 right-2 bg-green-500 text-white rounded-full p-1">
+                          <Check size={12} />
+                        </div>
+                      )}
+                      {!preview.error && (
+                        <div className="mt-1 text-xs text-gray-600">
+                          {preview.lat.toFixed(6)}, {preview.lng.toFixed(6)}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              
+              <div className="p-4 flex justify-end gap-2">
+                <button
+                  onClick={handleCancelImport}
+                  className="px-6 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700 font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmImport}
+                  disabled={importPreview.filter(p => !p.error).length === 0}
+                  className="px-6 py-2 bg-[#FFDD00] hover:bg-[#E6C700] disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg text-gray-900 font-medium transition-colors"
+                >
+                  Confirm Import ({importPreview.filter(p => !p.error).length})
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </motion.div>

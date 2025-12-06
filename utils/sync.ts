@@ -1,8 +1,8 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Project } from '../types';
 
-// Supabase 配置
-// 这些值需要从 Supabase 项目设置中获取
+// Supabase configuration
+// These values need to be obtained from Supabase project settings
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
@@ -11,7 +11,7 @@ let supabase: SupabaseClient | null = null;
 
 export function getSupabaseClient(): SupabaseClient | null {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-    console.warn('Supabase 配置未设置，云端同步功能不可用');
+    console.warn('Supabase configuration not set, cloud sync unavailable');
     return null;
   }
   
@@ -22,7 +22,7 @@ export function getSupabaseClient(): SupabaseClient | null {
   return supabase;
 }
 
-// 获取设备 ID（用于标识不同设备）
+// Get device ID (for identifying different devices)
 function getDeviceId(): string {
   let deviceId = localStorage.getItem('mapp-device-id');
   if (!deviceId) {
@@ -32,10 +32,10 @@ function getDeviceId(): string {
   return deviceId;
 }
 
-// 同步状态类型
+// Sync status type
 export type SyncStatus = 'idle' | 'syncing' | 'success' | 'error';
 
-// 同步所有项目到云端
+// Sync all projects to cloud
 export async function syncProjectsToCloud(projects: Project[]): Promise<{ success: boolean; error?: string }> {
   const client = getSupabaseClient();
   if (!client) {
@@ -45,11 +45,11 @@ export async function syncProjectsToCloud(projects: Project[]): Promise<{ succes
   const deviceId = getDeviceId();
 
   try {
-    // 将项目数据转换为 JSON
+    // Convert project data to JSON
     const projectsData = JSON.stringify(projects);
     const lastSyncTime = Date.now();
 
-    // 使用 upsert 操作（如果存在则更新，不存在则插入）
+    // Use upsert operation (update if exists, insert if not)
     const { error } = await client
       .from('user_projects')
       .upsert({
@@ -66,27 +66,27 @@ export async function syncProjectsToCloud(projects: Project[]): Promise<{ succes
       return { success: false, error: error.message };
     }
 
-    // 保存最后同步时间
+    // Save last sync time
     localStorage.setItem('mapp-last-sync-time', lastSyncTime.toString());
 
     return { success: true };
   } catch (err) {
-    let errorMessage = '未知错误';
+    let errorMessage = 'Unknown error';
     if (err instanceof Error) {
       errorMessage = err.message;
-      // 检查是否是网络错误
+      // Check if it's a network error
       if (errorMessage.includes('Failed to fetch') || errorMessage.includes('NetworkError')) {
-        errorMessage = '网络连接失败，请检查网络或 Supabase 配置';
+        errorMessage = 'Network connection failed, please check network or Supabase configuration';
       } else if (errorMessage.includes('CORS')) {
-        errorMessage = 'CORS 错误，请检查 Supabase 配置';
+        errorMessage = 'CORS error, please check Supabase configuration';
       }
     }
-    console.error('同步异常:', err);
+    console.error('Sync exception:', err);
     return { success: false, error: errorMessage };
   }
 }
 
-// 从云端加载项目
+// Load projects from cloud
 export async function loadProjectsFromCloud(): Promise<{ 
   success: boolean; 
   projects?: Project[]; 
@@ -108,11 +108,11 @@ export async function loadProjectsFromCloud(): Promise<{
       .single();
 
     if (error) {
-      // 如果是未找到记录，返回空数组（新设备）
+      // If record not found, return empty array (new device)
       if (error.code === 'PGRST116') {
         return { success: true, projects: [], isNewDevice: true };
       }
-      console.error('加载失败:', error);
+      console.error('Load failed:', error);
       return { success: false, error: error.message };
     }
 
@@ -123,31 +123,31 @@ export async function loadProjectsFromCloud(): Promise<{
     const projects = JSON.parse(data.projects_data) as Project[];
     const lastSyncTime = data.last_sync_time;
 
-    // 保存最后同步时间
+    // Save last sync time
     if (lastSyncTime) {
       localStorage.setItem('mapp-last-sync-time', lastSyncTime.toString());
     }
 
     return { success: true, projects };
   } catch (err) {
-    let errorMessage = '未知错误';
+    let errorMessage = 'Unknown error';
     if (err instanceof Error) {
       errorMessage = err.message;
-      // 检查是否是网络错误
+      // Check if it's a network error
       if (errorMessage.includes('Failed to fetch') || errorMessage.includes('NetworkError')) {
-        errorMessage = '网络连接失败，请检查网络或 Supabase 配置';
+        errorMessage = 'Network connection failed, please check network or Supabase configuration';
       } else if (errorMessage.includes('CORS')) {
-        errorMessage = 'CORS 错误，请检查 Supabase 配置';
+        errorMessage = 'CORS error, please check Supabase configuration';
       }
     }
-    console.error('加载异常:', err);
+    console.error('Load exception:', err);
     return { success: false, error: errorMessage };
   }
 }
 
-// 合并本地和云端数据（解决冲突）
+// Merge local and cloud data (resolve conflicts)
 export function mergeProjects(localProjects: Project[], cloudProjects: Project[]): Project[] {
-  // 创建项目 ID 映射
+  // Create project ID mapping
   const localMap = new Map(localProjects.map(p => [p.id, p]));
   const cloudMap = new Map(cloudProjects.map(p => [p.id, p]));
 
@@ -159,9 +159,9 @@ export function mergeProjects(localProjects: Project[], cloudProjects: Project[]
     const cloud = cloudMap.get(id);
 
     if (local && cloud) {
-      // 两个都存在，比较更新时间（使用 createdAt 或最后修改时间）
-      // 这里简单使用本地版本（因为本地是用户当前正在使用的）
-      // 你可以根据实际需求调整合并策略
+      // Both exist, compare update time (using createdAt or last modified time)
+      // Here we simply use local version (because local is what user is currently using)
+      // You can adjust merge strategy based on actual needs
       merged.push(local);
     } else if (local) {
       merged.push(local);
@@ -173,17 +173,17 @@ export function mergeProjects(localProjects: Project[], cloudProjects: Project[]
   return merged;
 }
 
-// 检查是否需要同步（基于时间间隔）
+// Check if sync is needed (based on time interval)
 export function shouldSync(): boolean {
   const lastSyncTime = localStorage.getItem('mapp-last-sync-time');
   if (!lastSyncTime) return true;
 
   const timeSinceLastSync = Date.now() - parseInt(lastSyncTime, 10);
-  // 如果距离上次同步超过 5 分钟，则同步
+  // If more than 5 minutes since last sync, sync
   return timeSinceLastSync > 5 * 60 * 1000;
 }
 
-// 获取最后同步时间
+// Get last sync time
 export function getLastSyncTime(): number | null {
   const lastSyncTime = localStorage.getItem('mapp-last-sync-time');
   return lastSyncTime ? parseInt(lastSyncTime, 10) : null;
