@@ -62,6 +62,9 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   // Sketch mode state
   const [isSketching, setIsSketching] = useState(false);
 
+  // Image preview state
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+
   // Keyboard height detection
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   
@@ -107,8 +110,13 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     touchEndRef.current = null;
   };
 
+  // Track if editor was just opened to only reset state on open, not on every initialNote change
+  const prevIsOpenRef = useRef(false);
+  
   useEffect(() => {
-    if (isOpen) {
+    // Only reset state when editor is opened (isOpen changes from false to true)
+    // This prevents clearing user input when initialNote updates (e.g., when images are added)
+    if (isOpen && !prevIsOpenRef.current) {
       setEmoji(initialNote?.emoji || '');
       setText(initialNote?.text || '');
       setFontSize(initialNote?.fontSize || 3);
@@ -120,6 +128,11 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       setIsAddingTag(false);
       setIsSketching(false);
     }
+    // Update images when initialNote changes (for drag-in images), but preserve other state
+    if (isOpen && initialNote?.images) {
+      setImages(initialNote.images);
+    }
+    prevIsOpenRef.current = isOpen;
   }, [initialNote, isOpen]);
   
   // Detect keyboard height by monitoring viewport height changes
@@ -501,10 +514,19 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                       </div>
                       <label className="w-20 h-20 bg-white/60 hover:bg-white shadow-sm rounded-2xl flex items-center justify-center cursor-pointer transition-colors relative overflow-hidden group" style={{ border: 'none' }}>
                           {images.length > 0 ? (
-                              <img src={images[images.length - 1]} className="w-full h-full object-cover" />
+                              <img 
+                                  src={images[images.length - 1]} 
+                                  className="w-full h-full object-cover cursor-pointer" 
+                                  onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      setShowEmojiPicker(false);
+                                      setPreviewImage(images[images.length - 1]);
+                                  }}
+                              />
                           ) : <Camera size={24} className="text-gray-500"/>}
                           <input type="file" accept="image/*" className="hidden" onChange={(e) => { setShowEmojiPicker(false); handleImageUpload(e); }} />
-                          {images.length > 0 && <button onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(false); removeImage(e); }} className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><X size={12}/></button>}
+                          {images.length > 0 && <button onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(false); removeImage(e); }} className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"><X size={12}/></button>}
                       </label>
                       <button 
                         onClick={() => { setShowEmojiPicker(false); setIsSketching(true); }}
@@ -628,6 +650,29 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         </div>
       )}
       </div>
+
+      {/* Image Preview Modal */}
+      {previewImage && (
+        <div 
+          className="fixed inset-0 z-[1000] bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div className="relative max-w-full max-h-full">
+            <button
+              onClick={() => setPreviewImage(null)}
+              className="absolute -top-12 right-0 text-white hover:text-gray-300 transition-colors"
+            >
+              <X size={32} />
+            </button>
+            <img 
+              src={previewImage} 
+              alt="Preview" 
+              className="max-w-full max-h-[90vh] object-contain"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -34,9 +34,10 @@ interface BoardViewProps {
   project?: { notes: Note[] };
   onUpdateProject?: (project: { notes: Note[] }) => void;
   onSwitchToMapView?: () => void;
+  onSwitchToBoardView?: () => void;
 }
 
-export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onToggleEditor, onAddNote, onDeleteNote, onEditModeChange, connections = [], onUpdateConnections, frames = [], onUpdateFrames, project, onUpdateProject, onSwitchToMapView, mapViewFileInputRef }) => {
+export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onToggleEditor, onAddNote, onDeleteNote, onEditModeChange, connections = [], onUpdateConnections, frames = [], onUpdateFrames, project, onUpdateProject, onSwitchToMapView, onSwitchToBoardView, mapViewFileInputRef }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
   
@@ -780,54 +781,87 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   // Zoom to Fit on Enter Edit Mode with animation
   useEffect(() => {
     if (isEditMode && notes.length > 0 && containerRef.current) {
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        notes.forEach(note => {
-            minX = Math.min(minX, note.boardX);
-            minY = Math.min(minY, note.boardY);
-            const w = note.variant === 'text' ? 500 : note.variant === 'compact' ? 180 : 256;
-            const h = note.variant === 'text' ? 100 : note.variant === 'compact' ? 180 : 256;
-            maxX = Math.max(maxX, note.boardX + w);
-            maxY = Math.max(maxY, note.boardY + h);
-        });
+        // Wait for DOM to render and measure text notes
+        const calculateBounds = () => {
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            notes.forEach(note => {
+                let w: number, h: number;
+                
+                if (note.variant === 'text') {
+                    // Use measured dimensions if available, otherwise use default
+                    const measured = textMeasureRefs.current.get(note.id);
+                    if (measured) {
+                        w = measured.width;
+                        h = measured.height;
+                    } else {
+                        // Fallback: estimate based on text length and fontSize
+                        const fontSize = note.fontSize === 1 ? 3 : note.fontSize === 2 ? 4 : note.fontSize === 3 ? 5 : note.fontSize === 4 ? 6 : 7;
+                        const estimatedWidth = (note.text?.length || 0) * fontSize * 0.6; // Rough estimate
+                        w = Math.max(estimatedWidth, 100);
+                        h = 100;
+                    }
+                } else if (note.variant === 'compact') {
+                    w = 180;
+                    h = 180;
+                } else {
+                    w = 256;
+                    h = 256;
+                }
+                
+                minX = Math.min(minX, note.boardX);
+                minY = Math.min(minY, note.boardY);
+                maxX = Math.max(maxX, note.boardX + w);
+                maxY = Math.max(maxY, note.boardY + h);
+            });
 
-        const padding = 100;
-        minX -= padding; minY -= padding;
-        maxX += padding; maxY += padding;
-        const contentWidth = maxX - minX;
-        const contentHeight = maxY - minY;
-        const { width: cW, height: cH } = containerRef.current.getBoundingClientRect();
+            const padding = 100;
+            minX -= padding; 
+            minY -= padding;
+            maxX += padding; 
+            maxY += padding;
+            const contentWidth = maxX - minX;
+            const contentHeight = maxY - minY;
+            const { width: cW, height: cH } = containerRef.current.getBoundingClientRect();
 
-        const scaleX = cW / contentWidth;
-        const scaleY = cH / contentHeight;
-        const newScale = Math.min(Math.max(0.5, Math.min(scaleX, scaleY)), 2); 
+            const scaleX = cW / contentWidth;
+            const scaleY = cH / contentHeight;
+            // Remove min/max constraints to fit exactly
+            const newScale = Math.min(scaleX, scaleY);
 
-        const newX = (cW - contentWidth * newScale) / 2 - minX * newScale;
-        const newY = (cH - contentHeight * newScale) / 2 - minY * newScale;
+            const newX = (cW - contentWidth * newScale) / 2 - minX * newScale;
+            const newY = (cH - contentHeight * newScale) / 2 - minY * newScale;
 
-        // 使用动画过渡
-        const startTransform = { ...transform };
-        const endTransform = { x: newX, y: newY, scale: newScale };
-        const duration = 400; // 400ms 动画
-        const startTime = Date.now();
-        
-        const animate = () => {
-          const elapsed = Date.now() - startTime;
-          const progress = Math.min(elapsed / duration, 1);
-          // 使用 easeOutCubic 缓动函数
-          const eased = 1 - Math.pow(1 - progress, 3);
-          
-          setTransform({
-            x: startTransform.x + (endTransform.x - startTransform.x) * eased,
-            y: startTransform.y + (endTransform.y - startTransform.y) * eased,
-            scale: startTransform.scale + (endTransform.scale - startTransform.scale) * eased
-          });
-          
-          if (progress < 1) {
+            // 使用动画过渡
+            const startTransform = { ...transform };
+            const endTransform = { x: newX, y: newY, scale: newScale };
+            const duration = 400; // 400ms 动画
+            const startTime = Date.now();
+            
+            const animate = () => {
+              const elapsed = Date.now() - startTime;
+              const progress = Math.min(elapsed / duration, 1);
+              // 使用 easeOutCubic 缓动函数
+              const eased = 1 - Math.pow(1 - progress, 3);
+              
+              setTransform({
+                x: startTransform.x + (endTransform.x - startTransform.x) * eased,
+                y: startTransform.y + (endTransform.y - startTransform.y) * eased,
+                scale: startTransform.scale + (endTransform.scale - startTransform.scale) * eased
+              });
+              
+              if (progress < 1) {
+                requestAnimationFrame(animate);
+              }
+            };
+            
             requestAnimationFrame(animate);
-          }
         };
-        
-        requestAnimationFrame(animate);
+
+        // Wait a frame for DOM to render text notes
+        requestAnimationFrame(() => {
+            // Give text notes time to measure
+            setTimeout(calculateBounds, 50);
+        });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEditMode]);
@@ -1086,22 +1120,27 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
       });
       
       if (maxX !== -Infinity && minY !== Infinity && count > 0) {
+        // Check aspect ratio - if too wide, show warning and prevent import
         const contentWidth = maxX - minX;
         const contentHeight = maxY - minY;
+        const aspectRatioThreshold = 2.5; // If width/height > 2.5, show warning
         const aspectRatio = contentHeight > 0 ? contentWidth / contentHeight : 0;
         
-        // If aspect ratio is too wide, start a new row
         if (aspectRatio > aspectRatioThreshold) {
-          // Start new row: go to left edge, below existing content
-          spawnX = minX;
-          spawnY = maxY + spacing;
-        } else {
-          // Continue current row: add to the right
-          spawnX = maxX + spacing;
-          // Use average center Y position, then adjust to top of note
-          const avgCenterY = sumCenterY / count;
-          spawnY = avgCenterY - noteHeight / 2;
+          // Show warning and prevent import
+          alert('先整理一下便利贴吧');
+          if (onSwitchToBoardView) {
+            onSwitchToBoardView();
+          }
+          // Clean up and return
+          setImportPreview([]);
+          setIsDragging(false);
+          return;
         }
+        
+        // Continue current row: add to the right, aligned to top
+        spawnX = maxX + spacing;
+        spawnY = minY;
       }
     }
     
@@ -1379,21 +1418,24 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
         
         // Ensure we have valid values before using them
         if (maxX !== -Infinity && minY !== Infinity) {
+          // Check aspect ratio - if too wide, show warning and prevent note creation
           const contentWidth = maxX - minX;
           const contentHeight = maxY - minY;
-          const aspectRatioThreshold = 2.5; // If width/height > 2.5, start a new row
+          const aspectRatioThreshold = 2.5; // If width/height > 2.5, show warning
           const aspectRatio = contentHeight > 0 ? contentWidth / contentHeight : 0;
           
-          // If aspect ratio is too wide, start a new row
           if (aspectRatio > aspectRatioThreshold) {
-            // Start new row: go to left edge, below existing content
-            spawnX = minX;
-            spawnY = maxY + spacing;
-          } else {
-            // Continue current row: add to the right, aligned to top
-            spawnX = maxX + spacing;
-            spawnY = minY;
+            // Show warning and prevent note creation
+            alert('先整理一下便利贴吧');
+            if (onSwitchToBoardView) {
+              onSwitchToBoardView();
+            }
+            return; // Don't create the note
           }
+          
+          // Continue current row: add to the right, aligned to top
+          spawnX = maxX + spacing;
+          spawnY = minY;
         }
         
         console.log('createNoteAtCenter calculation:', {
@@ -1453,9 +1495,9 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
     setTransform({ x: newX, y: newY, scale: newScale });
   };
 
-  const handleWheel = (e: React.WheelEvent) => {
-    // 检测双指缩放（移动端）或 Ctrl/Cmd + 滚轮
-    const isZoomGesture = e.ctrlKey || e.metaKey || (e.touches && e.touches.length === 2);
+  const handleWheel = (e: WheelEvent) => {
+    // 检测 Ctrl/Cmd + 滚轮缩放
+    const isZoomGesture = e.ctrlKey || e.metaKey;
     
     if (isZoomGesture) {
         e.preventDefault();
@@ -1593,6 +1635,38 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
       container.removeEventListener('touchend', handleTouchEnd);
     };
   }, [transform, longPressTimerRef, longPressNoteIdRef]);
+
+  // Add wheel event listener with passive: false to allow preventDefault
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const wheelHandler = (e: WheelEvent) => {
+      // 检测 Ctrl/Cmd + 滚轮缩放
+      const isZoomGesture = e.ctrlKey || e.metaKey;
+      
+      if (isZoomGesture) {
+        e.preventDefault();
+        const zoomSensitivity = 0.001;
+        const delta = -e.deltaY * zoomSensitivity;
+        const currentScale = transform.scale;
+        const newScale = Math.min(Math.max(0.2, currentScale + delta), 4);
+        zoomAtViewCenter(newScale);
+      } else {
+        setTransform(prev => ({
+          ...prev,
+          x: prev.x - e.deltaX,
+          y: prev.y - e.deltaY
+        }));
+      }
+    };
+
+    container.addEventListener('wheel', wheelHandler, { passive: false });
+
+    return () => {
+      container.removeEventListener('wheel', wheelHandler);
+    };
+  }, [transform, zoomAtViewCenter]);
 
   const handleBoardPointerDown = (e: React.PointerEvent) => {
       // 阻止浏览器默认长按菜单
@@ -2255,7 +2329,6 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
       <div 
         ref={containerRef}
         className={`w-full h-full overflow-hidden bg-gray-50 relative touch-none select-none ${isPanning ? 'cursor-grabbing' : 'cursor-grab'} ${isDragging ? 'ring-4 ring-[#FFDD00] ring-offset-2' : ''}`}
-        onWheel={handleWheel}
         onPointerDown={handleBoardPointerDown}
         onPointerMove={handleBoardPointerMove}
         onDragEnter={handleDragEnter}
@@ -2272,7 +2345,15 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
             onClick={() => setIsDragging(false)}
           >
             <div className="bg-white rounded-2xl shadow-2xl p-8 border-4 border-[#FFDD00] pointer-events-none">
-              <p className="text-2xl font-bold text-gray-800">Drop images or JSON files here to import</p>
+              <div className="text-center">
+                <div className="mb-4 flex justify-center">
+                  <svg width="64" height="64" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-gray-700">
+                    <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                    <path d="M8 11V5M5 8l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </div>
+                <p className="text-2xl font-bold text-gray-800">Drop images or JSON files here to import</p>
+              </div>
             </div>
           </div>
         )}
@@ -3075,7 +3156,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                       >
                           <div className={`w-full h-full flex flex-col relative ${isCompact ? 'p-4 gap-1' : 'p-6 gap-2'}`}>
                               {!isCompact && (note.sketch && note.sketch !== '') && (note.images && note.images.length > 0) && (
-                                  <div className="absolute inset-0 opacity-20 pointer-events-none z-0">
+                                  <div className="absolute inset-0 opacity-35 pointer-events-none z-0">
                                       <img 
                                           src={note.sketch || note.images[0]} 
                                           className="w-full h-full object-cover grayscale opacity-50" 
@@ -3083,8 +3164,17 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                                       />
                                   </div>
                               )}
+                              {!isCompact && (note.sketch && note.sketch !== '') && (!note.images || note.images.length === 0) && (
+                                  <div className="absolute inset-0 opacity-35 pointer-events-none z-0">
+                                      <img 
+                                          src={note.sketch} 
+                                          className="w-full h-full object-cover grayscale opacity-50" 
+                                          alt="bg" 
+                                      />
+                                  </div>
+                              )}
                               {!isCompact && !note.sketch && (note.images && note.images.length > 0) && (
-                                  <div className="absolute inset-0 opacity-20 pointer-events-none z-0">
+                                  <div className="absolute inset-0 opacity-35 pointer-events-none z-0">
                                       <img 
                                           src={note.images[0]} 
                                           className="w-full h-full object-cover grayscale opacity-50" 
@@ -3098,7 +3188,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                                     className={`text-gray-800 leading-none flex-1 overflow-hidden break-words ${clampClass} ${note.isBold ? 'font-bold' : 'font-medium'}`} 
                                     style={{ 
                                         // Sticky Note: 缩小到40% (1.2rem to 2.8rem)
-                                        fontSize: note.fontSize === 1 ? '1.2rem' : note.fontSize === 2 ? '1.6rem' : note.fontSize === 3 ? '2rem' : note.fontSize === 4 ? '2.6rem' : '3.0rem'
+                                        fontSize: note.fontSize === 1 ? '1.2rem' : note.fontSize === 2 ? '1.6rem' : note.fontSize === 3 ? '2.2rem' : note.fontSize === 4 ? '2.4rem' : '3.0rem'
                                     }}
                                   >
                                       {note.text || <span className="text-gray-400 italic font-normal text-base">Empty...</span>}
@@ -3348,7 +3438,10 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                         className="bg-white p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors"
                         title="Import"
                     >
-                        <Plus size={20} />
+                        <svg width="20" height="20" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                            <path d="M8 11V5M5 8l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
                     </button>
                         {showImportMenu && (
                             <div className="absolute left-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-[2000]">
@@ -3360,7 +3453,10 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                                     }}
                                     className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
                                 >
-                                    <ImageIcon size={16} /> Import from Photos
+                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                                        <path d="M8 11V5M5 8l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                                    </svg> Import from Photos
                                 </button>
                                 <div className="h-px bg-gray-100 my-1" />
                                 <button

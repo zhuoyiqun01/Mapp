@@ -293,7 +293,10 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                     className="bg-white p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors"
                     title="Import"
                 >
-                    <Plus size={20} />
+                    <svg width="20" height="20" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                        <path d="M8 11V5M5 8l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
                 </button>
                 {showImportMenu && (
                     <div className="absolute left-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-[2000]">
@@ -305,7 +308,10 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                             }}
                             className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
                         >
-                            <ImageIcon size={16} /> Import from Photos
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                                <path d="M8 11V5M5 8l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg> Import from Photos
                         </button>
                         <div className="h-px bg-gray-100 my-1" />
                         <button
@@ -1184,35 +1190,39 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       
       if (note.images && note.images.length > 0) {
         // Show photo with pin-shaped mask
+        // Inner container inherits outer shape, only rotates image to be upright
+        // Expand container with negative inset to allow image to scale 1.5x without clipping
         content = `<div style="
           position: absolute;
-          inset: 0;
-          border-radius: 50% 50% 50% 0;
+          inset: -25%;
           overflow: hidden;
           transform: rotate(45deg);
+          transform-origin: center;
         ">
           <img src="${note.images[0]}" style="
             width: 100%;
             height: 100%;
             object-fit: cover;
-            transform: scale(1.2);
+            transform: scale(1.5);
             transform-origin: center;
           " />
         </div>`;
       } else if (note.sketch) {
         // Show sketch with pin-shaped mask
+        // Inner container inherits outer shape, only rotates image to be upright
+        // Expand container with negative inset to allow image to scale 1.5x without clipping
         content = `<div style="
           position: absolute;
-          inset: 0;
-          border-radius: 50% 50% 50% 0;
+          inset: -25%;
           overflow: hidden;
           transform: rotate(45deg);
+          transform-origin: center;
         ">
           <img src="${note.sketch}" style="
             width: 100%;
             height: 100%;
             object-fit: cover;
-            transform: scale(1.2);
+            transform: scale(1.5);
             transform-origin: center;
           " />
         </div>`;
@@ -1460,7 +1470,12 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         >
           <div className="bg-white rounded-2xl shadow-2xl p-8 border-4 border-[#FFDD00] pointer-events-none">
             <div className="text-center">
-              <div className="text-4xl mb-4">📷</div>
+              <div className="mb-4 flex justify-center">
+                <svg width="64" height="64" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-gray-700">
+                  <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                  <path d="M8 11V5M5 8l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
               <div className="text-xl font-bold text-gray-800">Drop images or JSON files here to import</div>
               <div className="text-sm text-gray-600 mt-2">Maximum 9 images</div>
             </div>

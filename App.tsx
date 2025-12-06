@@ -505,6 +505,9 @@ export default function App() {
                 mapViewFileInputRef.current?.click();
               }, 300);
             }}
+            onSwitchToBoardView={() => {
+              setViewMode('board');
+            }}
             mapViewFileInputRef={mapViewFileInputRef}
           />
         ) : (
