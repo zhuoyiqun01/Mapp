@@ -7,7 +7,7 @@ import { MAP_TILE_URL, MAP_TILE_URL_FALLBACK, MAP_SATELLITE_URL, MAP_ATTRIBUTION
 import { Search, Locate, Loader2, X, Check, Satellite, ArrowRight, Plus, Image as ImageIcon, FileJson } from 'lucide-react';
 import exifr from 'exifr';
 import { NoteEditor } from './NoteEditor';
-import { generateId } from '../utils';
+import { generateId, fileToBase64 } from '../utils';
 import { ZoomSlider } from './ZoomSlider';
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -398,10 +398,11 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dataImportInputRef = useRef<HTMLInputElement>(null);
   
-  // Ultra-lightweight image fingerprint: dimensions and first pixel only (no filename, no size)
-  // This ensures consistent comparison between File objects and base64 strings
-  const calculateImageFingerprint = async (file: File, imageUrl: string): Promise<string> => {
+  // Image fingerprint: GPS coordinates + 3 sampled pixels (top-left, bottom-left, bottom-right)
+  // Format: lat_lng_topLeftPixel_bottomLeftPixel_bottomRightPixel
+  const calculateImageFingerprint = async (file: File, imageUrl: string, lat: number | null, lng: number | null): Promise<string> => {
     try {
+      // Load image
       const img = new Image();
       img.src = imageUrl;
       await new Promise((resolve, reject) => {
@@ -412,33 +413,55 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       const width = img.naturalWidth;
       const height = img.naturalHeight;
       
-      // Sample only first pixel for maximum speed
+      // Sample 3 pixels: top-left, bottom-left, bottom-right
       const canvas = document.createElement('canvas');
-      canvas.width = 1;
-      canvas.height = 1;
+      canvas.width = width;
+      canvas.height = height;
       const ctx = canvas.getContext('2d');
-      if (!ctx) return `${width}_${height}`;
+      if (!ctx) {
+        // Fallback: return GPS only if available
+        return lat !== null && lng !== null ? `${lat.toFixed(6)}_${lng.toFixed(6)}` : 'no_gps';
+      }
       
-      ctx.drawImage(img, 0, 0, 1, 1);
-      const imageData = ctx.getImageData(0, 0, 1, 1);
-      const data = imageData.data;
+      // Draw image
+      ctx.drawImage(img, 0, 0, width, height);
       
-      // Get first pixel RGB (3 values)
-      const firstPixel = data.length >= 3 
-        ? `${data[0]},${data[1]},${data[2]}` 
+      // Sample top-left pixel (0, 0)
+      const topLeftData = ctx.getImageData(0, 0, 1, 1).data;
+      const topLeft = topLeftData.length >= 3 
+        ? `${topLeftData[0]},${topLeftData[1]},${topLeftData[2]}` 
         : '0,0,0';
       
-      // Create fingerprint: width_height_firstPixel (no filename, no size for consistency)
-      return `${width}_${height}_${firstPixel}`;
+      // Sample bottom-left pixel (0, height-1)
+      const bottomLeftData = ctx.getImageData(0, height - 1, 1, 1).data;
+      const bottomLeft = bottomLeftData.length >= 3 
+        ? `${bottomLeftData[0]},${bottomLeftData[1]},${bottomLeftData[2]}` 
+        : '0,0,0';
+      
+      // Sample bottom-right pixel (width-1, height-1)
+      const bottomRightData = ctx.getImageData(width - 1, height - 1, 1, 1).data;
+      const bottomRight = bottomRightData.length >= 3 
+        ? `${bottomRightData[0]},${bottomRightData[1]},${bottomRightData[2]}` 
+        : '0,0,0';
+      
+      // Create fingerprint: lat_lng_topLeft_bottomLeft_bottomRight
+      const gpsPart = lat !== null && lng !== null 
+        ? `${lat.toFixed(6)}_${lng.toFixed(6)}` 
+        : 'no_gps';
+      return `${gpsPart}_${topLeft}_${bottomLeft}_${bottomRight}`;
     } catch (error) {
       console.error('Error calculating image fingerprint:', error);
-      return `unknown`;
+      return lat !== null && lng !== null ? `${lat.toFixed(6)}_${lng.toFixed(6)}` : 'unknown';
     }
   };
   
-  // Ultra-lightweight fingerprint from base64 image (no filename, no size)
-  const calculateFingerprintFromBase64 = async (base64Image: string): Promise<string> => {
+  // Fingerprint from base64 image (extract GPS from note if available)
+  const calculateFingerprintFromBase64 = async (base64Image: string, note?: Note): Promise<string> => {
     try {
+      // Extract GPS from note if available
+      const lat = note?.coords?.lat ?? null;
+      const lng = note?.coords?.lng ?? null;
+      
       const img = new Image();
       img.src = base64Image;
       await new Promise((resolve, reject) => {
@@ -449,26 +472,47 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       const width = img.naturalWidth;
       const height = img.naturalHeight;
       
-      // Sample only first pixel
+      // Sample 3 pixels: top-left, bottom-left, bottom-right
       const canvas = document.createElement('canvas');
-      canvas.width = 1;
-      canvas.height = 1;
+      canvas.width = width;
+      canvas.height = height;
       const ctx = canvas.getContext('2d');
-      if (!ctx) return `${width}_${height}`;
+      if (!ctx) {
+        // Fallback: return GPS only if available
+        return lat !== null && lng !== null ? `${lat.toFixed(6)}_${lng.toFixed(6)}` : 'no_gps';
+      }
       
-      ctx.drawImage(img, 0, 0, 1, 1);
-      const imageData = ctx.getImageData(0, 0, 1, 1);
-      const data = imageData.data;
+      // Draw image
+      ctx.drawImage(img, 0, 0, width, height);
       
-      const firstPixel = data.length >= 3 
-        ? `${data[0]},${data[1]},${data[2]}` 
+      // Sample top-left pixel (0, 0)
+      const topLeftData = ctx.getImageData(0, 0, 1, 1).data;
+      const topLeft = topLeftData.length >= 3 
+        ? `${topLeftData[0]},${topLeftData[1]},${topLeftData[2]}` 
         : '0,0,0';
       
-      // Same format as calculateImageFingerprint: width_height_firstPixel
-      return `${width}_${height}_${firstPixel}`;
+      // Sample bottom-left pixel (0, height-1)
+      const bottomLeftData = ctx.getImageData(0, height - 1, 1, 1).data;
+      const bottomLeft = bottomLeftData.length >= 3 
+        ? `${bottomLeftData[0]},${bottomLeftData[1]},${bottomLeftData[2]}` 
+        : '0,0,0';
+      
+      // Sample bottom-right pixel (width-1, height-1)
+      const bottomRightData = ctx.getImageData(width - 1, height - 1, 1, 1).data;
+      const bottomRight = bottomRightData.length >= 3 
+        ? `${bottomRightData[0]},${bottomRightData[1]},${bottomRightData[2]}` 
+        : '0,0,0';
+      
+      // Create fingerprint: lat_lng_topLeft_bottomLeft_bottomRight
+      const gpsPart = lat !== null && lng !== null 
+        ? `${lat.toFixed(6)}_${lng.toFixed(6)}` 
+        : 'no_gps';
+      return `${gpsPart}_${topLeft}_${bottomLeft}_${bottomRight}`;
     } catch (error) {
       console.error('Error calculating fingerprint from base64:', error);
-      return `unknown`;
+      const lat = note?.coords?.lat ?? null;
+      const lng = note?.coords?.lng ?? null;
+      return lat !== null && lng !== null ? `${lat.toFixed(6)}_${lng.toFixed(6)}` : 'unknown';
     }
   };
   
@@ -801,7 +845,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         
         // Calculate image fingerprint
         const imageUrl = URL.createObjectURL(file);
-        const imageFingerprint = await calculateImageFingerprint(file, imageUrl);
+        const imageFingerprint = await calculateImageFingerprint(file, imageUrl, lat, lng);
         
         // Check if this image has already been imported (lightweight comparison, no filename)
         let isDuplicate = false;
@@ -1337,13 +1381,23 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const handleDragLeave = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    // Only set to false if we're leaving the container itself
-    if (e.currentTarget === e.target) {
+    // Check if we're actually leaving the container (not just moving to a child element)
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const x = e.clientX;
+    const y = e.clientY;
+    
+    // If the mouse is outside the container bounds, hide the drag overlay
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
       setIsDragging(false);
     }
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDragEnd = (e: React.DragEvent) => {
+    // Always hide drag overlay when drag ends (even if cancelled)
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
@@ -1357,10 +1411,31 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       );
 
       if (imageFiles.length > 0) {
-        // Create a FileList-like object
-        const dataTransfer = new DataTransfer();
-        imageFiles.forEach((file: File) => dataTransfer.items.add(file));
-        handleImageImport(dataTransfer.files, true);
+        // If editor is open and editing a standard note, add images to current note
+        if (isEditorOpen && editingNote && editingNote.variant !== 'text' && editingNote.variant !== 'compact') {
+          try {
+            const newImages: string[] = [];
+            for (const file of imageFiles) {
+              const base64 = await fileToBase64(file as File);
+              newImages.push(base64);
+            }
+            const updatedNote = {
+              ...editingNote,
+              images: [...(editingNote.images || []), ...newImages]
+            };
+            onUpdateNote(updatedNote as Note);
+            setEditingNote(updatedNote);
+          } catch (error) {
+            console.error('Failed to add images to note:', error);
+          }
+        } else {
+          // Create a FileList-like object
+          const dataTransfer = new DataTransfer();
+          imageFiles.forEach((file) => {
+            dataTransfer.items.add(file as File);
+          });
+          handleImageImport(dataTransfer.files, true);
+        }
       } else if (jsonFiles.length > 0 && jsonFiles[0]) {
         // For JSON, import directly
         handleDataImport(jsonFiles[0] as File);
@@ -1376,10 +1451,14 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
+      onDragEnd={handleDragEnd}
     >
       {isDragging && (
-        <div className="absolute inset-0 z-[4000] bg-[#FFDD00]/20 backdrop-blur-sm flex items-center justify-center pointer-events-none">
-          <div className="bg-white rounded-2xl shadow-2xl p-8 border-4 border-[#FFDD00]">
+        <div 
+          className="absolute inset-0 z-[4000] bg-[#FFDD00]/20 backdrop-blur-sm flex items-center justify-center pointer-events-auto"
+          onClick={() => setIsDragging(false)}
+        >
+          <div className="bg-white rounded-2xl shadow-2xl p-8 border-4 border-[#FFDD00] pointer-events-none">
             <div className="text-center">
               <div className="text-4xl mb-4">📷</div>
               <div className="text-xl font-bold text-gray-800">Drop images or JSON files here to import</div>
