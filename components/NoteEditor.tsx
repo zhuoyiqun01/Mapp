@@ -60,6 +60,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   
   // Tag creation state
   const [isAddingTag, setIsAddingTag] = useState(false);
+  const [editingTagId, setEditingTagId] = useState<string | null>(null);
   const [newTagLabel, setNewTagLabel] = useState('');
   const [newTagColor, setNewTagColor] = useState(TAG_COLORS[2]);
 
@@ -117,6 +118,8 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   // Track if editor was just opened to only reset state on open, not on every initialNote change
   const prevIsOpenRef = useRef(false);
   
+  const prevNoteIdRef = useRef<string | undefined>(initialNote?.id);
+  
   useEffect(() => {
     // Only reset state when editor is opened (isOpen changes from false to true)
     // This prevents clearing user input when initialNote updates (e.g., when images are added)
@@ -131,9 +134,25 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       setSketch(initialNote?.sketch);
       setIsAddingTag(false);
       setIsSketching(false);
+      prevNoteIdRef.current = initialNote?.id;
+    }
+    // When note ID changes (switching between notes in cluster), reset all state
+    else if (isOpen && initialNote?.id !== prevNoteIdRef.current) {
+      setEmoji(initialNote?.emoji || '');
+      setText(initialNote?.text || '');
+      setFontSize(initialNote?.fontSize || 3);
+      setIsBold(initialNote?.isBold || false);
+      setColor(initialNote?.color || DEFAULT_BG);
+      setTags(initialNote?.tags || []);
+      setImages(initialNote?.images || []);
+      setSketch(initialNote?.sketch);
+      setIsAddingTag(false);
+      setIsSketching(false);
+      prevNoteIdRef.current = initialNote?.id;
     }
     // Update images when initialNote changes (for drag-in images), but preserve other state
-    if (isOpen && initialNote?.images) {
+    // Only if note ID hasn't changed (to avoid overwriting during note switch)
+    else if (isOpen && initialNote?.images && initialNote?.id === prevNoteIdRef.current) {
       setImages(initialNote.images);
     }
     prevIsOpenRef.current = isOpen;
@@ -175,19 +194,40 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
 
   const handleSaveTag = () => {
     if (newTagLabel.trim()) {
-      const newTag: Tag = {
-        id: generateId(),
-        label: newTagLabel.trim(),
-        color: newTagColor
-      };
-      setTags([...tags, newTag]);
+      if (editingTagId) {
+        // Update existing tag
+        setTags(tags.map(t => t.id === editingTagId ? { ...t, label: newTagLabel.trim(), color: newTagColor } : t));
+        setEditingTagId(null);
+      } else {
+        // Create new tag
+        const newTag: Tag = {
+          id: generateId(),
+          label: newTagLabel.trim(),
+          color: newTagColor
+        };
+        setTags([...tags, newTag]);
+      }
       setNewTagLabel('');
       setIsAddingTag(false);
     } else {
-      // If no text entered, cancel adding
+      // If no text entered, cancel adding/editing
       setNewTagLabel('');
       setIsAddingTag(false);
+      setEditingTagId(null);
     }
+  };
+
+  const handleEditTag = (tag: Tag) => {
+    setEditingTagId(tag.id);
+    setNewTagLabel(tag.label);
+    setNewTagColor(tag.color);
+    setIsAddingTag(false);
+  };
+
+  const handleCancelTagEdit = () => {
+    setNewTagLabel('');
+    setIsAddingTag(false);
+    setEditingTagId(null);
   };
 
   const removeTag = (id: string) => {
@@ -607,12 +647,44 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                 {!isCompactMode && (
                     <div className="px-3 pt-2 pb-2 flex-1 flex gap-2 overflow-x-auto scrollbar-hide items-center min-h-[50px]">
                         {tags.map(tag => (
-                            <span key={tag.id} className="flex-shrink-0 h-6 px-2.5 rounded-full text-xs font-bold text-white shadow-sm flex items-center gap-1" style={{backgroundColor: tag.color}}>
-                                {tag.label}
-                                <button onClick={() => { setShowEmojiPicker(false); removeTag(tag.id); }}><X size={10}/></button>
-                            </span>
+                            editingTagId === tag.id ? (
+                                <div key={tag.id} className="flex items-center gap-1 bg-white rounded-full shadow-sm p-1 pr-2 h-10 animate-in fade-in slide-in-from-left-2 flex-shrink-0" style={{ border: 'none' }}>
+                                    <input 
+                                        autoFocus
+                                        className="w-16 text-sm bg-transparent outline-none ml-2 text-gray-700 placeholder-gray-400"
+                                        placeholder="Tag name..."
+                                        value={newTagLabel}
+                                        onChange={(e) => setNewTagLabel(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') handleSaveTag();
+                                            if (e.key === 'Escape') handleCancelTagEdit();
+                                        }}
+                                    />
+                                    <div className="flex gap-1 pl-2" style={{ borderLeft: 'none' }}>
+                                        {TAG_COLORS.slice(0,5).map(c => (
+                                            <button 
+                                                key={c} 
+                                                onClick={() => setNewTagColor(c)} 
+                                                style={{backgroundColor: c}} 
+                                                className={`w-5 h-5 rounded-full transition-transform ${newTagColor === c ? 'scale-125 ring-2 ring-gray-300 ring-offset-1' : 'hover:scale-110'}`}
+                                            />
+                                        ))}
+                                    </div>
+                                    <button onClick={handleSaveTag} className="ml-1 text-green-500 hover:text-green-600 active:scale-90 transition-transform"><Check size={18}/></button>
+                                </div>
+                            ) : (
+                                <span 
+                                    key={tag.id} 
+                                    onClick={() => { setShowEmojiPicker(false); handleEditTag(tag); }}
+                                    className="flex-shrink-0 h-6 px-2.5 rounded-full text-xs font-bold text-white shadow-sm flex items-center gap-1 cursor-pointer hover:opacity-80 transition-opacity" 
+                                    style={{backgroundColor: tag.color}}
+                                >
+                                    {tag.label}
+                                    <button onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(false); removeTag(tag.id); }}><X size={10}/></button>
+                                </span>
+                            )
                         ))}
-                        {isAddingTag ? (
+                        {isAddingTag && !editingTagId ? (
                             <div className="flex items-center gap-1 bg-white rounded-full shadow-sm p-1 pr-2 h-10 animate-in fade-in slide-in-from-left-2" style={{ border: 'none' }}>
                             <input 
                                 autoFocus
@@ -620,7 +692,10 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                                 placeholder="Tag name..."
                                 value={newTagLabel}
                                 onChange={(e) => setNewTagLabel(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleSaveTag()}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handleSaveTag();
+                                    if (e.key === 'Escape') handleCancelTagEdit();
+                                }}
                             />
                             <div className="flex gap-1 pl-2" style={{ borderLeft: 'none' }}>
                                 {TAG_COLORS.slice(0,5).map(c => (
@@ -634,11 +709,11 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                             </div>
                             <button onClick={handleSaveTag} className="ml-1 text-green-500 hover:text-green-600 active:scale-90 transition-transform"><Check size={18}/></button>
                             </div>
-                        ) : (
+                        ) : !editingTagId ? (
                             <button onClick={() => { setShowEmojiPicker(false); setIsAddingTag(true); }} className="flex-shrink-0 h-10 px-4 bg-white/60 hover:bg-white rounded-full text-xs font-bold text-gray-500 shadow-sm flex items-center transition-all" style={{ border: 'none' }}>
                                 + Tag
                             </button>
-                        )}
+                        ) : null}
                     </div>
                 )}
 

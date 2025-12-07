@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Marker, ImageOverlay, useMap, useMapEvents } f
 import L from 'leaflet';
 import { Note, Coordinates, Project } from '../types';
 import { MAP_TILE_URL, MAP_TILE_URL_FALLBACK, MAP_SATELLITE_URL, MAP_ATTRIBUTION } from '../constants';
-import { Search, Locate, Loader2, X, Check, Satellite, ArrowRight, Plus, Image as ImageIcon, FileJson } from 'lucide-react';
+import { Search, Locate, Loader2, X, Check, Satellite, Plus, Image as ImageIcon, FileJson } from 'lucide-react';
 import exifr from 'exifr';
 import { NoteEditor } from './NoteEditor';
 import { generateId, fileToBase64 } from '../utils';
@@ -233,14 +233,22 @@ const MapNavigationHandler = ({ coords, onComplete }: { coords: { lat: number; l
       const targetZoom = 19;
       const targetCenter: [number, number] = [coords.lat, coords.lng];
       
-      // Use setView to ensure both center and zoom are set correctly
-      map.setView(targetCenter, targetZoom, {
-        animate: true,
-        duration: 1.0
-      });
+      let animationCompleted = false;
+      let moveEndHandler: (() => void) | null = null;
       
-      // Ensure center and zoom are correct after animation
-      const handleMoveEnd = () => {
+      // Small delay to ensure map is fully initialized before navigation
+      const initTimeout = setTimeout(() => {
+        // Use setView to ensure both center and zoom are set correctly with smooth animation
+        map.setView(targetCenter, targetZoom, {
+          animate: true,
+          duration: 1.5 // Increased duration for smoother animation
+        });
+      }, 50);
+      
+      // Ensure center and zoom are correct after animation completes
+      moveEndHandler = () => {
+        if (animationCompleted) return;
+        
         const currentCenter = map.getCenter();
         const currentZoom = map.getZoom();
         
@@ -248,89 +256,282 @@ const MapNavigationHandler = ({ coords, onComplete }: { coords: { lat: number; l
         const latDiff = Math.abs(currentCenter.lat - targetCenter[0]);
         const lngDiff = Math.abs(currentCenter.lng - targetCenter[1]);
         
-        if (latDiff > 0.0001 || lngDiff > 0.0001 || currentZoom < targetZoom) {
+        if (latDiff <= 0.0001 && lngDiff <= 0.0001 && currentZoom >= targetZoom) {
+          animationCompleted = true;
+          if (moveEndHandler) {
+            map.off('moveend', moveEndHandler);
+          }
+          onComplete?.();
+        } else if (latDiff > 0.0001 || lngDiff > 0.0001 || currentZoom < targetZoom) {
+          // Only correct if significantly off, but still animate
           map.setView(targetCenter, targetZoom, {
-            animate: false
+            animate: true,
+            duration: 0.5
           });
         }
-        
-        map.off('moveend', handleMoveEnd);
-        onComplete?.();
       };
       
-      map.on('moveend', handleMoveEnd);
+      map.on('moveend', moveEndHandler);
       
-      // Fallback: ensure center and zoom are correct
-      setTimeout(() => {
-        const currentCenter = map.getCenter();
-        const currentZoom = map.getZoom();
-        const latDiff = Math.abs(currentCenter.lat - targetCenter[0]);
-        const lngDiff = Math.abs(currentCenter.lng - targetCenter[1]);
-        
-        if (latDiff > 0.0001 || lngDiff > 0.0001 || currentZoom < targetZoom) {
-          map.setView(targetCenter, targetZoom, {
-            animate: false
-          });
+      // Fallback: ensure center and zoom are correct after animation should complete
+      const fallbackTimeout = setTimeout(() => {
+        if (!animationCompleted) {
+          const currentCenter = map.getCenter();
+          const currentZoom = map.getZoom();
+          const latDiff = Math.abs(currentCenter.lat - targetCenter[0]);
+          const lngDiff = Math.abs(currentCenter.lng - targetCenter[1]);
+          
+          if (latDiff > 0.0001 || lngDiff > 0.0001 || currentZoom < targetZoom) {
+            map.setView(targetCenter, targetZoom, {
+              animate: false
+            });
+          }
+          
+          if (moveEndHandler) {
+            map.off('moveend', moveEndHandler);
+          }
+          animationCompleted = true;
+          onComplete?.();
         }
-        
-        map.off('moveend', handleMoveEnd);
-        onComplete?.();
-      }, 1100);
+      }, 2000); // Increased timeout to match animation duration
+      
+      return () => {
+        clearTimeout(initTimeout);
+        if (moveEndHandler) {
+          map.off('moveend', moveEndHandler);
+        }
+        clearTimeout(fallbackTimeout);
+      };
     }
   }, [coords, map, onComplete]);
   
   return null;
 };
 
-const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange, onNextPin }: { 
+const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange, mapNotes }: { 
     onImportPhotos: () => void;
     onImportData: () => void;
     mapStyle: 'standard' | 'satellite';
     onMapStyleChange: (style: 'standard' | 'satellite') => void;
-    onNextPin: () => void;
+    mapNotes: Note[];
 }) => {
     const map = useMap();
     const [showImportMenu, setShowImportMenu] = useState(false);
+    const [showLocateMenu, setShowLocateMenu] = useState(false);
+    const [showLocationError, setShowLocationError] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
+    const locateMenuRef = useRef<HTMLDivElement>(null);
     
-    const locate = () => {
-        map.locate().on("locationfound", function (e) {
-            map.flyTo(e.latlng, 16);
+    const requestLocationPermission = (): Promise<GeolocationPosition> => {
+        return new Promise((resolve, reject) => {
+            if (!navigator.geolocation) {
+                reject(new Error('Geolocation is not supported by this browser'));
+                return;
+            }
+            
+            navigator.geolocation.getCurrentPosition(
+                (position) => resolve(position),
+                (error) => reject(error),
+                {
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    maximumAge: 0
+                }
+            );
         });
     };
     
-    // Close menu when clicking outside
+    const checkLocationPermission = async (): Promise<string> => {
+        // Check if Permissions API is available
+        if ('permissions' in navigator) {
+            try {
+                const result = await navigator.permissions.query({ name: 'geolocation' as PermissionName });
+                return result.state; // 'granted', 'denied', or 'prompt'
+            } catch (e) {
+                // Permissions API might not support 'geolocation' name in some browsers
+                return 'unknown';
+            }
+        }
+        return 'unknown';
+    };
+    
+    const getLocationErrorMessage = (error: any, permissionState?: string): string => {
+        if (!error) {
+            if (permissionState === 'denied') {
+                return 'Location permission was denied. Please enable location access in your browser settings.';
+            }
+            return 'Unable to get your current location.';
+        }
+        
+        const errorCode = error.code;
+        
+        // Check error codes
+        if (errorCode === 1) { // PERMISSION_DENIED
+            return 'Location permission was denied. Please enable location access in your browser settings and ensure your device location services are enabled.';
+        } else if (errorCode === 2) { // POSITION_UNAVAILABLE
+            return 'Location information is unavailable. Possible causes:\n• Device location services are disabled\n• GPS signal is weak or unavailable\n• You may be in a location where GPS cannot work (e.g., indoors, underground)';
+        } else if (errorCode === 3) { // TIMEOUT
+            return 'Location request timed out. This may happen if:\n• GPS signal is too weak\n• Location services are slow to respond\n• Network connectivity issues\n\nPlease try again or check your device location settings.';
+        }
+        
+        // Check error message for additional clues
+        const errorMessage = error.message || '';
+        if (errorMessage.includes('timeout') || errorMessage.includes('Timeout')) {
+            return 'Location request timed out. Please ensure your device location services are enabled and try again.';
+        }
+        if (errorMessage.includes('denied') || errorMessage.includes('permission')) {
+            return 'Location permission issue. Please check:\n• Browser location permissions\n• Device location services (system settings)\n• Try refreshing the page and granting permission again';
+        }
+        if (errorMessage.includes('unavailable') || errorMessage.includes('not available')) {
+            return 'Location is currently unavailable. Please check:\n• Device location services are enabled\n• GPS/Wi-Fi location is enabled\n• You are in an area with location coverage';
+        }
+        
+        // Default error message
+        return `Unable to get your current location. Error: ${errorMessage || 'Unknown error'}\n\nPlease check:\n• Browser location permissions\n• Device location services (system settings)\n• GPS signal strength\n• Network connectivity`;
+    };
+    
+    const [locationErrorMessage, setLocationErrorMessage] = useState<string>('');
+    
+    const locateToCurrentPosition = async () => {
+        // Check permission state first
+        let permissionState: string = 'unknown';
+        try {
+            permissionState = await checkLocationPermission();
+            console.log('Location permission state:', permissionState);
+        } catch (e) {
+            console.warn('Failed to check permission state:', e);
+        }
+        
+        // Use Leaflet's locate directly - it handles permission requests internally
+        // and is more reliable than calling navigator.geolocation separately
+        try {
+            const locationControl = map.locate({
+                setView: false,
+                watch: false,
+                enableHighAccuracy: true,
+                timeout: 15000,
+                maximumAge: 0
+            });
+            
+            // Store permission state in closure for error handler
+            const currentPermissionState = permissionState;
+            
+            const handleLocationFound = (e: L.LocationEvent) => {
+                console.log('Location found:', e.latlng);
+                map.flyTo(e.latlng, 16);
+                // Clean up listeners
+                locationControl.off("locationfound", handleLocationFound);
+                locationControl.off("locationerror", handleLocationError);
+            };
+            
+            const handleLocationError = (e: L.ErrorEvent) => {
+                console.warn("Location error:", e);
+                console.warn("Error code:", e.code);
+                console.warn("Error message:", e.message);
+                
+                // Check permission state again in case it changed
+                checkLocationPermission().then(state => {
+                    const errorMsg = getLocationErrorMessage(e, state || currentPermissionState);
+                    setLocationErrorMessage(errorMsg);
+                    setShowLocationError(true);
+                }).catch(() => {
+                    const errorMsg = getLocationErrorMessage(e, currentPermissionState);
+                    setLocationErrorMessage(errorMsg);
+                    setShowLocationError(true);
+                });
+                
+                // Clean up listeners
+                locationControl.off("locationfound", handleLocationFound);
+                locationControl.off("locationerror", handleLocationError);
+            };
+            
+            locationControl.on("locationfound", handleLocationFound);
+            locationControl.on("locationerror", handleLocationError);
+        } catch (error: any) {
+            console.warn("Failed to start location request:", error);
+            const errorMsg = getLocationErrorMessage(error, permissionState);
+            setLocationErrorMessage(errorMsg);
+            setShowLocationError(true);
+        }
+    };
+    
+    const locateToLatestPin = () => {
+        if (mapNotes.length > 0) {
+            const latestNote = mapNotes[mapNotes.length - 1];
+            map.flyTo([latestNote.coords.lat, latestNote.coords.lng], 16);
+        }
+    };
+    
+    // Close menus when clicking outside
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
             if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
                 setShowImportMenu(false);
             }
+            if (locateMenuRef.current && !locateMenuRef.current.contains(event.target as Node)) {
+                setShowLocateMenu(false);
+            }
         };
-        if (showImportMenu) {
+        if (showImportMenu || showLocateMenu) {
             document.addEventListener('mousedown', handleClickOutside);
             return () => document.removeEventListener('mousedown', handleClickOutside);
         }
-    }, [showImportMenu]);
+    }, [showImportMenu, showLocateMenu]);
     
     return (
         <div 
-            className="flex flex-col gap-2 pointer-events-auto"
+            className="flex flex-row gap-[6px] pointer-events-auto"
             onPointerDown={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
         >
-            <button 
-                onClick={(e) => { e.stopPropagation(); locate(); }}
-                className="bg-white p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors"
-                title="Locate Me"
-            >
-                <Locate size={20} />
-            </button>
+            <div className="relative" ref={locateMenuRef}>
+                <button 
+                    onClick={(e) => { 
+                        e.stopPropagation(); 
+                        setShowLocateMenu(!showLocateMenu);
+                    }}
+                    className="bg-white p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-12 h-12 flex items-center justify-center"
+                    title="Locate"
+                >
+                    <Locate size={20} />
+                </button>
+                {showLocateMenu && (
+                    <div className="absolute left-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-[2000]">
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                locateToCurrentPosition();
+                                setShowLocateMenu(false);
+                            }}
+                            className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 text-gray-700 whitespace-nowrap"
+                        >
+                            Locate to my Position
+                        </button>
+                        <div className="h-px bg-gray-100 my-1" />
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                locateToLatestPin();
+                                setShowLocateMenu(false);
+                            }}
+                            disabled={mapNotes.length === 0}
+                            className={`w-full text-left px-4 py-2.5 text-sm ${
+                                mapNotes.length === 0 
+                                    ? 'text-gray-400 cursor-not-allowed' 
+                                    : 'text-gray-700 hover:bg-gray-50'
+                            }`}
+                        >
+                            Locate to Latest Pin
+                        </button>
+                    </div>
+                )}
+            </div>
             <button 
                 onClick={(e) => { 
                     e.stopPropagation(); 
                     onMapStyleChange(mapStyle === 'standard' ? 'satellite' : 'standard');
                 }}
-                className={`p-3 rounded-xl shadow-lg transition-colors ${
+                className={`p-3 rounded-xl shadow-lg transition-colors w-12 h-12 flex items-center justify-center ${
                     mapStyle === 'satellite' 
                         ? 'bg-[#FFDD00] text-gray-900' 
                         : 'bg-white hover:bg-yellow-50 text-gray-700'
@@ -339,20 +540,13 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
             >
                 <Satellite size={20} />
             </button>
-            <button 
-                onClick={(e) => { e.stopPropagation(); onNextPin(); }}
-                className="bg-white p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors"
-                title="Next Pin"
-            >
-                <ArrowRight size={20} />
-            </button>
             <div className="relative" ref={menuRef}>
                 <button 
                     onClick={(e) => { 
                         e.stopPropagation(); 
                         setShowImportMenu(!showImportMenu);
                     }}
-                    className="bg-white p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors"
+                    className="bg-white p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-12 h-12 flex items-center justify-center"
                     title="Import"
                 >
                     <svg width="20" height="20" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -389,6 +583,29 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                     </div>
                 )}
             </div>
+            
+            {/* Location Error Dialog */}
+            {showLocationError && (
+                <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-black bg-opacity-50">
+                    <div className="bg-white rounded-xl shadow-xl p-6 max-w-md mx-4 max-h-[80vh] overflow-y-auto">
+                        <h3 className="text-lg font-semibold text-gray-900 mb-3">Location Failed</h3>
+                        <div className="text-sm text-gray-600 mb-4 whitespace-pre-line leading-relaxed">
+                            {locationErrorMessage || 'Unable to get your current location.'}
+                        </div>
+                        <div className="flex gap-2 justify-end">
+                            <button
+                                onClick={() => {
+                                    setShowLocationError(false);
+                                    setLocationErrorMessage('');
+                                }}
+                                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                            >
+                                OK
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
@@ -591,7 +808,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const [mapStyle, setMapStyle] = useState<'standard' | 'satellite'>('standard');
   
   // Current marker index being viewed
-  const [currentPinIndex, setCurrentPinIndex] = useState(0);
 
   const defaultCenter: [number, number] = [28.1847, 112.9467];
   const isMapMode = project.type === 'map';
@@ -726,23 +942,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     onToggleEditor(true);
   };
 
-  // Move to next pin
-  const moveToNextPin = () => {
-    if (!mapInstance || mapNotes.length === 0) return;
-    
-    // If current index is out of range, reset to 0
-    if (currentPinIndex >= mapNotes.length) {
-      setCurrentPinIndex(0);
-    }
-    
-    const nextIndex = (currentPinIndex + 1) % mapNotes.length;
-    const nextNote = mapNotes[nextIndex];
-    
-    if (nextNote) {
-      mapInstance.flyTo([nextNote.coords.lat, nextNote.coords.lng], 16, { duration: 1.5 });
-      setCurrentPinIndex(nextIndex);
-    }
-  };
   
   // Save current note without closing editor
   const saveCurrentNoteWithoutClose = (noteData: Partial<Note>) => {
@@ -1541,9 +1740,15 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       )}
       <MapContainer 
         key={project.id} 
-        center={isMapMode ? defaultCenter : [0, 0]} 
+        center={
+          isMapMode 
+            ? (mapNotes.length > 0 
+                ? [mapNotes[mapNotes.length - 1].coords.lat, mapNotes[mapNotes.length - 1].coords.lng]
+                : defaultCenter)
+            : [0, 0]
+        } 
         zoom={isMapMode ? 16 : -8}
-        minZoom={isMapMode ? 13 : -20} 
+        minZoom={isMapMode ? 6 : -20} 
         maxZoom={isMapMode ? 19 : 2}
         crs={isMapMode ? L.CRS.EPSG3857 : L.CRS.Simple}
         style={{ height: '100%', width: '100%' }}
@@ -1573,7 +1778,14 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         <MapLongPressHandler onLongPress={handleLongPress} />
         
         {isMapMode && (
-          <MapCenterHandler center={defaultCenter} zoom={16} />
+          <MapCenterHandler 
+            center={
+              mapNotes.length > 0 
+                ? [mapNotes[mapNotes.length - 1].coords.lat, mapNotes[mapNotes.length - 1].coords.lng]
+                : defaultCenter
+            } 
+            zoom={16} 
+          />
         )}
         
         {isMapMode && clusteredMarkers.length > 0 ? (
@@ -1677,7 +1889,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 onImportData={() => dataImportInputRef.current?.click()}
                 mapStyle={mapStyle}
                 onMapStyleChange={setMapStyle}
-                onNextPin={moveToNextPin}
+                mapNotes={mapNotes}
               />
               <div 
                   className="flex-1 max-w-md relative group pointer-events-auto"

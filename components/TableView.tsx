@@ -1,16 +1,18 @@
 import React, { useState, useMemo } from 'react';
 import { Note, Project, Frame } from '../types';
-import { GripVertical, Edit2, Check, Plus, X } from 'lucide-react';
+import { GripVertical, Edit2, Check, Plus, X, ExternalLink } from 'lucide-react';
 import { TAG_COLORS } from '../constants';
 import { generateId } from '../utils';
+import { NoteEditor } from './NoteEditor';
 
 interface TableViewProps {
   project: Project;
   onUpdateNote: (note: Note) => void;
   onUpdateFrames?: (frames: Frame[]) => void;
+  onSwitchToBoardView?: (coords?: { x: number; y: number }) => void;
 }
 
-export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onUpdateFrames }) => {
+export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onUpdateFrames, onSwitchToBoardView }) => {
   const [tableLevel, setTableLevel] = useState<'Primary' | 'Secondary'>('Primary');
   const [draggedNoteId, setDraggedNoteId] = useState<string | null>(null);
   const [draggedOverGroup, setDraggedOverGroup] = useState<string | null>(null);
@@ -19,8 +21,10 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
   const [editingFrameId, setEditingFrameId] = useState<string | null>(null);
   const [editingFrameName, setEditingFrameName] = useState('');
   const [addingTagNoteId, setAddingTagNoteId] = useState<string | null>(null);
+  const [editingTagId, setEditingTagId] = useState<{ noteId: string; tagId: string } | null>(null);
   const [newTagLabel, setNewTagLabel] = useState('');
   const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0]);
+  const [editorNoteId, setEditorNoteId] = useState<string | null>(null);
 
   // Only show standard notes
   const standardNotes = useMemo(() => 
@@ -178,19 +182,49 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
       setNewTagLabel('');
       setNewTagColor(TAG_COLORS[0]);
       setAddingTagNoteId(null);
+      setEditingTagId(null);
       return;
     }
     
-    const newTag = {
-      id: generateId(),
-      label: newTagLabel.trim(),
-      color: newTagColor
-    };
+    if (editingTagId && editingTagId.noteId === note.id) {
+      // Update existing tag
+      const updatedTags = note.tags.map(t => 
+        t.id === editingTagId.tagId 
+          ? { ...t, label: newTagLabel.trim(), color: newTagColor }
+          : t
+      );
+      onUpdateNote({ ...note, tags: updatedTags });
+      setEditingTagId(null);
+    } else {
+      // Create new tag
+      const newTag = {
+        id: generateId(),
+        label: newTagLabel.trim(),
+        color: newTagColor
+      };
+      onUpdateNote({ ...note, tags: [...note.tags, newTag] });
+    }
     
-    onUpdateNote({ ...note, tags: [...note.tags, newTag] });
     setNewTagLabel('');
     setNewTagColor(TAG_COLORS[0]);
     setAddingTagNoteId(null);
+  };
+
+  const handleEditTag = (note: Note, tagId: string) => {
+    const tag = note.tags.find(t => t.id === tagId);
+    if (tag) {
+      setEditingTagId({ noteId: note.id, tagId: tag.id });
+      setNewTagLabel(tag.label);
+      setNewTagColor(tag.color);
+      setAddingTagNoteId(null);
+    }
+  };
+
+  const handleCancelTagEdit = () => {
+    setNewTagLabel('');
+    setNewTagColor(TAG_COLORS[0]);
+    setAddingTagNoteId(null);
+    setEditingTagId(null);
   };
 
   const handleRemoveTag = (note: Note, tagId: string) => {
@@ -214,7 +248,7 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              Primary
+              Primary ({standardNotes.length})
             </button>
             <button
               onClick={() => setTableLevel('Secondary')}
@@ -224,7 +258,7 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              Secondary
+              Secondary ({compactNotes.length})
             </button>
           </div>
         </div>
@@ -301,20 +335,36 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
                   <div className="flex-1 flex items-center gap-2 box-border overflow-hidden">
                     <GripVertical size={16} className="text-gray-400 flex-shrink-0" />
                     {editingNoteId === note.id ? (
-                      <textarea
-                        autoFocus
-                        value={editingText}
-                        onChange={(e) => setEditingText(e.target.value)}
-                        onBlur={() => handleTextSave(note)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
+                      <div className="flex-1 flex items-center gap-2">
+                        <textarea
+                          autoFocus
+                          value={editingText}
+                          onChange={(e) => setEditingText(e.target.value)}
+                          onBlur={() => handleTextSave(note)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              handleTextSave(note);
+                            }
+                          }}
+                          className="flex-1 p-1 border border-[#FFDD00] rounded-lg outline-none resize-none"
+                          rows={2}
+                        />
+                        <button
+                          onMouseDown={(e) => {
                             e.preventDefault();
-                            handleTextSave(note);
-                          }
-                        }}
-                        className="w-full p-1 border border-[#FFDD00] rounded-lg outline-none resize-none"
-                        rows={2}
-                      />
+                            e.stopPropagation();
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditorNoteId(note.id);
+                          }}
+                          className="flex-shrink-0 p-1.5 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+                          title="打开标签编辑器"
+                        >
+                          <ExternalLink size={16} />
+                        </button>
+                      </div>
                     ) : (
                       <div
                         onClick={() => handleTextEdit(note)}
@@ -329,18 +379,52 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
                   <div className="tag-content-column flex gap-2 flex-nowrap items-center overflow-hidden flex-shrink-0">
                     <div className="flex gap-2 flex-nowrap items-center overflow-x-auto scrollbar-hide" style={{ width: '100%', maxWidth: '100%' }}>
                       {note.tags.map(tag => (
-                        <span
-                          key={tag.id}
-                          className="flex-shrink-0 h-6 px-2.5 rounded-full text-xs font-bold text-white shadow-sm flex items-center gap-1"
-                          style={{ backgroundColor: tag.color }}
-                        >
-                          {tag.label}
-                          <button onClick={() => handleRemoveTag(note, tag.id)}>
-                            <X size={10} />
-                          </button>
-                        </span>
+                        editingTagId && editingTagId.noteId === note.id && editingTagId.tagId === tag.id ? (
+                          <div key={tag.id} className="flex items-center gap-0.5 bg-white rounded-full shadow-sm p-0.5 pr-1 h-8 flex-shrink-0" style={{ maxWidth: '100%', overflow: 'hidden' }}>
+                            <input
+                              autoFocus
+                              className="text-xs bg-transparent outline-none ml-1.5 text-gray-700 placeholder-gray-400 flex-shrink-0"
+                              style={{ width: '40px', minWidth: '40px' }}
+                              placeholder="Tag"
+                              value={newTagLabel}
+                              onChange={(e) => setNewTagLabel(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleAddTag(note);
+                                if (e.key === 'Escape') handleCancelTagEdit();
+                              }}
+                            />
+                            <div className="flex gap-0.5 pl-0.5 flex-shrink-0">
+                              {TAG_COLORS.slice(0, 5).map(c => (
+                                <button
+                                  key={c}
+                                  onClick={() => setNewTagColor(c)}
+                                  style={{ backgroundColor: c }}
+                                  className={`w-3 h-3 rounded-full transition-transform flex-shrink-0 ${newTagColor === c ? 'ring-1 ring-gray-300' : ''}`}
+                                />
+                              ))}
+                            </div>
+                            <button 
+                              onClick={() => handleAddTag(note)} 
+                              className="ml-0.5 text-green-500 hover:text-green-600 active:scale-90 transition-transform flex-shrink-0"
+                            >
+                              <Check size={14} />
+                            </button>
+                          </div>
+                        ) : (
+                          <span
+                            key={tag.id}
+                            onClick={() => handleEditTag(note, tag.id)}
+                            className="flex-shrink-0 h-6 px-2.5 rounded-full text-xs font-bold text-white shadow-sm flex items-center gap-1 cursor-pointer hover:opacity-80 transition-opacity"
+                            style={{ backgroundColor: tag.color }}
+                          >
+                            {tag.label}
+                            <button onClick={(e) => { e.stopPropagation(); handleRemoveTag(note, tag.id); }}>
+                              <X size={10} />
+                            </button>
+                          </span>
+                        )
                       ))}
-                      {addingTagNoteId === note.id ? (
+                      {addingTagNoteId === note.id && !editingTagId ? (
                         <div className="flex items-center gap-0.5 bg-white rounded-full shadow-sm p-0.5 pr-1 h-8 flex-shrink-0" style={{ maxWidth: '100%', overflow: 'hidden' }}>
                           <input
                             autoFocus
@@ -351,7 +435,7 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
                             onChange={(e) => setNewTagLabel(e.target.value)}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') handleAddTag(note);
-                              if (e.key === 'Escape') { setAddingTagNoteId(null); setNewTagLabel(''); setNewTagColor(TAG_COLORS[0]); }
+                              if (e.key === 'Escape') handleCancelTagEdit();
                             }}
                           />
                           <div className="flex gap-0.5 pl-0.5 flex-shrink-0">
@@ -371,14 +455,14 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
                             <Check size={14} />
                           </button>
                         </div>
-                      ) : (
+                      ) : !editingTagId ? (
                         <button
                           onClick={() => { setAddingTagNoteId(note.id); setNewTagColor(TAG_COLORS[0]); }}
                           className="flex-shrink-0 h-6 px-2 bg-white/60 hover:bg-white rounded-full text-xs font-bold text-gray-500 shadow-sm flex items-center transition-all"
                         >
                           + Tag
                         </button>
-                      )}
+                      ) : null}
                     </div>
                   </div>
                 </div>
@@ -447,6 +531,25 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
           </div>
         )}
       </div>
+      
+      {/* Note Editor */}
+      {editorNoteId && (
+        <NoteEditor
+          initialNote={project.notes.find(n => n.id === editorNoteId)}
+          isOpen={true}
+          onClose={() => setEditorNoteId(null)}
+          onSave={(updatedNote) => {
+            if (editorNoteId) {
+              const existingNote = project.notes.find(n => n.id === editorNoteId);
+              if (existingNote) {
+                onUpdateNote({ ...existingNote, ...updatedNote });
+              }
+            }
+            setEditorNoteId(null);
+          }}
+          onSwitchToBoardView={onSwitchToBoardView}
+        />
+      )}
     </div>
   );
 };

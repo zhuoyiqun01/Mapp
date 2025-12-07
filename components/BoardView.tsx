@@ -3,7 +3,7 @@ import { Note, Frame, Connection } from '../types';
 import { motion } from 'framer-motion';
 import { NoteEditor } from './NoteEditor';
 import { ZoomSlider } from './ZoomSlider';
-import { Type, StickyNote, X, Pencil, Check, Minus, Move, ArrowUp, Hash, Plus, Image as ImageIcon, FileJson, Locate } from 'lucide-react';
+import { Type, StickyNote, X, Pencil, Check, Minus, Move, ArrowUp, Hash, Plus, Image as ImageIcon, FileJson, Locate, Layers, GitBranch } from 'lucide-react';
 import exifr from 'exifr';
 import { generateId, fileToBase64 } from '../utils';
 
@@ -11,7 +11,7 @@ import { generateId, fileToBase64 } from '../utils';
 const CONNECTION_OFFSET = 40; // 连接线从连接点延伸的距离
 const CONNECTION_POINT_SIZE = 6; // 连接点的大小（宽高，单位：像素）
 const CONNECTION_POINT_DETECT_RADIUS = 20; // 连接点检测半径
-const CONNECTION_LINE_WIDTH = 6; // 连接线宽度
+const CONNECTION_LINE_WIDTH = 4; // 连接线宽度
 const CONNECTION_LINE_CLICKABLE_WIDTH = 40; // 连接线可点击区域宽度（手机端友好）
 const CONNECTION_LINE_CORNER_RADIUS = 32; // 连接线转角圆角半径
 const SVG_OVERFLOW_PADDING = 500; // SVG 容器的溢出边距
@@ -49,6 +49,16 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   
   // Edit Mode State
   const [isEditMode, setIsEditMode] = useState(false);
+  
+  // Layer Visibility State
+  const [layerVisibility, setLayerVisibility] = useState({
+    frame: true,
+    primary: true,
+    secondary: true,
+    text: true,
+    connects: true,
+  });
+  const [showLayerPanel, setShowLayerPanel] = useState(false);
   
   // Layout state: global standard size scale is stored in project.standardSizeScale
   
@@ -2549,12 +2559,12 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                 backgroundColor: 'rgba(255, 255, 255, 1)',
                 border: '2px dashed rgba(156, 163, 175, 0.8)',
                 borderRadius: '12px',
-                zIndex: -1,
+                zIndex: 10,
               }}
             />
           )}
           
-          {frames.map((frame) => (
+          {layerVisibility.frame && frames.map((frame) => (
             <div
               key={frame.id}
               className="absolute transition-colors"
@@ -2565,7 +2575,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                 height: `${frame.height}px`,
                 backgroundColor: selectedFrameId === frame.id ? 'rgba(255, 221, 0, 0.2)' : frame.color,
                 borderRadius: '12px',
-                zIndex: selectedFrameId === frame.id ? 500 : -1,
+                zIndex: selectedFrameId === frame.id ? 1000 : 10,
                 pointerEvents: 'none',
               }}
             >
@@ -2573,7 +2583,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               <div
                 className="absolute inset-0 pointer-events-none"
                 style={{
-                  border: selectedFrameId === frame.id ? '4px solid #FFDD00' : '4px solid rgba(156, 163, 175, 0.3)',
+                  border: selectedFrameId === frame.id ? '2px solid #FFDD00' : '2px solid rgba(156, 163, 175, 0.3)',
                   borderRadius: '12px',
                   transform: `scale(${1 / transform.scale})`,
                   transformOrigin: 'top left',
@@ -2861,19 +2871,36 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
           ))}
           
           {/* Frame Titles Layer - Above Notes */}
-          {frames.map((frame) => (
-            <div
-              key={`title-${frame.id}`}
-              className="absolute -top-8 left-0 px-3 py-1 bg-gray-500/50 text-white text-sm font-bold rounded-lg shadow-md flex items-center gap-2 pointer-events-auto whitespace-nowrap"
-              style={{ 
-                left: `${frame.x}px`,
-                top: `${frame.y - 32}px`,
-                zIndex: selectedFrameId === frame.id ? 501 : 450,
-                cursor: draggingFrameId === frame.id ? 'grabbing' : 'grab',
-                transform: `scale(${1 / transform.scale})`,
-                transformOrigin: 'top left',
-                wordBreak: 'keep-all',
-              }}
+          {layerVisibility.frame && frames.map((frame) => (
+            <>
+              {/* Frame border in title layer with 5% opacity */}
+              <div
+                key={`frame-border-title-${frame.id}`}
+                className="absolute pointer-events-none"
+                style={{
+                  left: `${frame.x}px`,
+                  top: `${frame.y}px`,
+                  width: `${frame.width * transform.scale}px`,
+                  height: `${frame.height * transform.scale}px`,
+                  border: '2px solid rgba(0, 0, 0, 0.05)',
+                  borderRadius: '12px',
+                  zIndex: selectedFrameId === frame.id ? 1001 : 200,
+                  transform: `scale(${1 / transform.scale})`,
+                  transformOrigin: 'top left',
+                }}
+              />
+              <div
+                key={`title-${frame.id}`}
+                className="absolute -top-8 left-0 px-3 py-1 bg-gray-500/50 text-white text-sm font-bold rounded-lg shadow-md flex items-center gap-2 pointer-events-auto whitespace-nowrap"
+                style={{ 
+                  left: `${frame.x}px`,
+                  top: `${frame.y - 32}px`,
+                  zIndex: selectedFrameId === frame.id ? 1002 : 201,
+                  cursor: draggingFrameId === frame.id ? 'grabbing' : 'grab',
+                  transform: `scale(${1 / transform.scale})`,
+                  transformOrigin: 'top left',
+                  wordBreak: 'keep-all',
+                }}
               onDoubleClick={(e) => {
                 e.stopPropagation();
                 setEditingFrameId(frame.id);
@@ -3000,8 +3027,10 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                 </button>
               )}
             </div>
+            </>
           ))}
 
+          {layerVisibility.connects && (
           <svg 
             className="absolute pointer-events-none" 
             style={{ 
@@ -3009,7 +3038,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               top: `-${SVG_OVERFLOW_PADDING}px`,
               width: `calc(100% + ${SVG_OVERFLOW_PADDING * 2}px)`,
               height: `calc(100% + ${SVG_OVERFLOW_PADDING * 2}px)`,
-              zIndex: 10,
+              zIndex: 100,
               overflow: 'visible'
             }}
           >
@@ -3198,14 +3227,25 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               );
             })()}
           </svg>
+          )}
           {notes.map((note) => {
+              // Check layer visibility based on note variant
+              const isText = note.variant === 'text';
+              const isCompact = note.variant === 'compact';
+              const isStandard = !isText && !isCompact;
+              
+              // Determine if this note should be visible
+              let shouldShow = false;
+              if (isText && layerVisibility.text) shouldShow = true;
+              else if (isCompact && layerVisibility.secondary) shouldShow = true;
+              else if (isStandard && layerVisibility.primary) shouldShow = true;
+              
+              if (!shouldShow) return null;
+              
               const isDragging = draggingNoteId === note.id;
               const isInMultiSelect = selectedNoteIds.has(note.id);
               const currentX = note.boardX + (isDragging ? dragOffset.x : 0) + (isMultiSelectDragging && isInMultiSelect ? multiSelectDragOffset.x : 0);
               const currentY = note.boardY + (isDragging ? dragOffset.y : 0) + (isMultiSelectDragging && isInMultiSelect ? multiSelectDragOffset.y : 0);
-              
-              const isText = note.variant === 'text';
-              const isCompact = note.variant === 'compact';
               
               // 检查Note是否在任何Frame内
               const containingFrame = frames.find(frame => isNoteInFrame(note, frame));
@@ -3241,7 +3281,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                       position: 'absolute', 
                       left: currentX, 
                       top: currentY,
-                      zIndex: (isDragging || (isMultiSelectDragging && isInMultiSelect)) ? 100 : 1,
+                      zIndex: (selectedNoteId === note.id || selectedNoteIds.has(note.id) || isDragging || (isMultiSelectDragging && isInMultiSelect)) ? 1000 : (isCompact ? 60 : 50),
                       width: isText ? 'fit-content' : noteWidth,
                       height: noteHeight,
                       minWidth: isText ? '100px' : undefined,
@@ -3441,7 +3481,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                                   )}
                                   {!isCompact && (
                                     <div className="mt-auto flex flex-wrap gap-1 items-center justify-between">
-                                        <div className="flex flex-wrap gap-1">
+                                        <div className="flex flex-wrap gap-1" style={{ position: 'relative', zIndex: 70 }}>
                                             {note.tags.map(t => (
                                                 <span key={t.id} className="flex-shrink-0 h-6 px-2.5 rounded-full text-xs font-bold text-white shadow-sm flex items-center gap-1" style={{ backgroundColor: t.color }}>{t.label}</span>
                                             ))}
@@ -3628,12 +3668,12 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
         {/* Edit Toolbar: Unified White Buttons at Top Left */}
         <div 
             className={`fixed top-4 z-[500] pointer-events-auto animate-in fade-in flex items-center gap-2 ${isEditMode ? 'left-1/2 -translate-x-1/2' : 'left-4 slide-in-from-left-4'}`}
-            style={{ height: '40px' }}
+            style={{ height: '48px' }}
             onPointerDown={(e) => e.stopPropagation()} 
         >
             {/* Layout Buttons: L+ and L- */}
             {isEditMode && (
-                <div className="bg-white rounded-xl shadow-lg border border-gray-100 flex gap-2 h-full items-center p-1">
+                <div className="bg-white rounded-xl border border-gray-100 flex gap-2 items-center p-1" style={{ height: '48px' }}>
                     <button
                         onClick={() => {
                             if (!onUpdateProject || !project) return;
@@ -3722,12 +3762,12 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                     </button>
                 </div>
             )}
-            <div className={`bg-white rounded-xl shadow-lg border border-gray-100 flex gap-2 h-full items-center ${isEditMode ? 'p-1' : ''}`}>
+            <div className={`bg-white rounded-xl border border-gray-100 flex gap-2 items-center ${isEditMode ? 'p-1' : ''}`} style={{ height: '48px' }}>
                 {!isEditMode ? (
                     // 非编辑模式：显示进入编辑模式的按钮
                     <button
                         onClick={() => setIsEditMode(true)}
-                        className="p-3 hover:bg-yellow-50 text-gray-700 transition-colors"
+                        className="bg-white p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-12 h-12 flex items-center justify-center"
                         title="进入编辑模式"
                     >
                         <Pencil size={20} />
@@ -3773,10 +3813,127 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
             </div>
         </div>
 
-        {/* Import button below edit toolbar */}
+        {/* Layer button - horizontal layout with edit button (non-edit mode only) */}
         {!isEditMode && (
             <div 
-                className="fixed top-16 left-4 z-[500] pointer-events-auto flex flex-col gap-2"
+                className="fixed top-4 left-[70px] z-[500] pointer-events-auto"
+                onPointerDown={(e) => e.stopPropagation()}
+            >
+                <div className="relative">
+                    <button 
+                        onClick={(e) => { 
+                            e.stopPropagation(); 
+                            setShowLayerPanel(!showLayerPanel);
+                        }}
+                        className={`bg-white p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-12 h-12 flex items-center justify-center ${showLayerPanel ? 'bg-yellow-50' : ''}`}
+                        title="图层"
+                    >
+                        <Layers size={20} />
+                    </button>
+                    {showLayerPanel && (
+                        <div className="absolute left-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-[2000]">
+                            <div className="px-3 py-2 text-xs font-bold text-gray-500 uppercase tracking-wide">Layer</div>
+                            <div className="h-px bg-gray-100 mb-1" />
+                            {/* Connects (连线) - Top */}
+                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
+                                <div className="flex items-center gap-2">
+                                    <GitBranch size={16} className="text-gray-600" strokeWidth={2} />
+                                    <span className="text-sm text-gray-700">Connects</span>
+                                </div>
+                                <input
+                                    type="checkbox"
+                                    checked={layerVisibility.connects}
+                                    onChange={() => setLayerVisibility(prev => ({ ...prev, connects: !prev.connects }))}
+                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
+                                        layerVisibility.connects 
+                                            ? 'bg-[#FFDD00] border-[#FFDD00]' 
+                                            : 'bg-transparent border-[#FFDD00]'
+                                    }`}
+                                />
+                            </div>
+                            {/* Text (文本对象) */}
+                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
+                                <div className="flex items-center gap-2">
+                                    <Type size={16} className="text-gray-600" strokeWidth={2} />
+                                    <span className="text-sm text-gray-700">Text</span>
+                                </div>
+                                <input
+                                    type="checkbox"
+                                    checked={layerVisibility.text}
+                                    onChange={() => setLayerVisibility(prev => ({ ...prev, text: !prev.text }))}
+                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
+                                        layerVisibility.text 
+                                            ? 'bg-[#FFDD00] border-[#FFDD00]' 
+                                            : 'bg-transparent border-[#FFDD00]'
+                                    }`}
+                                />
+                            </div>
+                            {/* Secondary (小便签) */}
+                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
+                                <div className="flex items-center gap-2">
+                                    <StickyNote size={14} className="text-gray-600" strokeWidth={2.3} />
+                                    <span className="text-sm text-gray-700">Secondary</span>
+                                </div>
+                                <input
+                                    type="checkbox"
+                                    checked={layerVisibility.secondary}
+                                    onChange={() => setLayerVisibility(prev => ({ ...prev, secondary: !prev.secondary }))}
+                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
+                                        layerVisibility.secondary 
+                                            ? 'bg-[#FFDD00] border-[#FFDD00]' 
+                                            : 'bg-transparent border-[#FFDD00]'
+                                    }`}
+                                />
+                            </div>
+                            {/* Primary (标准便签) */}
+                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
+                                <div className="flex items-center gap-2">
+                                    <StickyNote size={16} className="text-gray-600" strokeWidth={2} />
+                                    <span className="text-sm text-gray-700">Primary</span>
+                                </div>
+                                <input
+                                    type="checkbox"
+                                    checked={layerVisibility.primary}
+                                    onChange={() => setLayerVisibility(prev => ({ ...prev, primary: !prev.primary }))}
+                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
+                                        layerVisibility.primary 
+                                            ? 'bg-[#FFDD00] border-[#FFDD00]' 
+                                            : 'bg-transparent border-[#FFDD00]'
+                                    }`}
+                                />
+                            </div>
+                            {/* Frame - Bottom */}
+                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
+                                <div className="flex items-center gap-2">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-600">
+                                        <line x1="5" y1="2" x2="5" y2="22" />
+                                        <line x1="19" y1="2" x2="19" y2="22" />
+                                        <line x1="3" y1="5" x2="21" y2="5" />
+                                        <line x1="3" y1="19" x2="21" y2="19" />
+                                    </svg>
+                                    <span className="text-sm text-gray-700">Frame</span>
+                                </div>
+                                <input
+                                    type="checkbox"
+                                    checked={layerVisibility.frame}
+                                    onChange={() => setLayerVisibility(prev => ({ ...prev, frame: !prev.frame }))}
+                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
+                                        layerVisibility.frame 
+                                            ? 'bg-[#FFDD00] border-[#FFDD00]' 
+                                            : 'bg-transparent border-[#FFDD00]'
+                                    }`}
+                                />
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        )}
+
+        {/* Import button - horizontal layout with edit and layer buttons (non-edit mode only) */}
+        {!isEditMode && (
+            <div 
+                className="fixed top-4 left-[124px] z-[500] pointer-events-auto flex flex-col gap-2"
                 ref={menuRef}
                 onPointerDown={(e) => e.stopPropagation()}
             >
@@ -3786,7 +3943,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                             e.stopPropagation(); 
                             setShowImportMenu(!showImportMenu);
                         }}
-                        className="bg-white p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors"
+                        className="bg-white p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-12 h-12 flex items-center justify-center"
                         title="Import"
                     >
                         <svg width="20" height="20" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">

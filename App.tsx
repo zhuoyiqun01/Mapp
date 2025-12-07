@@ -469,10 +469,15 @@ export default function App() {
             navigateToCoords={navigateToMapCoords}
             onNavigateComplete={() => setNavigateToMapCoords(null)}
             onSwitchToBoardView={(coords) => {
-              if (coords) {
-                setNavigateToBoardCoords(coords);
-              }
-              setViewMode('board');
+              // Close editor first to ensure UI state is correct
+              setIsEditorOpen(false);
+              // Use requestAnimationFrame to ensure state updates are batched
+              requestAnimationFrame(() => {
+                if (coords) {
+                  setNavigateToBoardCoords(coords);
+                }
+                setViewMode('board');
+              });
             }}
           />
         ) : viewMode === 'board' ? (
@@ -513,10 +518,17 @@ export default function App() {
             navigateToCoords={navigateToBoardCoords}
             onNavigateComplete={() => setNavigateToBoardCoords(null)}
             onSwitchToMapView={(coords?: { lat: number; lng: number }) => {
-              if (coords) {
-                setNavigateToMapCoords(coords);
-              }
+              // Close editor first to ensure UI state is correct
+              setIsEditorOpen(false);
+              // Switch view first, then set navigation coordinates after a short delay
+              // This ensures MapView is mounted and ready to receive navigation
               setViewMode('map');
+              // Set navigation coordinates after MapView has mounted
+              if (coords) {
+                setTimeout(() => {
+                  setNavigateToMapCoords(coords);
+                }, 100);
+              }
               // Trigger MapView's file input after a short delay
               setTimeout(() => {
                 mapViewFileInputRef.current?.click();
@@ -542,6 +554,12 @@ export default function App() {
                 }
                 return p;
               }));
+            }}
+            onSwitchToBoardView={(coords?: { x: number; y: number }) => {
+              if (coords) {
+                setNavigateToBoardCoords(coords);
+              }
+              setViewMode('board');
             }}
           />
         )}
