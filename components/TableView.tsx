@@ -69,16 +69,38 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
     }));
   }, [compactNotes]);
 
-  // Group notes
+  // Group notes (支持多frame归属，一个note可以出现在多个分组中)
   const groupedNotes = useMemo(() => {
     const groups: { [key: string]: { notes: Note[], frameId?: string } } = {};
     
     standardNotes.forEach(note => {
-      const groupName = note.groupName || 'Ungrouped';
-      if (!groups[groupName]) {
-        groups[groupName] = { notes: [], frameId: note.groupId };
+      // 获取所有frame名称（支持多frame）
+      const groupNames = note.groupNames || (note.groupName ? [note.groupName] : []);
+      const groupIds = note.groupIds || (note.groupId ? [note.groupId] : []);
+      
+      if (groupNames.length > 0) {
+        // 将note添加到所有相关的分组中
+        // 确保groupIds和groupNames长度一致，取较小值避免索引越界
+        const minLength = Math.min(groupNames.length, groupIds.length);
+        for (let index = 0; index < minLength; index++) {
+          const groupName = groupNames[index];
+          const frameId = groupIds[index];
+          if (!groups[groupName]) {
+            groups[groupName] = { notes: [], frameId: frameId };
+          }
+          // 检查是否已经添加过（避免重复）
+          if (!groups[groupName].notes.find(n => n.id === note.id)) {
+            groups[groupName].notes.push(note);
+          }
+        }
+      } else {
+        // Ungrouped notes
+        const groupName = 'Ungrouped';
+        if (!groups[groupName]) {
+          groups[groupName] = { notes: [], frameId: undefined };
+        }
+        groups[groupName].notes.push(note);
       }
-      groups[groupName].notes.push(note);
     });
     
     // Sort by creation time

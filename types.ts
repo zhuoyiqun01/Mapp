@@ -31,8 +31,10 @@ export interface Note {
   variant?: 'standard' | 'text' | 'compact';
   
   // Group/Frame membership
-  groupId?: string; // Frame ID if note is in a frame
-  groupName?: string; // Frame name for export
+  groupId?: string; // Frame ID if note is in a frame (backward compatibility, first frame)
+  groupName?: string; // Frame name for export (backward compatibility, first frame name)
+  groupIds?: string[]; // Frame IDs if note is in multiple frames
+  groupNames?: string[]; // Frame names for export (multiple frames)
   
   // Layout scale for board view
   layoutScale?: number; // Scale factor for layout (default 1)

@@ -50,6 +50,13 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   // Edit Mode State
   const [isEditMode, setIsEditMode] = useState(false);
   
+  // 当编辑模式切换时，清除过滤状态
+  useEffect(() => {
+    if (isEditMode) {
+      setFilterFrameIds(new Set());
+    }
+  }, [isEditMode]);
+  
   // Layer Visibility State
   const [layerVisibility, setLayerVisibility] = useState({
     frame: true,
@@ -100,6 +107,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   const [drawingFrameStart, setDrawingFrameStart] = useState<{ x: number; y: number } | null>(null);
   const [drawingFrameEnd, setDrawingFrameEnd] = useState<{ x: number; y: number } | null>(null);
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
+  // 在非编辑模式下选中的frames用于过滤显示（支持多frame）
+  const [filterFrameIds, setFilterFrameIds] = useState<Set<string>>(new Set());
   const [editingFrameId, setEditingFrameId] = useState<string | null>(null);
   const [editingFrameTitle, setEditingFrameTitle] = useState('');
   const frameTitleInputRef = useRef<HTMLInputElement | null>(null);
@@ -261,7 +270,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   // Keyboard shift key support
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Shift' && isEditMode) {
+      if (e.key === 'Shift') {
         setIsShiftPressed(true);
       }
       // Close import dialog on ESC key
@@ -334,22 +343,30 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
            centerY <= frame.y + frame.height;
   };
 
-  // 更新所有Note的分组信息
+  // 更新所有Note的分组信息（支持多frame归属）
   const updateNoteGroups = () => {
     const updatedNotes = notes.map(note => {
-      // 找到包含此Note的Frame
-      const containingFrame = frames.find(frame => isNoteInFrame(note, frame));
+      // 找到所有包含此Note的Frames
+      const containingFrames = frames.filter(frame => isNoteInFrame(note, frame));
       
-      if (containingFrame) {
+      if (containingFrames.length > 0) {
+        const groupIds = containingFrames.map(f => f.id);
+        const groupNames = containingFrames.map(f => f.title);
+        // 保持向后兼容：如果只有一个frame，也设置groupId和groupName
+        const singleFrame = containingFrames[0];
         return {
           ...note,
-          groupId: containingFrame.id,
-          groupName: containingFrame.title
+          groupIds,
+          groupNames,
+          groupId: singleFrame.id, // 向后兼容
+          groupName: singleFrame.title // 向后兼容
         };
       } else {
         // 不在任何Frame中，清除分组信息
         return {
           ...note,
+          groupIds: undefined,
+          groupNames: undefined,
           groupId: undefined,
           groupName: undefined
         };
@@ -357,10 +374,12 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
     });
     
     // 只在有变化时更新
-    const hasChanges = updatedNotes.some((note, index) => 
-      note.groupId !== notes[index].groupId || 
-      note.groupName !== notes[index].groupName
-    );
+    const hasChanges = updatedNotes.some((note, index) => {
+      const oldNote = notes[index];
+      const oldGroupIds = oldNote.groupIds || (oldNote.groupId ? [oldNote.groupId] : []);
+      const newGroupIds = note.groupIds || (note.groupId ? [note.groupId] : []);
+      return JSON.stringify(oldGroupIds.sort()) !== JSON.stringify(newGroupIds.sort());
+    });
     
     if (hasChanges) {
       updatedNotes.forEach(note => onUpdateNote(note));
@@ -742,29 +761,29 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
         const timer = setTimeout(() => {
             if (!containerRef.current) return;
             
-            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-            notes.forEach(note => {
-                minX = Math.min(minX, note.boardX);
-                minY = Math.min(minY, note.boardY);
-                const w = note.variant === 'text' ? 500 : note.variant === 'compact' ? 180 : 256;
-                const h = note.variant === 'text' ? 100 : note.variant === 'compact' ? 180 : 256;
-                maxX = Math.max(maxX, note.boardX + w);
-                maxY = Math.max(maxY, note.boardY + h);
-            });
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        notes.forEach(note => {
+            minX = Math.min(minX, note.boardX);
+            minY = Math.min(minY, note.boardY);
+            const w = note.variant === 'text' ? 500 : note.variant === 'compact' ? 180 : 256;
+            const h = note.variant === 'text' ? 100 : note.variant === 'compact' ? 180 : 256;
+            maxX = Math.max(maxX, note.boardX + w);
+            maxY = Math.max(maxY, note.boardY + h);
+        });
 
-            const padding = 100;
-            minX -= padding; minY -= padding;
-            maxX += padding; maxY += padding;
-            const contentWidth = maxX - minX;
-            const contentHeight = maxY - minY;
-            const { width: cW, height: cH } = containerRef.current.getBoundingClientRect();
+        const padding = 100;
+        minX -= padding; minY -= padding;
+        maxX += padding; maxY += padding;
+        const contentWidth = maxX - minX;
+        const contentHeight = maxY - minY;
+        const { width: cW, height: cH } = containerRef.current.getBoundingClientRect();
 
-            const scaleX = cW / contentWidth;
-            const scaleY = cH / contentHeight;
+        const scaleX = cW / contentWidth;
+        const scaleY = cH / contentHeight;
             const newScale = Math.min(Math.max(0.2, Math.min(scaleX, scaleY) * 0.9), 4); // 90%缩放以留出边距
 
-            const newX = (cW - contentWidth * newScale) / 2 - minX * newScale;
-            const newY = (cH - contentHeight * newScale) / 2 - minY * newScale;
+        const newX = (cW - contentWidth * newScale) / 2 - minX * newScale;
+        const newY = (cH - contentHeight * newScale) / 2 - minY * newScale;
 
             // 使用动画过渡，避免突然跳跃
             const startTransform = { ...transform };
@@ -1961,7 +1980,13 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               return;
           }
           
-          // 3. 如果在编辑模式，需要点击两次空白处才退出（但不在绘制frame时计数）
+          // 3. 非编辑模式下，点击空白处清除过滤
+          if (!isEditMode && filterFrameIds.size > 0) {
+              setFilterFrameIds(new Set());
+              return;
+          }
+          
+          // 4. 如果在编辑模式，需要点击两次空白处才退出（但不在绘制frame时计数）
           if (isEditMode && !isDrawingFrame) {
               blankClickCountRef.current += 1;
               
@@ -2013,8 +2038,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
       if (!isEditMode) {
           // 阻止默认的长按菜单和事件冒泡，确保note的点击事件被正确处理
           e.preventDefault();
-          e.stopPropagation();
-          
+      e.stopPropagation();
+      
           // 记录当前按下的 note ID 和位置，用于单击检测
           currentNotePressIdRef.current = noteId;
           lastMousePos.current = { x: e.clientX, y: e.clientY };
@@ -2033,8 +2058,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
         setMultiSelectDragOffset({ x: 0, y: 0 });
       } else {
         // Single note drag
-        setDraggingNoteId(noteId);
-        setDragOffset({ x: 0, y: 0 });
+      setDraggingNoteId(noteId);
+      setDragOffset({ x: 0, y: 0 });
       }
       lastMousePos.current = { x: e.clientX, y: e.clientY };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -2142,22 +2167,39 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               const centerX = newBoardX + width / 2;
               const centerY = newBoardY + height / 2;
               
-              // 找到包含新位置的Frame
-              const containingFrame = frames.find(frame => 
+              // 找到所有包含新位置的Frames
+              const containingFrames = frames.filter(frame => 
                 centerX >= frame.x && 
                 centerX <= frame.x + frame.width && 
                 centerY >= frame.y && 
                 centerY <= frame.y + frame.height
               );
               
-              // 更新便签，包括位置和frame关系
-              onUpdateNote({
-                ...selectedNote,
-                boardX: newBoardX,
-                boardY: newBoardY,
-                groupId: containingFrame?.id,
-                groupName: containingFrame?.title
-              });
+              // 更新便签，包括位置和frame关系（支持多frame）
+              if (containingFrames.length > 0) {
+                const groupIds = containingFrames.map(f => f.id);
+                const groupNames = containingFrames.map(f => f.title);
+                const singleFrame = containingFrames[0];
+                onUpdateNote({
+                  ...selectedNote,
+                  boardX: newBoardX,
+                  boardY: newBoardY,
+                  groupIds,
+                  groupNames,
+                  groupId: singleFrame.id, // 向后兼容
+                  groupName: singleFrame.title // 向后兼容
+                });
+              } else {
+                onUpdateNote({
+                  ...selectedNote,
+                  boardX: newBoardX,
+                  boardY: newBoardY,
+                  groupIds: undefined,
+                  groupNames: undefined,
+                  groupId: undefined,
+                  groupName: undefined
+                });
+              }
             }
           });
         }
@@ -2183,10 +2225,10 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
       if (draggingNoteId === note.id && !isZooming && isEditMode) {
           // 如果确实发生了拖动，处理拖动结束
           if (hasMoved || hasMovedEnough) {
-              e.stopPropagation();
-              (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+          e.stopPropagation();
+          (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
 
-              if (dragOffset.x !== 0 || dragOffset.y !== 0) {
+          if (dragOffset.x !== 0 || dragOffset.y !== 0) {
                   // 计算新的位置
                   const newBoardX = note.boardX + dragOffset.x;
                   const newBoardY = note.boardY + dragOffset.y;
@@ -2208,26 +2250,43 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                   const centerX = newBoardX + width / 2;
                   const centerY = newBoardY + height / 2;
                   
-                  // 找到包含新位置的Frame
-                  const containingFrame = frames.find(frame => 
+                  // 找到所有包含新位置的Frames
+                  const containingFrames = frames.filter(frame => 
                     centerX >= frame.x && 
                     centerX <= frame.x + frame.width && 
                     centerY >= frame.y && 
                     centerY <= frame.y + frame.height
                   );
                   
-                  // 更新便签，包括位置和frame关系
-                  onUpdateNote({
+                  // 更新便签，包括位置和frame关系（支持多frame）
+                  if (containingFrames.length > 0) {
+                    const groupIds = containingFrames.map(f => f.id);
+                    const groupNames = containingFrames.map(f => f.title);
+                    const singleFrame = containingFrames[0];
+              onUpdateNote({
+                  ...note,
+                      boardX: newBoardX,
+                      boardY: newBoardY,
+                      groupIds,
+                      groupNames,
+                      groupId: singleFrame.id, // 向后兼容
+                      groupName: singleFrame.title // 向后兼容
+                    });
+                  } else {
+                    onUpdateNote({
                       ...note,
                       boardX: newBoardX,
                       boardY: newBoardY,
-                      groupId: containingFrame?.id,
-                      groupName: containingFrame?.title
-                  });
-              }
-              setDraggingNoteId(null);
-              setDragOffset({ x: 0, y: 0 });
-              lastMousePos.current = null;
+                      groupIds: undefined,
+                      groupNames: undefined,
+                      groupId: undefined,
+                      groupName: undefined
+                    });
+                  }
+          }
+          setDraggingNoteId(null);
+          setDragOffset({ x: 0, y: 0 });
+          lastMousePos.current = null;
               
               // 清理状态
               currentNotePressIdRef.current = null;
@@ -2276,7 +2335,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   const lastClickTimeRef = useRef<number>(0);
 
   const handleNoteClick = (e: React.MouseEvent, note: Note) => {
-      e.stopPropagation();
+      e.stopPropagation(); 
       
       // 如果正在缩放，不触发点击
       if (isZooming) return;
@@ -2470,7 +2529,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
         setSelectedNoteId(null);
       } else {
         // Single note deletion
-        onDeleteNote?.(id);
+      onDeleteNote?.(id);
         // Also remove from selection if it was selected
         if (selectedNoteIds.has(id)) {
           const newSet = new Set(selectedNoteIds);
@@ -2514,9 +2573,27 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
         {isDragging && (
           <div 
             className="absolute inset-0 z-[4000] bg-[#FFDD00]/20 backdrop-blur-sm flex items-center justify-center pointer-events-auto"
-            onClick={() => setIsDragging(false)}
+            onClick={(e) => {
+              // 点击外部区域关闭
+              if (e.target === e.currentTarget) {
+                setIsDragging(false);
+              }
+            }}
           >
-            <div className="bg-white rounded-2xl shadow-2xl p-8 border-4 border-[#FFDD00] pointer-events-none">
+            <div 
+              className="bg-white rounded-2xl shadow-2xl p-8 border-4 border-[#FFDD00] relative"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                onClick={() => setIsDragging(false)}
+                className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors text-gray-500 hover:text-gray-700"
+                title="取消"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
               <div className="text-center">
                 <div className="mb-4 flex justify-center">
                   <svg width="64" height="64" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-gray-700">
@@ -2564,11 +2641,16 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
             />
           )}
           
-          {layerVisibility.frame && frames.map((frame) => (
-            <div
-              key={frame.id}
-              className="absolute transition-colors"
-              style={{
+          {layerVisibility.frame && frames.map((frame) => {
+              // 如果有过滤，只显示选中的frames的框体，但标题始终显示
+              const shouldShowFrame = filterFrameIds.size === 0 || filterFrameIds.has(frame.id);
+              if (!shouldShowFrame) return null;
+              
+              return (
+                <div
+                  key={frame.id}
+                  className="absolute transition-colors"
+                  style={{
                 left: `${frame.x}px`,
                 top: `${frame.y}px`,
                 width: `${frame.width}px`,
@@ -2868,30 +2950,35 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                 </>
               )}
             </div>
-          ))}
+              );
+            })}
           
-          {/* Frame Titles Layer - Above Notes */}
+          {/* Frame Titles Layer - Above Notes - 标题始终显示以便多选 */}
           {layerVisibility.frame && frames.map((frame) => (
             <>
-              {/* Frame border in title layer with 5% opacity */}
-              <div
-                key={`frame-border-title-${frame.id}`}
-                className="absolute pointer-events-none"
-                style={{
-                  left: `${frame.x}px`,
-                  top: `${frame.y}px`,
-                  width: `${frame.width * transform.scale}px`,
-                  height: `${frame.height * transform.scale}px`,
-                  border: '2px solid rgba(0, 0, 0, 0.05)',
-                  borderRadius: '12px',
-                  zIndex: selectedFrameId === frame.id ? 1001 : 200,
-                  transform: `scale(${1 / transform.scale})`,
-                  transformOrigin: 'top left',
-                }}
-              />
+              {/* Frame border in title layer with 5% opacity - 只在frame框体显示时显示边框 */}
+              {(filterFrameIds.size === 0 || filterFrameIds.has(frame.id)) && (
+                <div
+                  key={`frame-border-title-${frame.id}`}
+                  className="absolute pointer-events-none"
+                  style={{
+                    left: `${frame.x}px`,
+                    top: `${frame.y}px`,
+                    width: `${frame.width * transform.scale}px`,
+                    height: `${frame.height * transform.scale}px`,
+                    border: '2px solid rgba(0, 0, 0, 0.05)',
+                    borderRadius: '12px',
+                    zIndex: selectedFrameId === frame.id ? 1001 : 200,
+                    transform: `scale(${1 / transform.scale})`,
+                    transformOrigin: 'top left',
+                  }}
+                />
+              )}
               <div
                 key={`title-${frame.id}`}
-                className="absolute -top-8 left-0 px-3 py-1 bg-gray-500/50 text-white text-sm font-bold rounded-lg shadow-md flex items-center gap-2 pointer-events-auto whitespace-nowrap"
+                className={`absolute -top-8 left-0 px-3 py-1 text-white text-sm font-bold rounded-lg shadow-md flex items-center gap-2 pointer-events-auto whitespace-nowrap ${
+                  filterFrameIds.has(frame.id) ? 'bg-[#FFDD00]' : 'bg-gray-500/50'
+                }`}
                 style={{ 
                   left: `${frame.x}px`,
                   top: `${frame.y - 32}px`,
@@ -2900,6 +2987,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                   transform: `scale(${1 / transform.scale})`,
                   transformOrigin: 'top left',
                   wordBreak: 'keep-all',
+                  opacity: filterFrameIds.size > 0 && !filterFrameIds.has(frame.id) ? 0.3 : 1,
                 }}
               onDoubleClick={(e) => {
                 e.stopPropagation();
@@ -2908,10 +2996,34 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               }}
               onClick={(e) => {
                 e.stopPropagation();
-                if (isZooming || !isEditMode) return;
-                setSelectedFrameId(frame.id);
-                setSelectedNoteId(null);
-                resetBlankClickCount();
+                if (isZooming) return;
+                if (isEditMode) {
+                  setSelectedFrameId(frame.id);
+                  setSelectedNoteId(null);
+                  resetBlankClickCount();
+                } else {
+                  // 非编辑模式下，点击frame标题进行过滤（支持shift多选）
+                  const newFilterFrameIds = new Set(filterFrameIds);
+                  if (isShiftPressed) {
+                    // Shift+点击：切换该frame的选中状态
+                    if (newFilterFrameIds.has(frame.id)) {
+                      newFilterFrameIds.delete(frame.id);
+                    } else {
+                      newFilterFrameIds.add(frame.id);
+                    }
+                  } else {
+                    // 普通点击：如果已选中则取消，否则只选中这一个
+                    if (newFilterFrameIds.has(frame.id)) {
+                      // 如果已选中，则取消选中
+                      newFilterFrameIds.delete(frame.id);
+                    } else {
+                      // 如果未选中，则只选中这一个
+                      newFilterFrameIds.clear();
+                      newFilterFrameIds.add(frame.id);
+                    }
+                  }
+                  setFilterFrameIds(newFilterFrameIds);
+                }
               }}
               onPointerDown={(e) => {
                 e.stopPropagation();
@@ -3088,6 +3200,15 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               if (!pathData) return null;
               const conn = connections[index];
               
+              // 如果有过滤frame，只显示起点属于这些frames的连线
+              if (filterFrameIds.size > 0) {
+                const fromNote = notes.find(n => n.id === conn.fromNoteId);
+                if (!fromNote) return null;
+                const groupIds = fromNote.groupIds || (fromNote.groupId ? [fromNote.groupId] : []);
+                // 检查是否有任何groupIds在filterFrameIds中
+                if (!groupIds.some(id => filterFrameIds.has(id))) return null;
+              }
+              
               const arrowState = conn.arrow || 'forward'; // 默认正向箭头
               
               // 确定箭头标记
@@ -3228,7 +3349,15 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
             })()}
           </svg>
           )}
-          {notes.map((note) => {
+          {notes.filter(note => {
+              // 如果有过滤frames，只显示属于这些frames的便签
+              if (filterFrameIds.size > 0) {
+                const groupIds = note.groupIds || (note.groupId ? [note.groupId] : []);
+                // 检查是否有任何groupIds在filterFrameIds中
+                return groupIds.some(id => filterFrameIds.has(id));
+              }
+              return true;
+            }).map((note) => {
               // Check layer visibility based on note variant
               const isText = note.variant === 'text';
               const isCompact = note.variant === 'compact';
@@ -3271,7 +3400,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
 
               // Get global standard size scale, default to 1
               const standardSizeScale = project?.standardSizeScale || 1;
-              
+
               return (
                 <motion.div
                   key={note.id}
@@ -3482,10 +3611,10 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                                   {!isCompact && (
                                     <div className="mt-auto flex flex-wrap gap-1 items-center justify-between">
                                         <div className="flex flex-wrap gap-1" style={{ position: 'relative', zIndex: 70 }}>
-                                            {note.tags.map(t => (
+                                        {note.tags.map(t => (
                                                 <span key={t.id} className="flex-shrink-0 h-6 px-2.5 rounded-full text-xs font-bold text-white shadow-sm flex items-center gap-1" style={{ backgroundColor: t.color }}>{t.label}</span>
-                                            ))}
-                                        </div>
+                                        ))}
+                                    </div>
                                         {note.coords && note.coords.lat !== 0 && note.coords.lng !== 0 && onSwitchToMapView && (
                                             <button
                                                 onClick={(e) => {
@@ -3601,8 +3730,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
           })()}
         </div>
 
-        {/* Shift button for multi-select - above ZoomSlider */}
-        {isEditMode && (
+        {/* Shift button for multi-select (编辑模式) and multi-frame filter (非编辑模式) - above ZoomSlider */}
+        {(
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -3627,7 +3756,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                   ? 'bg-[#FFDD00] text-yellow-950' 
                   : 'bg-white text-gray-700 hover:bg-gray-50'
               }`}
-              title="Hold for multi-select"
+              title={isEditMode ? "Hold for multi-select" : "Hold for multi-frame filter"}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 4 L4 12 L9 12 L9 19 L16 19 L16 12 L21 12 Z" />
@@ -3666,11 +3795,11 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
         </div>
 
         {/* Edit Toolbar: Unified White Buttons at Top Left */}
-        <div 
+            <div 
             className={`fixed top-4 z-[500] pointer-events-auto animate-in fade-in flex items-center gap-2 ${isEditMode ? 'left-1/2 -translate-x-1/2' : 'left-4 slide-in-from-left-4'}`}
             style={{ height: '48px' }}
-            onPointerDown={(e) => e.stopPropagation()} 
-        >
+                onPointerDown={(e) => e.stopPropagation()} 
+            >
             {/* Layout Buttons: L+ and L- */}
             {isEditMode && (
                 <div className="bg-white rounded-xl border border-gray-100 flex gap-2 items-center p-1" style={{ height: '48px' }}>
@@ -3775,20 +3904,20 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                 ) : (
                     // 编辑模式：显示编辑工具
                     <>
-                        <button
-                            onClick={() => createNoteAtCenter('text')}
+                    <button
+                        onClick={() => createNoteAtCenter('text')}
                             className="p-3 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
-                            title="Add Text"
-                        >
+                        title="Add Text"
+                    >
                             <Type size={20} />
-                        </button>
-                        <button
-                            onClick={() => createNoteAtCenter('compact')}
+                    </button>
+                    <button
+                        onClick={() => createNoteAtCenter('compact')}
                             className="p-3 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
-                            title="Add Sticky Note"
-                        >
+                        title="Add Sticky Note"
+                    >
                             <StickyNote size={20} />
-                        </button>
+                    </button>
                         <button
                             onClick={() => {
                                 setIsDrawingFrame(true);
