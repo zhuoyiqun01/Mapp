@@ -229,7 +229,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   const handleExportData = (project: Project) => {
     // Only export standard notes (excluding compact and text-only notes)
     const standardNotes = project.notes.filter(note => 
-      note.variant !== 'text' && note.variant !== 'compact'
+      note.variant !== 'compact'
     );
     
     if (standardNotes.length === 0) {
@@ -481,7 +481,6 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         const noteCounts = {
           standard: importedNotes.filter(n => !n.variant || n.variant === 'standard').length,
           compact: importedNotes.filter(n => n.variant === 'compact').length,
-          text: importedNotes.filter(n => n.variant === 'text').length,
           total: importedNotes.length
         };
         console.log('Merging notes into existing project:', {
@@ -707,7 +706,6 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         const noteCounts = {
           standard: regeneratedNotes.filter(n => !n.variant || n.variant === 'standard').length,
           compact: regeneratedNotes.filter(n => n.variant === 'compact').length,
-          text: regeneratedNotes.filter(n => n.variant === 'text').length,
           total: regeneratedNotes.length
         };
         console.log('Importing project:', projectToCreate.name, {

@@ -28,7 +28,7 @@ export interface Note {
   boardY: number;
   
   // Type of note
-  variant?: 'standard' | 'text' | 'compact';
+  variant?: 'standard' | 'compact';
   
   // Group/Frame membership
   groupId?: string; // Frame ID if note is in a frame (backward compatibility, first frame)

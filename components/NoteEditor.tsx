@@ -81,7 +81,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   
   const minSwipeDistance = 50; // Minimum swipe distance
 
-  const isTextMode = initialNote?.variant === 'text';
   const isCompactMode = initialNote?.variant === 'compact';
   
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -158,9 +157,10 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     prevIsOpenRef.current = isOpen;
   }, [initialNote, isOpen]);
   
-  // Detect keyboard height by monitoring viewport height changes
+  // Detect keyboard height by monitoring viewport height changes (removed for text mode)
   useEffect(() => {
-    if (!isTextMode || !isOpen) return;
+    // Text mode removed
+    if (!isOpen) return;
     
     const initialViewportHeight = window.visualViewport?.height || window.innerHeight;
     let lastHeight = initialViewportHeight;
@@ -190,7 +190,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         window.removeEventListener('resize', handleResize);
       }
     };
-  }, [isTextMode, isOpen]);
+  }, [isOpen]);
 
   const handleSaveTag = () => {
     if (newTagLabel.trim()) {
@@ -272,11 +272,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   };
 
   const handleSave = () => {
-    if (isTextMode && !text.trim()) {
-        onClose();
-        return;
-    }
-
     onSave(getCurrentNoteData());
     onClose();
   };
@@ -315,7 +310,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
 
   return (
     <div 
-      className={`fixed inset-0 z-[1000] flex items-center justify-center ${isTextMode ? 'p-4' : 'p-4'} touch-none`}
+      className={`fixed inset-0 z-[1000] flex items-center justify-center p-4 touch-none`}
       onPointerDown={(e) => e.stopPropagation()}
       onPointerMove={(e) => e.stopPropagation()}
       onPointerUp={(e) => e.stopPropagation()}
@@ -323,7 +318,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
-      style={isTextMode ? { overflow: 'hidden', touchAction: 'none', backgroundColor: 'transparent' } : {}}
+      style={{}}
     >
       <div className="absolute inset-0" onClick={handleSave} style={{ zIndex: 1 }}></div>
       
@@ -344,14 +339,11 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0 }}
         // Explicit width w-[500px] to prevent auto-growing behavior. min-h-[500px] added when sketching to ensure full canvas.
-          className={`${isTextMode ? 'w-auto max-w-[95vw]' : 'w-[500px] max-w-[95vw]'} flex flex-col relative transition-colors duration-300 ${isTextMode ? 'max-h-[60vh]' : 'max-h-[90vh]'} ${isTextMode ? 'min-h-0' : 'min-h-[300px]'} ${isSketching ? 'min-h-[500px]' : ''}`}
+          className={`w-[500px] max-w-[95vw] flex flex-col relative transition-colors duration-300 max-h-[90vh] min-h-[300px] ${isSketching ? 'min-h-[500px]' : ''}`}
         style={{ 
-            backgroundColor: isTextMode ? 'transparent' : color,
-              boxShadow: isTextMode ? 'none' : '0 25px 50px 12px rgba(0, 0, 0, 0.15)',
-              border: isTextMode ? `2px solid ${THEME_COLOR}` : 'none',
-              borderRadius: isTextMode ? '12px' : undefined,
-              padding: isTextMode ? '6px' : '4px',
-              overflow: isTextMode ? 'visible' : 'hidden'
+            backgroundColor: color,
+              boxShadow: '0 25px 50px 12px rgba(0, 0, 0, 0.15)',
+              overflow: 'hidden'
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -374,7 +366,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         <div
           className="absolute left-3 flex justify-center items-center gap-2 pointer-events-auto"
           style={{ 
-            top: isTextMode ? '-54px' : isCompactMode ? '8px' : '12px',
+            top: isCompactMode ? '8px' : '12px',
             zIndex: 20
           }}
         >
@@ -386,9 +378,9 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
           </div>
         </div>
         
-        <div className={`flex flex-col flex-1 h-full ${isSketching ? 'invisible' : ''}`} style={isTextMode ? { backgroundColor: 'transparent', zIndex: 10 } : { zIndex: 10 }}>
+        <div className={`flex flex-col flex-1 h-full ${isSketching ? 'invisible' : ''}`} style={{ zIndex: 10 }}>
             {/* Header - middle layer z-10 (inherits from parent) */}
-            <div className={`flex justify-between items-start ${isTextMode ? 'hidden' : 'p-4 pb-2'} relative flex-shrink-0 ${isTextMode ? 'opacity-0 hover:opacity-100 transition-opacity' : ''}`} style={isTextMode ? { backgroundColor: 'transparent' } : {}}>
+            <div className={`flex justify-between items-start p-4 pb-2 relative flex-shrink-0`}>
                 <div></div>
                 
                 <div className="flex items-center gap-2">
@@ -463,11 +455,11 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
             </div>
 
             {/* Auto-Growing Text Area Container */}
-            <div className={`flex-1 ${isTextMode ? 'px-2 py-2' : 'px-3'} relative group flex flex-col ${isTextMode ? 'overflow-hidden' : 'overflow-y-auto custom-scrollbar'} ${isTextMode ? 'min-h-0' : 'min-h-[120px]'}`} style={isTextMode ? { backgroundColor: 'transparent' } : {}}>
-              <div className="grid w-full min-w-0" style={isTextMode ? { backgroundColor: 'transparent' } : {}}>
+            <div className={`flex-1 px-3 relative group flex flex-col overflow-y-auto custom-scrollbar min-h-[120px]`}>
+              <div className="grid w-full min-w-0">
                 {/* Invisible Pre-wrap div to force height */}
                 <div 
-                  className={`col-start-1 row-start-1 w-full min-w-0 ${isTextMode ? 'whitespace-nowrap' : 'whitespace-pre-wrap break-words'} invisible leading-none ${isTextMode ? 'pb-0' : 'pb-4'} ${getTextStyles()}`}
+                  className={`col-start-1 row-start-1 w-full min-w-0 whitespace-pre-wrap break-words invisible leading-none pb-4 ${getTextStyles()}`}
                   aria-hidden="true"
                 >
                    {text + ' '}
@@ -475,11 +467,11 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
 
                 {/* Actual Textarea */}
                 <textarea
-                    autoFocus={isTextMode}
+                    autoFocus={false}
                     value={text}
                     onChange={(e) => setText(e.target.value)}
-                    placeholder={isTextMode ? "Type something..." : "Write here..."}
-                    className={`col-start-1 row-start-1 w-full min-w-0 h-full bg-transparent border-none resize-none focus:ring-0 p-0 ${isTextMode ? 'text-gray-800' : 'text-gray-800'} placeholder-gray-500/30 leading-none overflow-hidden ${isTextMode ? 'whitespace-nowrap' : 'break-words whitespace-pre-wrap'} ${isTextMode ? 'pb-0' : 'pb-4'} ${getTextStyles()}`}
+                    placeholder="Write here..."
+                    className={`col-start-1 row-start-1 w-full min-w-0 h-full bg-transparent border-none resize-none focus:ring-0 p-0 text-gray-800 placeholder-gray-500/30 leading-none overflow-hidden break-words whitespace-pre-wrap pb-4 ${getTextStyles()}`}
                     spellCheck={false}
                     style={{ 
                       backgroundColor: 'transparent',
@@ -493,7 +485,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
             </div>
 
             {/* Footer Actions */}
-            {!isTextMode && (
+            {true && (
               <div className="flex flex-col z-10 backdrop-blur-[2px] mt-auto flex-shrink-0">
                 
                 {/* Media Row */}

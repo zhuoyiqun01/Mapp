@@ -28,13 +28,13 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
 
   // Only show standard notes
   const standardNotes = useMemo(() => 
-    project.notes.filter(note => note.variant !== 'text' && note.variant !== 'compact'),
+    project.notes.filter(note => note.variant !== 'compact'),
     [project.notes]
   );
 
-  // Compact notes (text and compact variants)
+  // Compact notes
   const compactNotes = useMemo(() => 
-    project.notes.filter(note => note.variant === 'text' || note.variant === 'compact'),
+    project.notes.filter(note => note.variant === 'compact'),
     [project.notes]
   );
 

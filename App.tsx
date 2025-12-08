@@ -394,7 +394,7 @@ export default function App() {
   const handleExportCSV = (project: Project) => {
     // 只导出标准便签（不包括小便签和纯文本）
     const standardNotes = project.notes.filter(note => 
-      note.variant !== 'text' && note.variant !== 'compact'
+      note.variant !== 'compact'
     );
     
     if (standardNotes.length === 0) {

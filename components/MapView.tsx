@@ -1717,7 +1717,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
       if (imageFiles.length > 0) {
         // If editor is open and editing a standard note, add images to current note
-        if (isEditorOpen && editingNote && editingNote.variant !== 'text' && editingNote.variant !== 'compact') {
+        if (isEditorOpen && editingNote && editingNote.variant !== 'compact') {
           try {
             const newImages: string[] = [];
             for (const file of imageFiles) {

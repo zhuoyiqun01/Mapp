@@ -3,7 +3,7 @@ import { Note, Frame, Connection } from '../types';
 import { motion } from 'framer-motion';
 import { NoteEditor } from './NoteEditor';
 import { ZoomSlider } from './ZoomSlider';
-import { Type, StickyNote, X, Pencil, Check, Minus, Move, ArrowUp, Hash, Plus, Image as ImageIcon, FileJson, Locate, Layers, GitBranch } from 'lucide-react';
+import { Square, StickyNote, X, Pencil, Check, Minus, Move, ArrowUp, Hash, Plus, Image as ImageIcon, FileJson, Locate, Layers, GitBranch } from 'lucide-react';
 import exifr from 'exifr';
 import { generateId, fileToBase64 } from '../utils';
 import { THEME_COLOR, THEME_COLOR_DARK } from '../constants';
@@ -65,7 +65,6 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
     frame: true,
     primary: true,
     secondary: true,
-    text: true,
     connects: true,
   });
   const [showLayerPanel, setShowLayerPanel] = useState(false);
@@ -101,6 +100,11 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   const [isShiftPressed, setIsShiftPressed] = useState(false);
   const [isMultiSelectDragging, setIsMultiSelectDragging] = useState(false);
   const [multiSelectDragOffset, setMultiSelectDragOffset] = useState({ x: 0, y: 0 });
+  
+  // Box selection state
+  const [isBoxSelecting, setIsBoxSelecting] = useState(false);
+  const [boxSelectStart, setBoxSelectStart] = useState<{ x: number; y: number } | null>(null);
+  const [boxSelectEnd, setBoxSelectEnd] = useState<{ x: number; y: number } | null>(null);
   const [connectingFrom, setConnectingFrom] = useState<{ noteId: string; side: 'top' | 'right' | 'bottom' | 'left' } | null>(null);
   const [connectingTo, setConnectingTo] = useState<{ x: number; y: number } | null>(null);
   const [hoveringConnectionPoint, setHoveringConnectionPoint] = useState<{ noteId: string; side: 'top' | 'right' | 'bottom' | 'left' } | null>(null);
@@ -258,8 +262,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   
   const [showImportDialog, setShowImportDialog] = useState(false);
   
-  // Text measurement refs
-  const textMeasureRefs = useRef<Map<string, { width: number; height: number }>>(new Map());
+  // Text measurement refs removed (text variant removed)
 
   // 重置空白点击计数
   const resetBlankClickCount = () => {
@@ -324,18 +327,9 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
 
   // 计算Note的中心点是否在Frame内
   const isNoteInFrame = (note: Note, frame: Frame): boolean => {
-    const isText = note.variant === 'text';
     const isCompact = note.variant === 'compact';
-    let width = isCompact ? 180 : 256;
-    let height = isText ? 100 : isCompact ? 180 : 256;
-    
-    if (isText) {
-      const measured = textMeasureRefs.current.get(note.id);
-      if (measured) {
-        width = measured.width;
-        height = measured.height;
-      }
-    }
+    const width = isCompact ? 180 : 256;
+    const height = isCompact ? 180 : 256;
     
     const centerX = note.boardX + width / 2;
     const centerY = note.boardY + height / 2;
@@ -398,29 +392,11 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   const getConnectionPoint = (note: Note, side: 'top' | 'right' | 'bottom' | 'left', isDragging: boolean, dragOffset: { x: number; y: number }) => {
     const x = note.boardX + (isDragging ? dragOffset.x : 0);
     const y = note.boardY + (isDragging ? dragOffset.y : 0);
-    const isText = note.variant === 'text';
     const isCompact = note.variant === 'compact';
     
-    // For text notes, use measured dimensions from the inner div (text container)
-    let width = isCompact ? 180 : 256;
-    let height = isText ? 100 : isCompact ? 180 : 256;
-    
-    if (isText) {
-      // Use measured dimensions from the text container
-      const measured = textMeasureRefs.current.get(note.id);
-      if (measured) {
-        width = measured.width;
-        height = measured.height;
-      } else {
-        // Fallback calculation (unified scale: 3rem - 7rem)
-        const fontSize = note.fontSize === 1 ? 3 : note.fontSize === 2 ? 4 : note.fontSize === 3 ? 5 : note.fontSize === 4 ? 6 : 7;
-        const textLength = note.text?.length || 0;
-        // Estimate width based on font size and text length
-        const charWidth = fontSize * 16 * 0.6; // rem to px: fontSize * 16px/rem * char width ratio
-        width = textLength * charWidth;
-        height = fontSize * 16 * 1.2; // Line height approximation
-      }
-    }
+    // For compact/standard notes, use fixed dimensions
+    const width = isCompact ? 180 : 256;
+    const height = isCompact ? 180 : 256;
     
     switch (side) {
       case 'top':
@@ -768,8 +744,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
         notes.forEach(note => {
             minX = Math.min(minX, note.boardX);
             minY = Math.min(minY, note.boardY);
-            const w = note.variant === 'text' ? 500 : note.variant === 'compact' ? 180 : 256;
-            const h = note.variant === 'text' ? 100 : note.variant === 'compact' ? 180 : 256;
+            const w = note.variant === 'compact' ? 180 : 256;
+            const h = note.variant === 'compact' ? 180 : 256;
             maxX = Math.max(maxX, note.boardX + w);
             maxY = Math.max(maxY, note.boardY + h);
         });
@@ -827,20 +803,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
             notes.forEach(note => {
                 let w: number, h: number;
                 
-                if (note.variant === 'text') {
-                    // Use measured dimensions if available, otherwise use default
-                    const measured = textMeasureRefs.current.get(note.id);
-                    if (measured) {
-                        w = measured.width;
-                        h = measured.height;
-                    } else {
-                        // Fallback: estimate based on text length and fontSize
-                        const fontSize = note.fontSize === 1 ? 3 : note.fontSize === 2 ? 4 : note.fontSize === 3 ? 5 : note.fontSize === 4 ? 6 : 7;
-                        const estimatedWidth = (note.text?.length || 0) * fontSize * 0.6; // Rough estimate
-                        w = Math.max(estimatedWidth, 100);
-                        h = 100;
-                    }
-                } else if (note.variant === 'compact') {
+                if (note.variant === 'compact') {
                     w = 180;
                     h = 180;
                 } else {
@@ -1477,7 +1440,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
 
       if (imageFiles.length > 0) {
         // If editor is open and editing a standard note, add images to current note
-        if (editingNote && editingNote.variant !== 'text' && editingNote.variant !== 'compact') {
+        if (editingNote && editingNote.variant !== 'compact') {
           try {
             const newImages: string[] = [];
             for (const file of imageFiles) {
@@ -1508,7 +1471,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
     }
   };
 
-  const createNoteAtCenter = (variant: 'text' | 'compact') => {
+  const createNoteAtCenter = (variant: 'compact') => {
      if (!containerRef.current) return;
      const { width, height } = containerRef.current.getBoundingClientRect();
      
@@ -1836,6 +1799,23 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
         // currentNotePressIdRef 会在 handleNotePointerUp 中根据移动距离判断是否清空
       }
       
+      // Box selection mode (when box select mode is active and in edit mode)
+      if (e.button === 0 && isBoxSelecting && isEditMode && !draggingNoteId && !resizingFrame && !draggingFrameId && !isNoteClick) {
+          const rect = containerRef.current?.getBoundingClientRect();
+          if (!rect) return;
+          const worldX = (e.clientX - rect.left - transform.x) / transform.scale;
+          const worldY = (e.clientY - rect.top - transform.y) / transform.scale;
+          setBoxSelectStart({ x: worldX, y: worldY });
+          setBoxSelectEnd({ x: worldX, y: worldY });
+          // If Shift is pressed, preserve existing selection; otherwise replace
+          if (!isShiftPressed) {
+              setSelectedNoteIds(new Set());
+              setSelectedNoteId(null);
+          }
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+          return;
+      }
+      
       // Allow panning in both edit and non-edit modes, but not when dragging notes or frames
       if (e.button === 0 && !draggingNoteId && !resizingFrame && !draggingFrameId) { 
           setIsPanning(true);
@@ -1920,6 +1900,41 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
           return;
       }
       
+      // 如果正在框选
+      if (isBoxSelecting && boxSelectStart) {
+          const rect = containerRef.current?.getBoundingClientRect();
+          if (!rect) return;
+          const worldX = (e.clientX - rect.left - transform.x) / transform.scale;
+          const worldY = (e.clientY - rect.top - transform.y) / transform.scale;
+          setBoxSelectEnd({ x: worldX, y: worldY });
+          
+          // 计算框选区域
+          const minX = Math.min(boxSelectStart.x, worldX);
+          const maxX = Math.max(boxSelectStart.x, worldX);
+          const minY = Math.min(boxSelectStart.y, worldY);
+          const maxY = Math.max(boxSelectStart.y, worldY);
+          
+          // 找到所有在框选区域内的notes
+          // When Shift is pressed, add to existing selection; otherwise replace selection
+          const selectedIds = new Set<string>(isShiftPressed ? selectedNoteIds : new Set());
+          notes.forEach(note => {
+              const noteWidth = note.variant === 'compact' ? 180 : 256;
+              const noteHeight = note.variant === 'compact' ? 180 : 256;
+              const noteRight = note.boardX + noteWidth;
+              const noteBottom = note.boardY + noteHeight;
+              
+              // 检查note是否与框选区域相交
+              if (note.boardX < maxX && noteRight > minX && note.boardY < maxY && noteBottom > minY) {
+                  selectedIds.add(note.id);
+              } else if (!isShiftPressed) {
+                  // 如果不按住shift，移除不在框选区域内的notes
+                  selectedIds.delete(note.id);
+              }
+          });
+          setSelectedNoteIds(selectedIds);
+          return;
+      }
+      
       // 如果正在连接，处理连接线移动
       if (connectingFrom) {
         handleConnectionPointMove(e);
@@ -1935,6 +1950,15 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   };
 
   const handleBoardPointerUp = (e: React.PointerEvent) => {
+      // 如果正在框选，结束当前框选操作（但保持框选模式）
+      if (isBoxSelecting && boxSelectStart) {
+          // Clear box select start/end but keep box select mode active
+          setBoxSelectStart(null);
+          setBoxSelectEnd(null);
+          (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+          return;
+      }
+      
       // 如果正在拖动Frame，结束拖动
       if (draggingFrameId) {
           setDraggingFrameId(null);
@@ -2199,18 +2223,9 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               const newBoardY = selectedNote.boardY + multiSelectDragOffset.y;
               
               // 检查新位置是否在任何frame内
-              const isText = selectedNote.variant === 'text';
               const isCompact = selectedNote.variant === 'compact';
-              let width = isCompact ? 180 : 256;
-              let height = isText ? 100 : isCompact ? 180 : 256;
-              
-              if (isText) {
-                const measured = textMeasureRefs.current.get(selectedNote.id);
-                if (measured) {
-                  width = measured.width;
-                  height = measured.height;
-                }
-              }
+              const width = isCompact ? 180 : 256;
+              const height = isCompact ? 180 : 256;
               
               const centerX = newBoardX + width / 2;
               const centerY = newBoardY + height / 2;
@@ -2282,18 +2297,9 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                   const newBoardY = note.boardY + dragOffset.y;
                   
                   // 检查新位置是否在任何frame内
-                  const isText = note.variant === 'text';
                   const isCompact = note.variant === 'compact';
-                  let width = isCompact ? 180 : 256;
-                  let height = isText ? 100 : isCompact ? 180 : 256;
-                  
-                  if (isText) {
-                    const measured = textMeasureRefs.current.get(note.id);
-                    if (measured) {
-                      width = measured.width;
-                      height = measured.height;
-                    }
-                  }
+                  const width = isCompact ? 180 : 256;
+                  const height = isCompact ? 180 : 256;
                   
                   const centerX = newBoardX + width / 2;
                   const centerY = newBoardY + height / 2;
@@ -2675,6 +2681,22 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
         >
           {/* Render connections */}
           {/* Frames Layer - Below everything */}
+          {/* Box Selection Preview */}
+          {isBoxSelecting && boxSelectStart && boxSelectEnd && (
+            <div
+              className="absolute pointer-events-none z-[3000]"
+              style={{
+                left: `${Math.min(boxSelectStart.x, boxSelectEnd.x)}px`,
+                top: `${Math.min(boxSelectStart.y, boxSelectEnd.y)}px`,
+                width: `${Math.abs(boxSelectEnd.x - boxSelectStart.x)}px`,
+                height: `${Math.abs(boxSelectEnd.y - boxSelectStart.y)}px`,
+                backgroundColor: `${themeColor}20`,
+                border: `2px solid ${themeColor}`,
+                borderRadius: '4px'
+              }}
+            />
+          )}
+          
           {/* Drawing Frame Preview */}
           {isDrawingFrame && drawingFrameStart && drawingFrameEnd && (
             <div
@@ -3417,14 +3439,12 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               return true;
             }).map((note) => {
               // Check layer visibility based on note variant
-              const isText = note.variant === 'text';
               const isCompact = note.variant === 'compact';
-              const isStandard = !isText && !isCompact;
+              const isStandard = !isCompact;
               
               // Determine if this note should be visible
               let shouldShow = false;
-              if (isText && layerVisibility.text) shouldShow = true;
-              else if (isCompact && layerVisibility.secondary) shouldShow = true;
+              if (isCompact && layerVisibility.secondary) shouldShow = true;
               else if (isStandard && layerVisibility.primary) shouldShow = true;
               
               if (!shouldShow) return null;
@@ -3438,23 +3458,17 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               const containingFrame = frames.find(frame => isNoteInFrame(note, frame));
               const isInFrame = !!containingFrame;
 
-              // For text notes, use fit-content
-              let noteWidth: string | number = isCompact ? '180px' : '256px';
-              const noteHeight = isText ? 'auto' : isCompact ? '180px' : '256px';
-              
-              if (isText) {
-                noteWidth = 'fit-content';
-              }
+              // For compact/standard notes, use fixed dimensions
+              const noteWidth: number = isCompact ? 180 : 256;
+              const noteHeight: number = isCompact ? 180 : 256;
 
               // Determine line clamp based on font size to ensure it fits the box
               // Compact/Standard notes have fixed height.
               let clampClass = '';
-              if (!isText) {
-                  if (note.fontSize >= 4) clampClass = 'line-clamp-1';
-                  else if (note.fontSize === 3) clampClass = 'line-clamp-2';
-                  else if (note.fontSize === 2) clampClass = 'line-clamp-3';
-                  else clampClass = 'line-clamp-4';
-              }
+              if (note.fontSize >= 4) clampClass = 'line-clamp-1';
+              else if (note.fontSize === 3) clampClass = 'line-clamp-2';
+              else if (note.fontSize === 2) clampClass = 'line-clamp-3';
+              else clampClass = 'line-clamp-4';
 
               // Get global standard size scale, default to 1
               const standardSizeScale = project?.standardSizeScale || 1;
@@ -3469,10 +3483,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                       left: currentX, 
                       top: currentY,
                       zIndex: (selectedNoteId === note.id || selectedNoteIds.has(note.id) || isDragging || (isMultiSelectDragging && isInMultiSelect)) ? 1000 : (isCompact ? 60 : 50),
-                      width: isText ? 'fit-content' : noteWidth,
+                      width: noteWidth,
                       height: noteHeight,
-                      minWidth: isText ? '100px' : undefined,
-                      maxWidth: isText ? '800px' : undefined,
                       transform: `scale(${standardSizeScale})`,
                       transformOrigin: 'center',
                   }}
@@ -3488,15 +3500,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                 >
                   {isEditMode && (
                       <>
-                        {isText ? (
-                          <button 
-                            onClick={(e) => handleDeleteClick(e, note.id)}
-                            onPointerDown={(e) => e.stopPropagation()}
-                            className="absolute top-0 right-0 z-50 bg-red-500 text-white rounded-full p-1.5 shadow-md hover:scale-110 transition-transform translate-x-1/2 -translate-y-1/2"
-                          >
-                            <X size={14} />
-                          </button>
-                        ) : (
+                        {!isCompact && (
                       <button 
                         onClick={(e) => handleDeleteClick(e, note.id)}
                         onPointerDown={(e) => e.stopPropagation()}
@@ -3511,26 +3515,11 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                           <>
                             {(['top', 'right', 'bottom', 'left'] as const).map(side => {
                               const point = getConnectionPoint(note, side, isDragging, dragOffset);
-                              const isText = note.variant === 'text';
                               const isCompact = note.variant === 'compact';
                               
-                              // Use measured dimensions from the text container
-                              let width = isCompact ? 180 : 256;
-                              let height = isText ? 100 : isCompact ? 180 : 256;
-                              
-                              if (isText) {
-                                const measured = textMeasureRefs.current.get(note.id);
-                                if (measured) {
-                                  width = measured.width;
-                                  height = measured.height;
-                                } else {
-                                  const fontSize = note.fontSize === 1 ? 3 : note.fontSize === 2 ? 4 : note.fontSize === 3 ? 5 : note.fontSize === 4 ? 6 : 7;
-                                  const textLength = note.text?.length || 0;
-                                  const charWidth = fontSize * 16 * 0.6;
-                                  width = textLength * charWidth;
-                                  height = fontSize * 16 * 1.2;
-                                }
-                              }
+                              // Use fixed dimensions for compact/standard notes
+                              const width = isCompact ? 180 : 256;
+                              const height = isCompact ? 180 : 256;
                               
                               let left = 0, top = 0;
                               switch (side) {
@@ -3576,34 +3565,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                       </>
                   )}
 
-                  {isText ? (
-                      <div 
-                        className={`inline-block`} 
-                        style={{ width: 'fit-content' }}
-                        ref={(el) => {
-                          // Measure text container dimensions
-                          if (el) {
-                            const rect = el.getBoundingClientRect();
-                            // Convert screen coordinates to board coordinates
-                            textMeasureRefs.current.set(note.id, { 
-                              width: rect.width / transform.scale, 
-                              height: rect.height / transform.scale 
-                            });
-                          }
-                        }}
-                      >
-                          <p 
-                            className={`text-gray-800 leading-none whitespace-nowrap ${note.isBold ? 'font-bold' : 'font-medium'}`} 
-                            style={{ 
-                              // Unified scale: 3rem - 7rem (5 levels)
-                              fontSize: note.fontSize === 1 ? '3rem' : note.fontSize === 2 ? '4rem' : note.fontSize === 3 ? '5rem' : note.fontSize === 4 ? '6rem' : '7rem',
-                              textShadow: '0 2px 4px rgba(0,0,0,0.05)'
-                            }}
-                          >
-                              {note.text}
-                          </p>
-                      </div>
-                  ) : (
+                  {!isCompact && (
                       <div 
                           className={`w-full h-full shadow-xl flex flex-col overflow-hidden group rounded-sm transition-shadow ${isDragging ? 'shadow-2xl ring-4' : isInFrame ? 'ring-4 ring-[#EEEEEE]' : ''}`}
                           style={{
@@ -3891,8 +3853,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                             // Update all notes to use new standard size scale
                             notes.forEach(note => {
                                 // Calculate note dimensions (original, unscaled standard sizes)
-                                const noteWidth = note.variant === 'compact' ? 180 : note.variant === 'text' ? 500 : 256;
-                                const noteHeight = note.variant === 'compact' ? 180 : note.variant === 'text' ? 100 : 256;
+                                const noteWidth = note.variant === 'compact' ? 180 : 256;
+                                const noteHeight = note.variant === 'compact' ? 180 : 256;
                                 
                                 // Calculate current center position (using current scale)
                                 const currentCenterX = (note.boardX || 0) + (noteWidth * currentScale) / 2;
@@ -3937,8 +3899,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                             // Update all notes to use new standard size scale
                             notes.forEach(note => {
                                 // Calculate note dimensions (original, unscaled standard sizes)
-                                const noteWidth = note.variant === 'compact' ? 180 : note.variant === 'text' ? 500 : 256;
-                                const noteHeight = note.variant === 'compact' ? 180 : note.variant === 'text' ? 100 : 256;
+                                const noteWidth = note.variant === 'compact' ? 180 : 256;
+                                const noteHeight = note.variant === 'compact' ? 180 : 256;
                                 
                                 // Calculate current center position (using current scale)
                                 const currentCenterX = (note.boardX || 0) + (noteWidth * currentScale) / 2;
@@ -3988,16 +3950,6 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                     // 编辑模式：显示编辑工具
                     <>
                     <button
-                        onClick={() => createNoteAtCenter('text')}
-                            className="w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
-                            style={{ backgroundColor: 'transparent' }}
-                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${themeColor}1A`}
-                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                        title="Add Text"
-                    >
-                            <Type size={18} className="sm:w-5 sm:h-5" />
-                    </button>
-                    <button
                         onClick={() => createNoteAtCenter('compact')}
                             className="w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
                             style={{ backgroundColor: 'transparent' }}
@@ -4029,6 +3981,26 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                                 <line x1="3" y1="19" x2="21" y2="19" />
                             </svg>
                         </button>
+                    <button
+                        onClick={() => {
+                            // Toggle box selection mode
+                            setIsBoxSelecting(!isBoxSelecting);
+                            if (!isBoxSelecting) {
+                                // Clear selection when entering box select mode
+                                setSelectedNoteIds(new Set());
+                                setSelectedNoteId(null);
+                            }
+                        }}
+                        className={`w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95 ${isBoxSelecting ? 'bg-yellow-200' : ''}`}
+                        style={{ backgroundColor: isBoxSelecting ? `${themeColor}80` : 'transparent' }}
+                        onMouseEnter={(e) => !isBoxSelecting && (e.currentTarget.style.backgroundColor = `${themeColor}1A`)}
+                        onMouseLeave={(e) => !isBoxSelecting && (e.currentTarget.style.backgroundColor = 'transparent')}
+                        title="Box Select (Click to toggle, then drag to select)"
+                    >
+                            <svg width="18" height="18" className="sm:w-5 sm:h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="5 5">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                            </svg>
+                    </button>
                     </>
                 )}
             </div>
@@ -4072,27 +4044,6 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                                     }`}
                                     style={{ 
                                         backgroundColor: layerVisibility.connects ? themeColor : 'transparent',
-                                        borderColor: themeColor
-                                    }}
-                                />
-                            </div>
-                            {/* Text (文本对象) */}
-                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
-                                <div className="flex items-center gap-2">
-                                    <Type size={16} className="text-gray-600" strokeWidth={2} />
-                                    <span className="text-sm text-gray-700">Text</span>
-                                </div>
-                                <input
-                                    type="checkbox"
-                                    checked={layerVisibility.text}
-                                    onChange={() => setLayerVisibility(prev => ({ ...prev, text: !prev.text }))}
-                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
-                                        layerVisibility.text 
-                                            ? '' 
-                                            : 'bg-transparent'
-                                    }`}
-                                    style={{ 
-                                        backgroundColor: layerVisibility.text ? themeColor : 'transparent',
                                         borderColor: themeColor
                                     }}
                                 />
@@ -4251,7 +4202,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               onSwitchToMapView={onSwitchToMapView}
               onSwitchToBoardView={onSwitchToBoardView}
               onSave={(updated) => {
-                  if (!updated.text && updated.variant === 'text') return;
+                  // Text variant removed
                   if (updated.id && notes.some(n => n.id === updated.id)) {
                       onUpdateNote(updated as Note);
                   } else if (onAddNote && updated.id) {
