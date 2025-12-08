@@ -6,6 +6,7 @@ import { ZoomSlider } from './ZoomSlider';
 import { Type, StickyNote, X, Pencil, Check, Minus, Move, ArrowUp, Hash, Plus, Image as ImageIcon, FileJson, Locate, Layers, GitBranch } from 'lucide-react';
 import exifr from 'exifr';
 import { generateId, fileToBase64 } from '../utils';
+import { THEME_COLOR, THEME_COLOR_DARK } from '../constants';
 
 // 常量定义
 const CONNECTION_OFFSET = 40; // 连接线从连接点延伸的距离
@@ -37,9 +38,10 @@ interface BoardViewProps {
   onSwitchToBoardView?: (coords?: { x: number; y: number }) => void;
   navigateToCoords?: { x: number; y: number } | null;
   onNavigateComplete?: () => void;
+  themeColor?: string;
 }
 
-export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onToggleEditor, onAddNote, onDeleteNote, onEditModeChange, connections = [], onUpdateConnections, frames = [], onUpdateFrames, project, onUpdateProject, onSwitchToMapView, onSwitchToBoardView, navigateToCoords, onNavigateComplete, mapViewFileInputRef }) => {
+export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onToggleEditor, onAddNote, onDeleteNote, onEditModeChange, connections = [], onUpdateConnections, frames = [], onUpdateFrames, project, onUpdateProject, onSwitchToMapView, onSwitchToBoardView, navigateToCoords, onNavigateComplete, mapViewFileInputRef, themeColor = THEME_COLOR }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
   
@@ -2553,13 +2555,14 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
         className={`w-full h-full relative overflow-hidden transition-all duration-300`}
         style={{
             boxShadow: isEditMode 
-                ? 'inset 0 0 0 8px #FFDD00, inset 0 0 0 12px rgba(255,221,0,0.3), inset 0 0 80px rgba(255,221,0,0.15)' 
+                ? `inset 0 0 0 8px ${themeColor}, inset 0 0 0 12px ${themeColor}4D, inset 0 0 80px ${themeColor}26` 
                 : 'none'
         }}
     >
       <div 
         ref={containerRef}
-        className={`w-full h-full overflow-hidden bg-gray-50 relative touch-none select-none ${isPanning ? 'cursor-grabbing' : 'cursor-grab'} ${isDragging ? 'ring-4 ring-[#FFDD00] ring-offset-2' : ''}`}
+        className={`w-full h-full overflow-hidden bg-gray-50 relative touch-none select-none ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`}
+        style={isDragging ? { boxShadow: `0 0 0 4px ${themeColor}` } : undefined}
         onPointerDown={handleBoardPointerDown}
         onPointerMove={handleBoardPointerMove}
         onDragEnter={handleDragEnter}
@@ -2572,7 +2575,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
       >
         {isDragging && (
           <div 
-            className="absolute inset-0 z-[4000] bg-[#FFDD00]/20 backdrop-blur-sm flex items-center justify-center pointer-events-auto"
+            className="absolute inset-0 z-[4000] backdrop-blur-sm flex items-center justify-center pointer-events-auto"
+            style={{ backgroundColor: `${themeColor}33` }}
             onClick={(e) => {
               // 点击外部区域关闭
               if (e.target === e.currentTarget) {
@@ -2581,7 +2585,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
             }}
           >
             <div 
-              className="bg-white rounded-2xl shadow-2xl p-8 border-4 border-[#FFDD00] relative"
+              className="bg-white rounded-2xl shadow-2xl p-8 border-4 relative"
+              style={{ borderColor: themeColor }}
               onClick={(e) => e.stopPropagation()}
             >
               <button
@@ -2610,7 +2615,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
         <div 
           className="absolute inset-0 pointer-events-none z-0"
           style={{
-              backgroundImage: `radial-gradient(#FFDD00 ${dotSize}px, transparent ${dotSize + 0.5}px)`,
+              backgroundImage: `radial-gradient(${themeColor} ${dotSize}px, transparent ${dotSize + 0.5}px)`,
               backgroundPosition: `${transform.x}px ${transform.y}px`,
               backgroundSize: `${gridSize}px ${gridSize}px`,
               opacity: 0.8
@@ -2665,7 +2670,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               <div
                 className="absolute inset-0 pointer-events-none"
                 style={{
-                  border: selectedFrameId === frame.id ? '2px solid #FFDD00' : '2px solid rgba(156, 163, 175, 0.3)',
+                  border: selectedFrameId === frame.id ? `2px solid ${themeColor}` : '2px solid rgba(156, 163, 175, 0.3)',
                   borderRadius: '12px',
                   transform: `scale(${1 / transform.scale})`,
                   transformOrigin: 'top left',
@@ -2857,7 +2862,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                       width: '12px',
                       height: '12px',
                       backgroundColor: 'white',
-                      border: '2px solid #FFDD00',
+                      border: `2px solid ${themeColor}`,
                       borderRadius: '2px',
                       transform: `scale(${1 / transform.scale})`,
                       transformOrigin: 'top left',
@@ -2882,7 +2887,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                       width: '12px',
                       height: '12px',
                       backgroundColor: 'white',
-                      border: '2px solid #FFDD00',
+                      border: `2px solid ${themeColor}`,
                       borderRadius: '2px',
                       transform: `scale(${1 / transform.scale})`,
                       transformOrigin: 'top right',
@@ -2907,7 +2912,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                       width: '12px',
                       height: '12px',
                       backgroundColor: 'white',
-                      border: '2px solid #FFDD00',
+                      border: `2px solid ${themeColor}`,
                       borderRadius: '2px',
                       transform: `scale(${1 / transform.scale})`,
                       transformOrigin: 'bottom left',
@@ -2932,7 +2937,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                       width: '12px',
                       height: '12px',
                       backgroundColor: 'white',
-                      border: '2px solid #FFDD00',
+                      border: `2px solid ${themeColor}`,
                       borderRadius: '2px',
                       transform: `scale(${1 / transform.scale})`,
                       transformOrigin: 'bottom right',
@@ -2977,7 +2982,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               <div
                 key={`title-${frame.id}`}
                 className={`absolute -top-8 left-0 px-3 py-1 text-white text-sm font-bold rounded-lg shadow-md flex items-center gap-2 pointer-events-auto whitespace-nowrap ${
-                  filterFrameIds.has(frame.id) ? 'bg-[#FFDD00]' : 'bg-gray-500/50'
+                  filterFrameIds.has(frame.id) ? '' : 'bg-gray-500/50'
                 }`}
                 style={{ 
                   left: `${frame.x}px`,
@@ -2988,6 +2993,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                   transformOrigin: 'top left',
                   wordBreak: 'keep-all',
                   opacity: filterFrameIds.size > 0 && !filterFrameIds.has(frame.id) ? 0.3 : 1,
+                  backgroundColor: filterFrameIds.has(frame.id) ? themeColor : (selectedFrameId === frame.id ? themeColor : undefined)
                 }}
               onDoubleClick={(e) => {
                 e.stopPropagation();
@@ -3154,8 +3160,12 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               overflow: 'visible'
             }}
           >
-            {/* 直角箭头标记定义 */}
+            {/* 直角箭头标记定义和投影滤镜 */}
             <defs>
+              {/* 投影滤镜 */}
+              <filter id="connectionShadow" x="-50%" y="-50%" width="200%" height="200%">
+                <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="rgba(0,0,0,0.3)" floodOpacity="1"/>
+              </filter>
               <marker
                 id="arrowForward"
                 markerWidth="36"
@@ -3168,7 +3178,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                 {/* 90度折角箭头 */}
                 <path
                   d="M 12 3 L 30 18 L 12 33"
-                  stroke="#FFDD00"
+                  stroke={themeColor}
                   strokeWidth="6"
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -3187,7 +3197,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                 {/* 90度折角箭头 */}
                 <path
                   d="M 12 3 L 30 18 L 12 33"
-                  stroke="#FFDD00"
+                  stroke={themeColor}
                   strokeWidth="6"
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -3284,7 +3294,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                   {isSelected && (
                     <path
                       d={pathData.pathD}
-                      stroke="rgba(255, 221, 0, 0.3)"
+                      stroke={`${themeColor}4D`}
                       strokeWidth={CONNECTION_LINE_CLICKABLE_WIDTH / transform.scale}
                       strokeLinecap="round"
                       strokeLinejoin="round"
@@ -3294,7 +3304,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                   {/* 连接线 */}
                   <path
                     d={pathData.pathD}
-                    stroke="#FFDD00"
+                    stroke={themeColor}
                     strokeWidth={(isSelected ? CONNECTION_LINE_WIDTH + 2 : CONNECTION_LINE_WIDTH) / transform.scale}
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -3302,6 +3312,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                     markerEnd={markerEnd}
                     markerStart={markerStart}
                     opacity={getOpacity()}
+                    filter="url(#connectionShadow)"
                   />
                   
                   {/* 可点击的透明宽线 */}
@@ -3339,11 +3350,12 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               return (
                 <path
                   d={pathD}
-                  stroke="#FFDD00"
+                  stroke={themeColor}
                   strokeWidth={CONNECTION_LINE_WIDTH / transform.scale}
                   strokeLinecap="round"
                   strokeOpacity={strokeOpacity}
                   fill="none"
+                  filter="url(#connectionShadow)"
                 />
               );
             })()}
@@ -3500,10 +3512,15 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                               return (
                                 <div
                                   key={side}
-                                  className={`absolute z-50 w-6 h-6 -translate-x-1/2 -translate-y-1/2 bg-[#FFDD00] border-2 border-white rounded-full shadow-lg cursor-crosshair transition-transform pointer-events-auto ${
-                                    isActive ? 'scale-125' : isHovering ? 'scale-150 ring-4 ring-[#FFDD00] ring-opacity-50' : 'hover:scale-110'
+                                  className={`absolute z-50 w-6 h-6 -translate-x-1/2 -translate-y-1/2 border-2 border-white rounded-full shadow-lg cursor-crosshair transition-transform pointer-events-auto ${
+                                    isActive ? 'scale-125' : isHovering ? 'scale-150 ring-4 ring-opacity-50' : 'hover:scale-110'
                                   }`}
-                                  style={{ left: `${left}px`, top: `${top}px` }}
+                                  style={{ 
+                                    backgroundColor: themeColor,
+                                    boxShadow: isHovering ? `0 0 0 4px ${themeColor}80` : undefined,
+                                    left: `${left}px`, 
+                                    top: `${top}px`
+                                  }}
                                   onPointerDown={(e) => handleConnectionPointDown(e, note.id, side)}
                                 />
                               );
@@ -3542,8 +3559,9 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                       </div>
                   ) : (
                       <div 
-                          className={`w-full h-full shadow-xl flex flex-col overflow-hidden group rounded-sm transition-shadow ${isDragging ? 'shadow-2xl ring-4 ring-[#FFDD00]' : isInFrame ? 'ring-4 ring-[#EEEEEE]' : ''}`}
+                          className={`w-full h-full shadow-xl flex flex-col overflow-hidden group rounded-sm transition-shadow ${isDragging ? 'shadow-2xl ring-4' : isInFrame ? 'ring-4 ring-[#EEEEEE]' : ''}`}
                           style={{
+                              boxShadow: isDragging ? `0 0 0 4px ${themeColor}` : undefined,
                               transform: `rotate(${(parseInt(note.id.slice(-2), 36) % 6) - 3}deg)`,
                               backgroundColor: note.color || '#FFFDF5'
                           }}
@@ -3665,7 +3683,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                   top: minY - padding,
                   width: maxX - minX + padding * 2,
                   height: maxY - minY + padding * 2,
-                  border: '6px dashed #FFDD00',
+                  border: `6px dashed ${themeColor}`,
                   borderRadius: '8px',
                   pointerEvents: 'none',
                 }}
@@ -3753,9 +3771,10 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               }}
               className={`w-8 h-12 rounded-full shadow-lg flex items-center justify-center transition-all ${
                 isShiftPressed 
-                  ? 'bg-[#FFDD00] text-yellow-950' 
+                  ? 'text-yellow-950' 
                   : 'bg-white text-gray-700 hover:bg-gray-50'
               }`}
+                style={isShiftPressed ? { backgroundColor: themeColor } : undefined}
               title={isEditMode ? "Hold for multi-select" : "Hold for multi-frame filter"}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -3786,8 +3805,19 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                 onPointerDown={(e) => {
                   e.stopPropagation();
                 }}
-                className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 bg-[#FFDD00] text-yellow-950 rounded-xl shadow-lg hover:bg-[#E6C700] font-bold h-full"
-                style={{ paddingTop: '6px', paddingBottom: '6px' }}
+                className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 text-yellow-950 rounded-xl shadow-lg font-bold h-full"
+                style={{ backgroundColor: themeColor, paddingTop: '6px', paddingBottom: '6px' }}
+                onMouseEnter={(e) => {
+                  const darkR = Math.max(0, Math.floor(parseInt(themeColor.slice(1, 3), 16) * 0.9));
+                  const darkG = Math.max(0, Math.floor(parseInt(themeColor.slice(3, 5), 16) * 0.9));
+                  const darkB = Math.max(0, Math.floor(parseInt(themeColor.slice(5, 7), 16) * 0.9));
+                  const darkHex = '#' + [darkR, darkG, darkB].map(x => {
+                    const hex = x.toString(16);
+                    return hex.length === 1 ? '0' + hex : hex;
+                  }).join('').toUpperCase();
+                  e.currentTarget.style.backgroundColor = darkHex;
+                }}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
               >
                   <Check size={18} className="sm:w-5 sm:h-5" />
                   <span className="hidden sm:inline">Done</span>
@@ -3842,7 +3872,10 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                                 standardSizeScale: newScale
                             });
                         }}
-                        className="p-2 sm:p-3 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
+                        className="p-2 sm:p-3 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
+                        style={{ backgroundColor: 'transparent' }}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${themeColor}1A`}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                         title="放大布局"
                     >
                         <span className="text-base sm:text-lg">L+</span>
@@ -3885,7 +3918,10 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                                 standardSizeScale: newScale
                             });
                         }}
-                        className="p-2 sm:p-3 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
+                        className="p-2 sm:p-3 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
+                        style={{ backgroundColor: 'transparent' }}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${themeColor}1A`}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                         title="缩小布局"
                     >
                         <span className="text-base sm:text-lg">L-</span>
@@ -3907,14 +3943,20 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                     <>
                     <button
                         onClick={() => createNoteAtCenter('text')}
-                            className="w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
+                            className="w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
+                            style={{ backgroundColor: 'transparent' }}
+                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${themeColor}1A`}
+                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                         title="Add Text"
                     >
                             <Type size={18} className="sm:w-5 sm:h-5" />
                     </button>
                     <button
                         onClick={() => createNoteAtCenter('compact')}
-                            className="w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
+                            className="w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
+                            style={{ backgroundColor: 'transparent' }}
+                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${themeColor}1A`}
+                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                         title="Add Sticky Note"
                     >
                             <StickyNote size={18} className="sm:w-5 sm:h-5" />
@@ -3924,7 +3966,10 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                                 setIsDrawingFrame(true);
                                 setSelectedFrameId(null);
                             }}
-                            className={`w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 flex items-center justify-center transition-colors active:scale-95 ${isDrawingFrame ? 'bg-[#FFDD00] text-yellow-900' : 'hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700'}`}
+                            className={`w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 flex items-center justify-center transition-colors active:scale-95 ${isDrawingFrame ? 'text-yellow-900' : 'text-gray-700 hover:text-yellow-700'}`}
+                            style={isDrawingFrame ? { backgroundColor: themeColor } : undefined}
+                            onMouseEnter={(e) => !isDrawingFrame && (e.currentTarget.style.backgroundColor = `${themeColor}1A`)}
+                            onMouseLeave={(e) => !isDrawingFrame && (e.currentTarget.style.backgroundColor = '')}
                             title="Add Frame"
                         >
                             <svg width="18" height="18" className="sm:w-5 sm:h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -3976,9 +4021,13 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                                     onChange={() => setLayerVisibility(prev => ({ ...prev, connects: !prev.connects }))}
                                     className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
                                         layerVisibility.connects 
-                                            ? 'bg-[#FFDD00] border-[#FFDD00]' 
-                                            : 'bg-transparent border-[#FFDD00]'
+                                            ? '' 
+                                            : 'bg-transparent'
                                     }`}
+                                    style={{ 
+                                        backgroundColor: layerVisibility.connects ? themeColor : 'transparent',
+                                        borderColor: themeColor
+                                    }}
                                 />
                             </div>
                             {/* Text (文本对象) */}
@@ -3993,9 +4042,13 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                                     onChange={() => setLayerVisibility(prev => ({ ...prev, text: !prev.text }))}
                                     className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
                                         layerVisibility.text 
-                                            ? 'bg-[#FFDD00] border-[#FFDD00]' 
-                                            : 'bg-transparent border-[#FFDD00]'
+                                            ? '' 
+                                            : 'bg-transparent'
                                     }`}
+                                    style={{ 
+                                        backgroundColor: layerVisibility.text ? themeColor : 'transparent',
+                                        borderColor: themeColor
+                                    }}
                                 />
                             </div>
                             {/* Secondary (小便签) */}
@@ -4010,9 +4063,13 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                                     onChange={() => setLayerVisibility(prev => ({ ...prev, secondary: !prev.secondary }))}
                                     className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
                                         layerVisibility.secondary 
-                                            ? 'bg-[#FFDD00] border-[#FFDD00]' 
-                                            : 'bg-transparent border-[#FFDD00]'
+                                            ? '' 
+                                            : 'bg-transparent'
                                     }`}
+                                    style={{ 
+                                        backgroundColor: layerVisibility.secondary ? themeColor : 'transparent',
+                                        borderColor: themeColor
+                                    }}
                                 />
                             </div>
                             {/* Primary (标准便签) */}
@@ -4027,9 +4084,13 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                                     onChange={() => setLayerVisibility(prev => ({ ...prev, primary: !prev.primary }))}
                                     className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
                                         layerVisibility.primary 
-                                            ? 'bg-[#FFDD00] border-[#FFDD00]' 
-                                            : 'bg-transparent border-[#FFDD00]'
+                                            ? '' 
+                                            : 'bg-transparent'
                                     }`}
+                                    style={{ 
+                                        backgroundColor: layerVisibility.primary ? themeColor : 'transparent',
+                                        borderColor: themeColor
+                                    }}
                                 />
                             </div>
                             {/* Frame - Bottom */}
@@ -4049,9 +4110,13 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                                     onChange={() => setLayerVisibility(prev => ({ ...prev, frame: !prev.frame }))}
                                     className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
                                         layerVisibility.frame 
-                                            ? 'bg-[#FFDD00] border-[#FFDD00]' 
-                                            : 'bg-transparent border-[#FFDD00]'
+                                            ? '' 
+                                            : 'bg-transparent'
                                     }`}
+                                    style={{ 
+                                        backgroundColor: layerVisibility.frame ? themeColor : 'transparent',
+                                        borderColor: themeColor
+                                    }}
                                 />
                             </div>
                         </div>
@@ -4260,7 +4325,25 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                 <button
                   onClick={handleConfirmImport}
                   disabled={importPreview.filter(p => !p.error && !p.isDuplicate).length === 0}
-                  className="px-6 py-2 bg-[#FFDD00] hover:bg-[#E6C700] disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg text-gray-900 font-medium transition-colors"
+                  className="px-6 py-2 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg text-gray-900 font-medium transition-colors"
+                  style={{ backgroundColor: themeColor }}
+                  onMouseEnter={(e) => {
+                    if (!e.currentTarget.disabled) {
+                      const darkR = Math.max(0, Math.floor(parseInt(themeColor.slice(1, 3), 16) * 0.9));
+                      const darkG = Math.max(0, Math.floor(parseInt(themeColor.slice(3, 5), 16) * 0.9));
+                      const darkB = Math.max(0, Math.floor(parseInt(themeColor.slice(5, 7), 16) * 0.9));
+                      const darkHex = '#' + [darkR, darkG, darkB].map(x => {
+                        const hex = x.toString(16);
+                        return hex.length === 1 ? '0' + hex : hex;
+                      }).join('').toUpperCase();
+                      e.currentTarget.style.backgroundColor = darkHex;
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!e.currentTarget.disabled) {
+                      e.currentTarget.style.backgroundColor = themeColor;
+                    }
+                  }}
                 >
                   Confirm Import ({importPreview.filter(p => !p.error && !p.isDuplicate).length})
                 </button>

@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { MapContainer, TileLayer, Marker, ImageOverlay, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { Note, Coordinates, Project } from '../types';
-import { MAP_TILE_URL, MAP_TILE_URL_FALLBACK, MAP_SATELLITE_URL, MAP_ATTRIBUTION } from '../constants';
+import { MAP_TILE_URL, MAP_TILE_URL_FALLBACK, MAP_SATELLITE_URL, MAP_ATTRIBUTION, THEME_COLOR, THEME_COLOR_DARK } from '../constants';
 import { Search, Locate, Loader2, X, Check, Satellite, Plus, Image as ImageIcon, FileJson } from 'lucide-react';
 import exifr from 'exifr';
 import { NoteEditor } from './NoteEditor';
@@ -28,6 +28,7 @@ interface MapViewProps {
   navigateToCoords?: { lat: number; lng: number } | null;
   onNavigateComplete?: () => void;
   onSwitchToBoardView?: (coords?: { x: number; y: number }) => void;
+  themeColor?: string;
 }
 
 const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinates) => void }) => {
@@ -533,9 +534,10 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                 }}
                 className={`p-2 sm:p-3 rounded-xl shadow-lg transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${
                     mapStyle === 'satellite' 
-                        ? 'bg-[#FFDD00] text-gray-900' 
+                        ? 'text-gray-900' 
                         : 'bg-white hover:bg-yellow-50 text-gray-700'
                 }`}
+                style={mapStyle === 'satellite' ? { backgroundColor: themeColor } : undefined}
                 title={mapStyle === 'standard' ? 'Switch to Satellite' : 'Switch to Standard'}
             >
                 <Satellite size={18} className="sm:w-5 sm:h-5" />
@@ -648,7 +650,7 @@ const MapCenterHandler = ({ center, zoom }: { center: [number, number], zoom: nu
     return null;
 };
 
-export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, onNavigateComplete, onSwitchToBoardView }) => {
+export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, onNavigateComplete, onSwitchToBoardView, themeColor = THEME_COLOR }) => {
   const notes = project.notes;
   const [editingNote, setEditingNote] = useState<Partial<Note> | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
@@ -1463,10 +1465,10 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           justify-content: center;
           box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
           z-index: 10;
-          border: 2px solid #FFDD00;
+          border: 2px solid ${themeColor};
         ">
           <span style="
-            color: #FFDD00;
+            color: ${themeColor};
             font-size: 12px;
             font-weight: bold;
             line-height: 1;
@@ -1479,7 +1481,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       let backgroundColor = 'white';
       
       // Use yellow as background for all cases to fill the pin shape
-      backgroundColor = '#FFDD00';
+      backgroundColor = themeColor;
       
       if (note.images && note.images.length > 0) {
         // Show photo with pin-shaped mask
@@ -1537,7 +1539,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             align-items: center;
             justify-content: center;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
-            border: 3px solid #FFDD00;
+            border: 3px solid ${themeColor};
             overflow: hidden;
           ">
             ${content}
@@ -1749,7 +1751,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   return (
     <div 
       id="map-view-container" 
-      className={`relative w-full h-full z-0 bg-gray-100 ${isDragging ? 'ring-4 ring-[#FFDD00] ring-offset-2' : ''}`}
+      className={`relative w-full h-full z-0 bg-gray-100 ${isDragging ? 'ring-4 ring-offset-2' : ''}`}
+      style={isDragging ? { boxShadow: `0 0 0 4px ${themeColor}` } : undefined}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -1758,10 +1761,11 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     >
       {isDragging && (
         <div 
-          className="absolute inset-0 z-[4000] bg-[#FFDD00]/20 backdrop-blur-sm flex items-center justify-center pointer-events-auto"
+          className="absolute inset-0 z-[4000] backdrop-blur-sm flex items-center justify-center pointer-events-auto"
+          style={{ backgroundColor: `${themeColor}33` }}
           onClick={() => setIsDragging(false)}
         >
-          <div className="bg-white rounded-2xl shadow-2xl p-8 border-4 border-[#FFDD00] pointer-events-none">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 border-4 pointer-events-none" style={{ borderColor: themeColor }}>
             <div className="text-center">
               <div className="mb-4 flex justify-center">
                 <svg width="64" height="64" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-gray-700">
@@ -1884,7 +1888,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               className: 'custom-icon preview-marker',
               html: `<div style="
                 position: relative;
-                background-color: #FFDD00; 
+                background-color: ${themeColor}; 
                 width: 40px; 
                 height: 40px; 
                 border-radius: 50% 50% 50% 0; 
@@ -1893,7 +1897,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 align-items: center;
                 justify-content: center;
                 box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
-                border: 3px solid #FFDD00;
+                border: 3px solid ${themeColor};
                 overflow: hidden;
                 opacity: 0.7;
               ">
@@ -2081,7 +2085,25 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               <button
                 onClick={handleConfirmImport}
                 disabled={importPreview.filter(p => !p.error && !p.isDuplicate).length === 0}
-                className="px-6 py-2 bg-[#FFDD00] hover:bg-[#E6C700] disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg text-gray-900 font-medium transition-colors"
+                className="px-6 py-2 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg text-gray-900 font-medium transition-colors"
+                style={{ backgroundColor: themeColor }}
+                onMouseEnter={(e) => {
+                  if (!e.currentTarget.disabled) {
+                    const darkR = Math.max(0, Math.floor(parseInt(themeColor.slice(1, 3), 16) * 0.9));
+                    const darkG = Math.max(0, Math.floor(parseInt(themeColor.slice(3, 5), 16) * 0.9));
+                    const darkB = Math.max(0, Math.floor(parseInt(themeColor.slice(5, 7), 16) * 0.9));
+                    const darkHex = '#' + [darkR, darkG, darkB].map(x => {
+                      const hex = x.toString(16);
+                      return hex.length === 1 ? '0' + hex : hex;
+                    }).join('').toUpperCase();
+                    e.currentTarget.style.backgroundColor = darkHex;
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!e.currentTarget.disabled) {
+                    e.currentTarget.style.backgroundColor = themeColor;
+                  }
+                }}
               >
                 Confirm Import ({importPreview.filter(p => !p.error && !p.isDuplicate).length})
               </button>

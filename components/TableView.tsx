@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Note, Project, Frame } from '../types';
 import { GripVertical, Edit2, Check, Plus, X, ExternalLink } from 'lucide-react';
-import { TAG_COLORS } from '../constants';
+import { TAG_COLORS, THEME_COLOR } from '../constants';
 import { generateId } from '../utils';
 import { NoteEditor } from './NoteEditor';
 
@@ -302,11 +302,13 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
                       if (e.key === 'Enter') handleFrameSave();
                       if (e.key === 'Escape') setEditingFrameId(null);
                     }}
-                    className="bg-white px-3 py-1 rounded-lg border-2 border-[#FFDD00] outline-none text-sm"
+                    className="bg-white px-3 py-1 rounded-lg border-2 outline-none text-sm"
+                    style={{ borderColor: THEME_COLOR }}
                   />
                   <button
                     onClick={handleFrameSave}
-                    className="p-1 text-[#FFDD00] hover:text-yellow-600 transition-colors"
+                    className="p-1 hover:text-yellow-600 transition-colors"
+                    style={{ color: THEME_COLOR }}
                   >
                     <Check size={16} />
                   </button>
@@ -318,7 +320,9 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
                     {group.frameId && group.name !== 'Ungrouped' && (
                       <button
                         onClick={() => handleFrameEdit(group.frameId!, group.name)}
-                        className="p-0.5 text-gray-400 hover:text-[#FFDD00] transition-colors flex-shrink-0"
+                        className="p-0.5 text-gray-400 transition-colors flex-shrink-0"
+                        onMouseEnter={(e) => e.currentTarget.style.color = THEME_COLOR}
+                        onMouseLeave={(e) => e.currentTarget.style.color = ''}
                       >
                         <Edit2 size={14} />
                       </button>
@@ -369,7 +373,8 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
                               handleTextSave(note);
                             }
                           }}
-                          className="flex-1 p-1 border border-[#FFDD00] rounded-lg outline-none resize-none"
+                          className="flex-1 p-1 border rounded-lg outline-none resize-none"
+                          style={{ borderColor: THEME_COLOR }}
                           rows={2}
                         />
                         <button

@@ -1,9 +1,11 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Project } from '../types';
-import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check, Upload } from 'lucide-react';
+import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check, Upload, Palette } from 'lucide-react';
 import { generateId, fileToBase64, formatDate, exportToJpeg, exportToJpegCentered, compressImageFromBase64 } from '../utils';
 import { getLastSyncTime, type SyncStatus } from '../utils/sync';
+import { THEME_COLOR, THEME_COLOR_DARK } from '../constants';
+import { ThemeColorPicker } from './ThemeColorPicker';
 
 // Menu dropdown component that adjusts position to avoid going off-screen
 const MenuDropdown: React.FC<{
@@ -98,6 +100,8 @@ interface ProjectManagerProps {
   activeProject?: Project | null;
   onExportCSV?: (project: Project) => void;
   syncStatus?: SyncStatus;
+  themeColor?: string;
+  onThemeColorChange?: (color: string) => void;
 }
 
 export const ProjectManager: React.FC<ProjectManagerProps> = ({ 
@@ -113,8 +117,27 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   onBackToHome,
   viewMode = 'map',
   activeProject,
-  onExportCSV
+  onExportCSV,
+  themeColor = THEME_COLOR,
+  onThemeColorChange
 }) => {
+  // Helper function to calculate darker version of theme color
+  const getDarkerColor = (color: string): string => {
+    // Remove # if present
+    const hex = color.replace('#', '');
+    // Convert to RGB
+    const r = parseInt(hex.substr(0, 2), 16);
+    const g = parseInt(hex.substr(2, 2), 16);
+    const b = parseInt(hex.substr(4, 2), 16);
+    // Darken by 10%
+    const darkerR = Math.max(0, Math.floor(r * 0.9));
+    const darkerG = Math.max(0, Math.floor(g * 0.9));
+    const darkerB = Math.max(0, Math.floor(b * 0.9));
+    // Convert back to hex
+    return `#${darkerR.toString(16).padStart(2, '0')}${darkerG.toString(16).padStart(2, '0')}${darkerB.toString(16).padStart(2, '0')}`;
+  };
+  
+  const themeColorDark = getDarkerColor(themeColor);
   const [isCreating, setIsCreating] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectType, setNewProjectType] = useState<'map' | 'image'>('map');
@@ -126,6 +149,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   const [isImportingFromData, setIsImportingFromData] = useState(false);
   const importFileInputRef = React.useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [showThemeColorPicker, setShowThemeColorPicker] = useState(false);
 
   const handleCreate = () => {
     if (!newProjectName.trim()) return;
@@ -697,8 +721,8 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   };
 
   const containerClass = isSidebar 
-    ? "h-full w-full bg-[#FFDD00] shadow-2xl flex flex-col border-r border-[#FFDD00] overflow-hidden" 
-    : "w-full min-h-screen bg-[#FFDD00] flex flex-col items-center justify-start pt-40 pb-0 p-4 relative"; 
+    ? "h-full w-full shadow-2xl flex flex-col border-r overflow-hidden" 
+    : "w-full min-h-screen flex flex-col items-center justify-start pt-40 pb-0 p-4 relative"; 
 
   const titleClass = isSidebar
     ? "hidden" // Hide title in sidebar
@@ -706,15 +730,20 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
 
   return (
     <div 
-      className={`${containerClass} ${isDragging ? 'ring-4 ring-[#FFDD00] ring-offset-2' : ''}`}
+      className={`${containerClass} ${isDragging ? 'ring-4 ring-offset-2' : ''}`}
+      style={{ 
+        backgroundColor: themeColor,
+        borderColor: isSidebar ? themeColor : undefined,
+        boxShadow: isDragging ? `0 0 0 4px ${themeColor}` : undefined
+      }}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
       {isDragging && (
-        <div className="fixed inset-0 z-[4000] bg-[#FFDD00]/20 backdrop-blur-sm flex items-center justify-center pointer-events-none">
-          <div className="bg-white rounded-2xl shadow-2xl p-8 border-4 border-[#FFDD00]">
+        <div className="fixed inset-0 z-[4000] backdrop-blur-sm flex items-center justify-center pointer-events-none" style={{ backgroundColor: `${themeColor}33` }}>
+          <div className="bg-white rounded-2xl shadow-2xl p-8 border-4" style={{ borderColor: themeColor }}>
             <div className="text-center">
               <div className="text-4xl mb-4">📁</div>
               <div className="text-xl font-bold text-gray-800">Drop JSON file to merge project</div>
@@ -723,6 +752,17 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           </div>
         </div>
       )}
+      {/* Theme Color Button - Top Left */}
+      {!isSidebar && onThemeColorChange && (
+        <button
+          onClick={() => setShowThemeColorPicker(true)}
+          className="absolute top-4 left-4 p-2 bg-white/90 hover:bg-white rounded-xl shadow-lg text-gray-700 transition-all z-[2010]"
+          title="Change Theme Color"
+        >
+          <Palette size={20} />
+        </button>
+      )}
+
       {isSidebar && (
         <>
           <button 
@@ -734,55 +774,65 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                 onCloseSidebar();
               }
             }} 
-            className="absolute top-4 left-4 text-yellow-800 hover:text-white transition-colors z-[2010]"
+            className="absolute top-4 left-4 p-2 rounded-xl text-white transition-colors z-[2010]"
+            style={{ backgroundColor: themeColor }}
+            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = themeColorDark}
+            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
           >
             <Home size={24} />
           </button>
+          {activeProject && syncStatus === 'idle' && getLastSyncTime() && (
+            <div
+              className="absolute top-4 right-20 flex items-center justify-center w-8 h-8 p-2 rounded-xl text-white transition-colors z-[2010] cursor-help"
+              style={{ backgroundColor: themeColor }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = themeColorDark}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
+              title={`Synced: ${new Date(getLastSyncTime()!).toLocaleString('en-US')}`}
+            >
+              <Cloud size={20} />
+            </div>
+          )}
           {activeProject && (
-            <>
-              {/* Cloud icon - to the left of export button */}
-              {syncStatus === 'idle' && getLastSyncTime() && (
-                <div
-                  className="absolute top-4 right-20 flex items-center justify-center w-8 h-8 text-yellow-800 hover:text-white transition-colors z-[2010] cursor-help"
-                  title={`Synced: ${new Date(getLastSyncTime()!).toLocaleString('en-US')}`}
-                >
-                  <Cloud size={20} />
-                </div>
-              )}
-              <button 
-                onClick={handleExportCurrentView}
-                className="absolute top-4 right-12 text-yellow-800 hover:text-white transition-colors z-[2010]"
-                title="Export Current View"
-              >
-                <Download size={24} />
-              </button>
-            </>
+            <button 
+              onClick={handleExportCurrentView}
+              className="absolute top-4 right-12 p-2 rounded-xl text-white transition-colors z-[2010]"
+              style={{ backgroundColor: themeColor }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = themeColorDark}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
+              title="Export Current View"
+            >
+              <Download size={24} />
+            </button>
           )}
           <button 
             onClick={onCloseSidebar} 
-            className="absolute top-4 right-4 text-yellow-800 hover:text-white transition-colors z-[2010]"
+            className="absolute top-4 right-4 p-2 rounded-xl text-white transition-colors z-[2010]"
+            style={{ backgroundColor: themeColor }}
+            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = themeColorDark}
+            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
           >
-          <X size={24} />
-        </button>
+            <X size={24} />
+          </button>
         </>
       )}
 
-      <div className={isSidebar ? "p-6 pt-28 border-b border-[#FFDD00]/20 flex-shrink-0" : "flex flex-col items-center"}>
+      <div className={isSidebar ? "p-6 pt-28 border-b flex-shrink-0" : "flex flex-col items-center"} style={isSidebar ? { borderColor: `${themeColor}33` } : undefined}>
         {!isSidebar && (
-          <h1 className={titleClass}>
-            <span>START</span>
-            <span>YOUR</span>
-            <span>MAPPING</span>
-          </h1>
-        )}
-        
-        {!isSidebar && (
-          <button 
-            onClick={() => setIsCreating(true)}
-            className="mt-8 px-8 py-4 bg-white text-yellow-900 rounded-full font-bold text-lg shadow-xl hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
-          >
-            <Plus size={24} /> New Project
-          </button>
+          <>
+            <h1 className={titleClass}>
+              <span>START</span>
+              <span>YOUR</span>
+              <span>MAPPING</span>
+            </h1>
+            
+            {/* New Project Button */}
+            <button 
+              onClick={() => setIsCreating(true)}
+              className="mt-8 px-8 py-4 bg-white text-yellow-900 rounded-full font-bold text-lg shadow-xl hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
+            >
+              <Plus size={24} /> New Project
+            </button>
+          </>
         )}
       </div>
 
@@ -824,11 +874,27 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
               key={p.id} 
               className={`group relative flex items-center justify-between p-4 rounded-2xl transition-all ${
                 p.id === currentProjectId 
-                  ? 'bg-white shadow-lg ring-2 ring-[#FFDD00] text-yellow-950' 
+                  ? 'bg-white shadow-lg ring-2 text-yellow-950' 
                   : isSidebar 
-                    ? 'bg-[#FFDD00]/50 hover:bg-[#FFDD00] text-yellow-900 border border-[#FFDD00]/20' 
+                    ? 'text-yellow-900 border' 
                     : 'bg-white/90 hover:bg-white shadow-lg text-gray-800'
               }`}
+              style={p.id === currentProjectId 
+                ? { boxShadow: `0 0 0 2px ${themeColor}` }
+                : isSidebar 
+                  ? { backgroundColor: `${themeColor}E6`, borderColor: `${themeColor}33` }
+                  : undefined
+              }
+              onMouseEnter={(e) => {
+                if (isSidebar && p.id !== currentProjectId) {
+                  e.currentTarget.style.backgroundColor = themeColor;
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (isSidebar && p.id !== currentProjectId) {
+                  e.currentTarget.style.backgroundColor = `${themeColor}E6`;
+                }
+              }}
             >
               <div 
                 className="flex-1 cursor-pointer" 
@@ -848,7 +914,8 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                         }
                       }}
                       onClick={(e) => e.stopPropagation()}
-                      className="flex-1 px-2 py-1 bg-white border-2 border-[#FFDD00] rounded-lg outline-none text-lg font-bold"
+                      className="flex-1 px-2 py-1 bg-white border-2 rounded-lg outline-none text-lg font-bold"
+                      style={{ borderColor: themeColor }}
                     />
                     <button
                       onClick={(e) => {
@@ -872,7 +939,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                 ) : (
                   <>
                     <div className="font-bold text-lg leading-tight">{p.name}</div>
-                    <div className={`text-xs flex items-center gap-1 mt-1 ${p.id === currentProjectId ? 'text-yellow-700' : 'text-yellow-800/60'}`}>
+                    <div className="text-xs flex items-center gap-1 mt-1" style={{ color: 'rgba(0,0,0,0.4)' }}>
                       {p.type === 'map' ? <MapIcon size={12}/> : <ImageIcon size={12}/>}
                       {formatDate(p.createdAt)}
                     </div>
@@ -892,7 +959,16 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                     e.stopPropagation(); 
                     setOpenMenuId(openMenuId === p.id ? null : p.id); 
                   }}
-                  className={`p-2 rounded-full transition-colors ${p.id === currentProjectId ? 'text-yellow-700 hover:bg-[#FFDD00]/10' : 'text-yellow-800/60 hover:text-yellow-900 hover:bg-[#FFDD00]/20'}`}
+                  className="p-2 rounded-full transition-colors"
+                  style={{ color: p.id === currentProjectId ? themeColor : `${themeColor}99` }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = p.id === currentProjectId ? `${themeColor}1A` : `${themeColor}33`;
+                    e.currentTarget.style.color = themeColor;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '';
+                    e.currentTarget.style.color = p.id === currentProjectId ? themeColor : `${themeColor}99`;
+                  }}
                 >
                   <MoreHorizontal size={20} />
                 </button>
@@ -981,7 +1057,10 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                       handleCreate();
                     }
                   }}
-                  className="w-full p-3 bg-gray-50 rounded-xl outline-none focus:ring-2 focus:ring-[#FFDD00] transition-all font-medium"
+                  className="w-full p-3 bg-gray-50 rounded-xl outline-none focus:ring-2 transition-all font-medium"
+                  style={{ '--tw-ring-color': themeColor } as React.CSSProperties}
+                  onFocus={(e) => e.currentTarget.style.boxShadow = `0 0 0 2px ${themeColor}`}
+                  onBlur={(e) => e.currentTarget.style.boxShadow = ''}
                   placeholder="My Mapp Trip"
                 />
               </div>
@@ -991,14 +1070,16 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                 <div className="grid grid-cols-2 gap-3">
                   <button 
                     onClick={() => setNewProjectType('map')}
-                    className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${newProjectType === 'map' ? 'border-[#FFDD00] bg-[#FFDD00]/10 text-yellow-800' : 'border-gray-100 text-gray-400 hover:border-gray-200'}`}
+                    className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${newProjectType === 'map' ? '' : 'border-gray-100 text-gray-400 hover:border-gray-200'}`}
+                    style={newProjectType === 'map' ? { borderColor: themeColor, backgroundColor: `${themeColor}1A`, color: themeColor } : undefined}
                   >
                     <MapIcon size={24} />
                     <span className="font-bold text-sm">Map Based</span>
                   </button>
                   <button 
                     onClick={() => setNewProjectType('image')}
-                    className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${newProjectType === 'image' ? 'border-[#FFDD00] bg-[#FFDD00]/10 text-yellow-800' : 'border-gray-100 text-gray-400 hover:border-gray-200'}`}
+                    className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${newProjectType === 'image' ? '' : 'border-gray-100 text-gray-400 hover:border-gray-200'}`}
+                    style={newProjectType === 'image' ? { borderColor: themeColor, backgroundColor: `${themeColor}1A`, color: themeColor } : undefined}
                   >
                     <ImageIcon size={24} />
                     <span className="font-bold text-sm">Image Based</span>
@@ -1009,7 +1090,11 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
               {newProjectType === 'image' && (
                 <div>
                    <label className="block text-sm font-bold text-gray-600 mb-2">Background Image (Optional)</label>
-                   <label className="block w-full p-4 border-2 border-dashed border-gray-300 rounded-xl text-center cursor-pointer hover:bg-gray-50 hover:border-[#FFDD00] transition-colors">
+                   <label 
+                     className="block w-full p-4 border-2 border-dashed border-gray-300 rounded-xl text-center cursor-pointer hover:bg-gray-50 transition-colors"
+                     onMouseEnter={(e) => e.currentTarget.style.borderColor = themeColor}
+                     onMouseLeave={(e) => e.currentTarget.style.borderColor = ''}
+                   >
                       {bgImage ? (
                         <div className="relative h-32 w-full">
                            <img src={bgImage} className="w-full h-full object-contain" alt="preview"/>
@@ -1038,7 +1123,10 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
               <button 
                 onClick={handleCreate}
                 disabled={!newProjectName.trim()}
-                className="flex-1 py-3 bg-[#FFDD00] text-yellow-950 font-bold rounded-xl shadow-lg hover:bg-[#E6C700] disabled:opacity-50 disabled:shadow-none"
+                className="flex-1 py-3 text-yellow-950 font-bold rounded-xl shadow-lg disabled:opacity-50 disabled:shadow-none"
+                style={{ backgroundColor: themeColor }}
+                onMouseEnter={(e) => !e.currentTarget.disabled && (e.currentTarget.style.backgroundColor = themeColorDark)}
+                onMouseLeave={(e) => !e.currentTarget.disabled && (e.currentTarget.style.backgroundColor = themeColor)}
               >
                 Create
               </button>
@@ -1078,13 +1166,26 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
               </button>
               <button 
                 onClick={() => importFileInputRef.current?.click()}
-                className="flex-1 py-3 bg-[#FFDD00] text-yellow-950 font-bold rounded-xl shadow-lg hover:bg-[#E6C700]"
+                className="flex-1 py-3 text-yellow-950 font-bold rounded-xl shadow-lg"
+                style={{ backgroundColor: themeColor }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = themeColorDark}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
               >
                 Select File
               </button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Theme Color Picker */}
+      {onThemeColorChange && (
+        <ThemeColorPicker
+          isOpen={showThemeColorPicker}
+          onClose={() => setShowThemeColorPicker(false)}
+          currentColor={themeColor}
+          onColorChange={onThemeColorChange}
+        />
       )}
     </div>
   );

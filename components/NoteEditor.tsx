@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Note, Tag } from '../types';
-import { EMOJI_LIST, EMOJI_CATEGORIES, TAG_COLORS } from '../constants';
+import { EMOJI_LIST, EMOJI_CATEGORIES, TAG_COLORS, THEME_COLOR } from '../constants';
 import { createTag, fileToBase64, generateId } from '../utils';
 import { X, Camera, Plus, Check, PenTool, Minus, Bold, Image as ImageIcon, Trash2, ArrowLeft, ArrowRight, Locate, ArrowUp } from 'lucide-react';
 import { DrawingCanvas } from './DrawingCanvas';
@@ -348,7 +348,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
           style={{ 
               backgroundColor: isTextMode ? 'transparent' : color,
               boxShadow: isTextMode ? 'none' : '0 25px 50px 12px rgba(0, 0, 0, 0.15)',
-              border: isTextMode ? '2px solid #FFDD00' : 'none',
+              border: isTextMode ? `2px solid ${THEME_COLOR}` : 'none',
               borderRadius: isTextMode ? '12px' : undefined,
               padding: isTextMode ? '6px' : '4px',
               overflow: isTextMode ? 'visible' : 'hidden'
@@ -379,10 +379,10 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
           }}
         >
           <div className="flex items-center gap-1 bg-white rounded-xl shadow-lg p-2" style={{ border: 'none' }}>
-            <button onClick={() => { setShowEmojiPicker(false); adjustFontSize(1); }} className="p-1 bg-gray-50 hover:bg-[#FFDD00]/10 text-gray-600 hover:text-[#FFDD00] rounded-lg transition-all" style={{ border: 'none', outline: 'none' }}><Plus size={18}/></button>
-            <button onClick={() => { setShowEmojiPicker(false); adjustFontSize(-1); }} className="p-1 bg-gray-50 hover:bg-[#FFDD00]/10 text-gray-600 hover:text-[#FFDD00] rounded-lg transition-all" style={{ border: 'none', outline: 'none' }}><Minus size={18}/></button>
+            <button onClick={() => { setShowEmojiPicker(false); adjustFontSize(1); }} className="p-1 bg-gray-50 text-gray-600 rounded-lg transition-all" style={{ border: 'none', outline: 'none' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = `${THEME_COLOR}1A`; e.currentTarget.style.color = THEME_COLOR; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; }}><Plus size={18}/></button>
+            <button onClick={() => { setShowEmojiPicker(false); adjustFontSize(-1); }} className="p-1 bg-gray-50 text-gray-600 rounded-lg transition-all" style={{ border: 'none', outline: 'none' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = `${THEME_COLOR}1A`; e.currentTarget.style.color = THEME_COLOR; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; }}><Minus size={18}/></button>
             <div className="w-px h-6 bg-gray-200 mx-1"></div>
-            <button onClick={() => { setShowEmojiPicker(false); setIsBold(!isBold); }} className={`p-1 rounded-lg transition-all ${isBold ? 'bg-[#FFDD00] text-yellow-900' : 'bg-gray-50 hover:bg-[#FFDD00]/10 text-gray-600'}`} style={{ border: 'none', outline: 'none' }}><Bold size={18}/></button>
+            <button onClick={() => { setShowEmojiPicker(false); setIsBold(!isBold); }} className={`p-1 rounded-lg transition-all ${isBold ? 'text-yellow-900' : 'bg-gray-50 text-gray-600'}`} style={{ border: 'none', outline: 'none', backgroundColor: isBold ? THEME_COLOR : undefined }} onMouseEnter={(e) => !isBold && (e.currentTarget.style.backgroundColor = `${THEME_COLOR}1A`)} onMouseLeave={(e) => !isBold && (e.currentTarget.style.backgroundColor = '')}><Bold size={18}/></button>
           </div>
         </div>
         
@@ -576,7 +576,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                                     onClick={() => setSelectedEmojiCategory(category as keyof typeof EMOJI_CATEGORIES)}
                                     className={`px-2 py-1 text-xs font-medium rounded-lg whitespace-nowrap transition-colors flex-shrink-0 ${
                                       selectedEmojiCategory === category
-                                        ? 'bg-[#FFDD00] text-gray-900'
+                                        ? 'text-gray-900'
                                         : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                     }`}
                                   >
@@ -602,7 +602,10 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                                           }
                                         }
                                       }}
-                                      className="text-2xl p-2 hover:bg-[#FFDD00]/10 rounded-lg transition-colors flex items-center justify-center"
+                                      className="text-2xl p-2 rounded-lg transition-colors flex items-center justify-center"
+                                      style={{ backgroundColor: 'transparent' }}
+                                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${THEME_COLOR}1A`}
+                                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                                     >
                                       {e}
                                     </button>
@@ -753,8 +756,11 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
             className={`p-2 rounded-full transition-all ${
               currentIndex === 0
                 ? 'text-gray-400 cursor-not-allowed'
-                : 'text-white hover:text-[#FFDD00]'
+                : 'text-white'
             }`}
+            style={currentIndex !== 0 ? { color: 'white' } : undefined}
+            onMouseEnter={(e) => currentIndex !== 0 && (e.currentTarget.style.color = THEME_COLOR)}
+            onMouseLeave={(e) => currentIndex !== 0 && (e.currentTarget.style.color = 'white')}
             title="Previous note"
           >
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -776,8 +782,11 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
             className={`p-2 rounded-full transition-all ${
               currentIndex === clusterNotes.length - 1
                 ? 'text-gray-400 cursor-not-allowed'
-                : 'text-white hover:text-[#FFDD00]'
+                : 'text-white'
             }`}
+            style={currentIndex !== clusterNotes.length - 1 ? { color: 'white' } : undefined}
+            onMouseEnter={(e) => currentIndex !== clusterNotes.length - 1 && (e.currentTarget.style.color = THEME_COLOR)}
+            onMouseLeave={(e) => currentIndex !== clusterNotes.length - 1 && (e.currentTarget.style.color = 'white')}
             title="Next note"
           >
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">

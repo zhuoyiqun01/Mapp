@@ -17,6 +17,10 @@ export const MAP_TILE_URL_FALLBACK = "https://{s}.tile.openstreetmap.org/{z}/{x}
 export const MAP_SATELLITE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 export const MAP_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
 
+// Theme Colors
+export const THEME_COLOR = '#FFDD00';
+export const THEME_COLOR_DARK = '#E6C700'; // Hover/dark variant
+
 export const TAG_COLORS = [
   '#f87171', // red-400
   '#fb923c', // orange-400

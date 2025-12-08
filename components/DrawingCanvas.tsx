@@ -1,6 +1,7 @@
 
 import React, { useRef, useState, useEffect } from 'react';
 import { Eraser, Pencil, Trash2, Check, X } from 'lucide-react';
+import { THEME_COLOR, THEME_COLOR_DARK } from '../constants';
 
 interface DrawingCanvasProps {
   onSave: (dataUrl: string) => void;
@@ -248,13 +249,15 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({ onSave, onCancel, 
          <div className="flex bg-gray-100 rounded-lg p-0.5">
             <button
               onClick={() => setMode('draw')}
-              className={`p-1.5 rounded-md transition-all ${mode === 'draw' ? 'bg-white text-[#FFDD00] shadow-sm' : 'text-gray-400'}`}
+              className={`p-1.5 rounded-md transition-all ${mode === 'draw' ? 'bg-white shadow-sm' : 'text-gray-400'}`}
+              style={mode === 'draw' ? { color: THEME_COLOR } : undefined}
             >
               <Pencil size={18} />
             </button>
             <button
               onClick={() => setMode('erase')}
-              className={`p-1.5 rounded-md transition-all ${mode === 'erase' ? 'bg-white text-[#FFDD00] shadow-sm' : 'text-gray-400'}`}
+              className={`p-1.5 rounded-md transition-all ${mode === 'erase' ? 'bg-white shadow-sm' : 'text-gray-400'}`}
+              style={mode === 'erase' ? { color: THEME_COLOR } : undefined}
             >
               <Eraser size={18} />
             </button>
@@ -273,7 +276,7 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({ onSave, onCancel, 
 
          <div className="w-px h-6 bg-gray-200"></div>
 
-         <button onClick={handleDone} className="p-2 bg-[#FFDD00] text-yellow-950 rounded-full hover:bg-[#E6C700] shadow-sm active:scale-95 transition-all">
+         <button onClick={handleDone} className="p-2 text-yellow-950 rounded-full shadow-sm active:scale-95 transition-all" style={{ backgroundColor: THEME_COLOR }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = THEME_COLOR_DARK} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = THEME_COLOR}>
             <Check size={20} />
          </button>
       </div>

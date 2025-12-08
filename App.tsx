@@ -8,6 +8,7 @@ import { TableView } from './components/TableView';
 import { ProjectManager } from './components/ProjectManager';
 import { Note, ViewMode, Project } from './types';
 import { get, set } from 'idb-keyval';
+import { THEME_COLOR, THEME_COLOR_DARK } from './constants';
 import { 
   syncProjectsToCloud, 
   loadProjectsFromCloud, 
@@ -40,6 +41,41 @@ export default function App() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+
+  // Theme Color State
+  const [themeColor, setThemeColor] = useState<string>(THEME_COLOR);
+
+  // Load Theme Color from IndexedDB
+  useEffect(() => {
+    const loadThemeColor = async () => {
+      try {
+        const savedColor = await get<string>('mapp-theme-color');
+        if (savedColor) {
+          setThemeColor(savedColor);
+          // Update CSS variables
+          const darkR = Math.max(0, Math.floor(parseInt(savedColor.slice(1, 3), 16) * 0.9));
+          const darkG = Math.max(0, Math.floor(parseInt(savedColor.slice(3, 5), 16) * 0.9));
+          const darkB = Math.max(0, Math.floor(parseInt(savedColor.slice(5, 7), 16) * 0.9));
+          const darkHex = '#' + [darkR, darkG, darkB].map(x => {
+            const hex = x.toString(16);
+            return hex.length === 1 ? '0' + hex : hex;
+          }).join('').toUpperCase();
+          
+          document.documentElement.style.setProperty('--theme-color', savedColor);
+          document.documentElement.style.setProperty('--theme-color-dark', darkHex);
+          
+          // Update meta theme-color
+          const metaThemeColor = document.querySelector('meta[name="theme-color"]');
+          if (metaThemeColor) {
+            metaThemeColor.setAttribute('content', savedColor);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load theme color", err);
+      }
+    };
+    loadThemeColor();
+  }, []);
 
   // Load Projects from IndexedDB and Cloud
   useEffect(() => {
@@ -320,9 +356,16 @@ export default function App() {
     }
   };
 
+  const handleThemeColorChange = (color: string) => {
+    setThemeColor(color);
+    // Force re-render by updating a dummy state or using window.location.reload()
+    // For now, we'll just update the CSS variables which should be enough
+    window.location.reload();
+  };
+
   if (isLoading) {
     return (
-      <div className="w-full min-h-screen bg-[#FFDD00] flex flex-col items-center justify-center text-yellow-900">
+      <div className="w-full min-h-screen flex flex-col items-center justify-center text-yellow-900" style={{ backgroundColor: themeColor }}>
          <Loader2 size={48} className="animate-spin mb-4" />
          <div className="font-bold text-xl">Loading your maps...</div>
       </div>
@@ -331,7 +374,7 @@ export default function App() {
 
   if (!activeProject) {
     return (
-      <div className="w-full min-h-screen bg-[#FFDD00]">
+      <div className="w-full min-h-screen" style={{ backgroundColor: themeColor }}>
       <ProjectManager 
          projects={projects}
          currentProjectId={null}
@@ -339,6 +382,8 @@ export default function App() {
          onSelectProject={setCurrentProjectId}
          onDeleteProject={handleDeleteProject}
          onUpdateProject={handleUpdateProject}
+         themeColor={themeColor}
+         onThemeColorChange={handleThemeColorChange}
       />
       </div>
     );
@@ -378,6 +423,8 @@ export default function App() {
                   activeProject={activeProject}
                   onExportCSV={handleExportCSV}
                   syncStatus={syncStatus}
+                  themeColor={themeColor}
+                  onThemeColorChange={handleThemeColorChange}
               />
              </motion.div>
         </div>
@@ -444,8 +491,24 @@ export default function App() {
                  sidebarButtonDragRef.current.isDragging = false;
                }, 10);
              }}
-             className="absolute left-0 z-[900] pl-3 pr-4 bg-[#FFDD00] hover:bg-[#E6C700] rounded-r-xl shadow-lg text-yellow-950 transition-none cursor-move"
-             style={{ top: `${sidebarButtonY}px`, paddingTop: '12.8px', paddingBottom: '12.8px' }}
+             className="absolute left-0 z-[900] pl-3 pr-4 rounded-r-xl shadow-lg text-yellow-950 transition-none cursor-move"
+             style={{ 
+               backgroundColor: themeColor,
+               top: `${sidebarButtonY}px`, 
+               paddingTop: '12.8px', 
+               paddingBottom: '12.8px' 
+             }}
+             onMouseEnter={(e) => {
+               const darkR = Math.max(0, Math.floor(parseInt(themeColor.slice(1, 3), 16) * 0.9));
+               const darkG = Math.max(0, Math.floor(parseInt(themeColor.slice(3, 5), 16) * 0.9));
+               const darkB = Math.max(0, Math.floor(parseInt(themeColor.slice(5, 7), 16) * 0.9));
+               const darkHex = '#' + [darkR, darkG, darkB].map(x => {
+                 const hex = x.toString(16);
+                 return hex.length === 1 ? '0' + hex : hex;
+               }).join('').toUpperCase();
+               e.currentTarget.style.backgroundColor = darkHex;
+             }}
+             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
           >
              <Menu size={18} />
           </button>
@@ -479,6 +542,7 @@ export default function App() {
                 setViewMode('board');
               });
             }}
+            themeColor={themeColor}
           />
         ) : viewMode === 'board' ? (
           <BoardView 
@@ -541,6 +605,7 @@ export default function App() {
               setViewMode('board');
             }}
             mapViewFileInputRef={mapViewFileInputRef}
+            themeColor={themeColor}
           />
         ) : (
           <TableView 
@@ -573,10 +638,11 @@ export default function App() {
             className={`
               flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
               ${viewMode === 'map' 
-                ? 'bg-[#FFDD00] text-yellow-950 shadow-md scale-105' 
+                ? 'text-yellow-950 shadow-md scale-105' 
                 : 'hover:bg-gray-100 text-gray-500'}
               ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
             `}
+            style={viewMode === 'map' ? { backgroundColor: themeColor } : undefined}
           >
             <Map size={20} />
             Mapping
@@ -587,10 +653,11 @@ export default function App() {
             className={`
               flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
               ${viewMode === 'board' 
-                ? 'bg-[#FFDD00] text-yellow-950 shadow-md scale-105' 
+                ? 'text-yellow-950 shadow-md scale-105' 
                 : 'hover:bg-gray-100 text-gray-500'}
               ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
             `}
+            style={viewMode === 'board' ? { backgroundColor: themeColor } : undefined}
           >
             <Grid size={20} />
             Board
@@ -601,10 +668,11 @@ export default function App() {
             className={`
               flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
               ${viewMode === 'table' 
-                ? 'bg-[#FFDD00] text-yellow-950 shadow-md scale-105' 
+                ? 'text-yellow-950 shadow-md scale-105' 
                 : 'hover:bg-gray-100 text-gray-500'}
               ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
             `}
+            style={viewMode === 'table' ? { backgroundColor: themeColor } : undefined}
           >
             <Table2 size={20} />
             Table
