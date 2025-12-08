@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Map, Grid, Menu, Loader2, Table2, Cloud, CloudOff, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Map as MapIcon, Grid, Menu, Loader2, Table2, Cloud, CloudOff, CheckCircle2, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapView } from './components/MapView';
 import { BoardView } from './components/BoardView';
@@ -17,6 +17,15 @@ import {
   getLastSyncTime,
   type SyncStatus 
 } from './utils/sync';
+import {
+  migrateFromOldFormat,
+  loadAllProjects,
+  saveProject,
+  deleteProject as deleteProjectStorage,
+  loadProject,
+  deleteImage,
+  deleteSketch
+} from './utils/storage';
 
 export default function App() {
   const [viewMode, setViewMode] = useState<ViewMode>('map');
@@ -81,49 +90,46 @@ export default function App() {
   useEffect(() => {
     const loadProjects = async () => {
       try {
-        // 1. First load from local IndexedDB (quick display)
-        const storedProjects = await get<Project[]>('mapp-projects');
-        let localProjects: Project[] = [];
+        // 1. 数据迁移（从旧格式到新格式）
+        await migrateFromOldFormat();
         
-        if (storedProjects) {
-          localProjects = storedProjects;
-          setProjects(storedProjects);
-        } else {
-          // Migration: Check localStorage one last time
-          const localData = localStorage.getItem('mapp-projects');
-          if (localData) {
-             try {
-               const parsed = JSON.parse(localData);
-               localProjects = parsed;
-               setProjects(parsed);
-               // Migrate to IDB
-               await set('mapp-projects', parsed);
-               // Clear LocalStorage
-               localStorage.removeItem('mapp-projects');
-             } catch (e) {
-               console.error("Migration failed", e);
-             }
-          }
+        // 2. 从新格式加载项目（不加载图片，用于快速显示）
+        let localProjects: Project[] = await loadAllProjects(false);
+        
+        if (localProjects.length > 0) {
+          setProjects(localProjects);
         }
         
         setIsLoading(false);
         
-        // 2. Then sync from cloud (background process)
+        // 3. 然后从云端同步（后台进程）
         try {
           setSyncStatus('syncing');
           const cloudResult = await loadProjectsFromCloud();
           
           if (cloudResult.success && cloudResult.projects) {
-            // Merge local and cloud data
+            // 合并本地和云端数据
             const merged = mergeProjects(localProjects, cloudResult.projects);
             
-            // If merged data differs from local, update local
-            if (JSON.stringify(merged) !== JSON.stringify(localProjects)) {
+            // 如果合并后的数据与本地不同，更新本地
+            const localIds = new Set(localProjects.map(p => p.id));
+            const mergedIds = new Set(merged.map(p => p.id));
+            const hasChanges = localProjects.length !== merged.length ||
+              [...localIds].some(id => !mergedIds.has(id)) ||
+              merged.some(p => {
+                const local = localProjects.find(lp => lp.id === p.id);
+                return !local || (local.version || 0) < (p.version || 0);
+              });
+            
+            if (hasChanges) {
+              // 保存合并后的项目
+              for (const project of merged) {
+                await saveProject(project);
+              }
               setProjects(merged);
-              await set('mapp-projects', merged);
             }
             
-            // If cloud has updates, sync to cloud
+            // 如果云端有更新，同步到云端
             if (!cloudResult.isNewDevice) {
               await syncProjectsToCloud(merged);
             }
@@ -139,7 +145,7 @@ export default function App() {
               setSyncError(null);
             }, 3000);
           } else {
-            // New device, upload local data to cloud
+            // 新设备，上传本地数据到云端
             if (localProjects.length > 0) {
               await syncProjectsToCloud(localProjects);
             }
@@ -192,9 +198,9 @@ export default function App() {
 
   // Save to IndexedDB and Cloud
   useEffect(() => {
-    if (!isLoading) {
-      // 1. 保存到本地 IndexedDB
-      set('mapp-projects', projects).catch((err) => {
+    if (!isLoading && projects.length > 0) {
+      // 1. 保存到本地 IndexedDB（使用新格式）
+      Promise.all(projects.map(p => saveProject(p))).catch((err) => {
         console.error("Failed to save projects to IDB", err);
         if (err.name === 'QuotaExceededError') {
           alert("Storage Limit Reached. Please delete some projects or images.");
@@ -243,7 +249,62 @@ export default function App() {
     };
   }, [projects, isLoading]);
 
-  const activeProject = projects.find(p => p.id === currentProjectId);
+  // Load full project with images when needed
+  const [activeProject, setActiveProject] = useState<Project | undefined>(
+    projects.find(p => p.id === currentProjectId)
+  );
+
+  // Load full project with images when project changes
+  useEffect(() => {
+    const loadActiveProject = async () => {
+      if (currentProjectId) {
+        // Load project with images for display
+        const fullProject = await loadProject(currentProjectId, true);
+        if (fullProject) {
+          setActiveProject(fullProject);
+        }
+      } else {
+        setActiveProject(undefined);
+      }
+    };
+    loadActiveProject();
+  }, [currentProjectId]);
+
+  // Update activeProject when projects array changes (but keep images loaded)
+  useEffect(() => {
+    if (currentProjectId && activeProject) {
+      const updatedProject = projects.find(p => p.id === currentProjectId);
+      if (updatedProject) {
+        // Merge: use updated metadata from projects, but keep images from activeProject
+        setActiveProject(prev => {
+          if (!prev) return updatedProject;
+          
+          // Create a map of existing notes with loaded images
+          const prevNotesMap = new Map(prev.notes.map(n => [n.id, n]));
+          
+          // Build new notes array: keep loaded images for existing notes, add new notes
+          const newNotes = updatedProject.notes.map(updatedNote => {
+            const prevNote = prevNotesMap.get(updatedNote.id);
+            if (prevNote) {
+              // Note exists, keep loaded images
+              return { ...updatedNote, images: prevNote.images, sketch: prevNote.sketch };
+            } else {
+              // New note, will need to load images when displayed
+              return updatedNote;
+            }
+          });
+          
+          return {
+            ...updatedProject,
+            notes: newNotes,
+            frames: updatedProject.frames || prev.frames || [],
+            connections: updatedProject.connections || prev.connections || [],
+            backgroundImage: prev.backgroundImage || updatedProject.backgroundImage
+          };
+        });
+      }
+    }
+  }, [projects, currentProjectId]);
 
   const addNote = (note: Note) => {
     if (!currentProjectId) return;
@@ -265,8 +326,41 @@ export default function App() {
     }));
   };
 
-  const deleteNote = (noteId: string) => {
+  const deleteNote = async (noteId: string) => {
     if (!currentProjectId) return;
+    
+    // Find the note to delete (to get its images)
+    const project = projects.find(p => p.id === currentProjectId);
+    const noteToDelete = project?.notes.find(n => n.id === noteId);
+    
+    // Delete note's images if they are stored separately
+    if (noteToDelete) {
+      // Delete images
+      if (noteToDelete.images && noteToDelete.images.length > 0) {
+        for (const imageData of noteToDelete.images) {
+          if (imageData.startsWith('img-')) {
+            // It's an image ID, delete it
+            try {
+              await deleteImage(imageData);
+            } catch (error) {
+              console.error('Failed to delete image:', error);
+            }
+          }
+          // If it's Base64 (legacy), no need to delete
+        }
+      }
+      
+      // Delete sketch
+      if (noteToDelete.sketch && noteToDelete.sketch.startsWith('img-')) {
+        try {
+          await deleteSketch(noteToDelete.sketch);
+        } catch (error) {
+          console.error('Failed to delete sketch:', error);
+        }
+      }
+    }
+    
+    // Update projects state
     setProjects(prev => prev.map(p => {
         if (p.id === currentProjectId) {
             // 删除便利贴时，同时删除相关的连接
@@ -281,6 +375,20 @@ export default function App() {
         }
         return p;
     }));
+    
+    // Update activeProject
+    if (activeProject && activeProject.id === currentProjectId) {
+      setActiveProject(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          notes: prev.notes.filter(n => n.id !== noteId),
+          connections: (prev.connections || []).filter(
+            conn => conn.fromNoteId !== noteId && conn.toNoteId !== noteId
+          )
+        };
+      });
+    }
   };
 
   const handleExportCSV = (project: Project) => {
@@ -295,7 +403,8 @@ export default function App() {
     }
     
     // 创建CSV内容
-    const headers = ['文本内容', 'Tag1', 'Tag2', 'Tag3', '分组'];
+    // 支持多个分组：分组1、分组2、分组3
+    const headers = ['文本内容', 'Tag1', 'Tag2', 'Tag3', '分组1', '分组2', '分组3'];
     const rows = standardNotes.map(note => {
       // 文本内容
       const text = note.text || '';
@@ -306,10 +415,18 @@ export default function App() {
       const tag2 = tags[1]?.label || '';
       const tag3 = tags[2]?.label || '';
       
-      // 分组
-      const groupName = note.groupName || '';
+      // 分组（支持多个分组）
+      const groupNames = note.groupNames || [];
+      // 如果没有 groupNames，使用 groupName（向后兼容）
+      const allGroups = groupNames.length > 0 
+        ? groupNames 
+        : (note.groupName ? [note.groupName] : []);
       
-      return [text, tag1, tag2, tag3, groupName];
+      const group1 = allGroups[0] || '';
+      const group2 = allGroups[1] || '';
+      const group3 = allGroups[2] || '';
+      
+      return [text, tag1, tag2, tag3, group1, group2, group3];
     });
 
     // 生成CSV
@@ -334,7 +451,8 @@ export default function App() {
     setIsSidebarOpen(false);
   };
 
-  const handleDeleteProject = (id: string) => {
+  const handleDeleteProject = async (id: string) => {
+    await deleteProjectStorage(id);
     setProjects(prev => prev.filter(p => p.id !== id));
     if (currentProjectId === id) {
         setCurrentProjectId(null);
@@ -644,7 +762,7 @@ export default function App() {
             `}
             style={viewMode === 'map' ? { backgroundColor: themeColor } : undefined}
           >
-            <Map size={20} />
+            <MapIcon size={20} />
             Mapping
           </button>
           <button

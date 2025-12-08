@@ -7,6 +7,7 @@ import { Type, StickyNote, X, Pencil, Check, Minus, Move, ArrowUp, Hash, Plus, I
 import exifr from 'exifr';
 import { generateId, fileToBase64 } from '../utils';
 import { THEME_COLOR, THEME_COLOR_DARK } from '../constants';
+import { saveImage, saveSketch } from '../utils/storage';
 
 // 常量定义
 const CONNECTION_OFFSET = 40; // 连接线从连接点延伸的距离
@@ -1344,12 +1345,57 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
       }
 
       // Generate new IDs and offset positions for imported notes
-      const newNotes = uniqueImportedNotes.map((note: Note) => ({
-        ...note,
-        id: generateId(),
-        createdAt: Date.now() + Math.random(),
-        boardX: (note.boardX || 0) + offsetX,
-        boardY: (note.boardY || 0) + (offsetY - (uniqueImportedNotes[0]?.boardY || 0))
+      // Also handle image separation for imported notes
+      const newNotes = await Promise.all(uniqueImportedNotes.map(async (note: Note) => {
+        const processedNote: Note = {
+          ...note,
+          id: generateId(),
+          createdAt: Date.now() + Math.random(),
+          boardX: (note.boardX || 0) + offsetX,
+          boardY: (note.boardY || 0) + (offsetY - (uniqueImportedNotes[0]?.boardY || 0))
+        };
+
+        // Process images: convert Base64 to image IDs if needed
+        if (note.images && note.images.length > 0) {
+          const processedImages: string[] = [];
+          for (const imageData of note.images) {
+            if (imageData.startsWith('img-')) {
+              // Already an image ID, keep it
+              processedImages.push(imageData);
+            } else {
+              // Base64 data, save it and get image ID
+              try {
+                const imageId = await saveImage(imageData);
+                processedImages.push(imageId);
+              } catch (error) {
+                console.error('Failed to save imported image:', error);
+                // Keep original Base64 as fallback
+                processedImages.push(imageData);
+              }
+            }
+          }
+          processedNote.images = processedImages;
+        }
+
+        // Process sketch: convert Base64 to sketch ID if needed
+        if (note.sketch) {
+          if (note.sketch.startsWith('img-')) {
+            // Already a sketch ID, keep it
+            processedNote.sketch = note.sketch;
+          } else {
+            // Base64 data, save it and get sketch ID
+            try {
+              const sketchId = await saveSketch(note.sketch);
+              processedNote.sketch = sketchId;
+            } catch (error) {
+              console.error('Failed to save imported sketch:', error);
+              // Keep original Base64 as fallback
+              processedNote.sketch = note.sketch;
+            }
+          }
+        }
+
+        return processedNote;
       }));
 
       // Add all new notes
@@ -3613,9 +3659,9 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                                                 // Upgrade compact note to standard note
                                                 const upgradedNote: Note = {
                                                     ...note,
-                                                    variant: 'standard',
-                                                    // Keep text and color, but coords will be empty (0, 0)
-                                                    coords: { lat: 0, lng: 0 }
+                                                    variant: 'standard' as const,
+                                                    // Keep existing coords if available
+                                                    coords: note.coords || { lat: 0, lng: 0 }
                                                 };
                                                 onUpdateNote(upgradedNote);
                                             }}

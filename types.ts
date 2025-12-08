@@ -19,8 +19,8 @@ export interface Note {
   fontSize: number; // 1 to 5 scale
   isBold?: boolean;
   color?: string; // Background color
-  images: string[]; // Base64 strings
-  sketch?: string; // Base64 string from canvas
+  images: string[]; // Image IDs (format: "img-xxx") or Base64 strings (legacy)
+  sketch?: string; // Sketch ID (format: "img-xxx") or Base64 string (legacy)
   tags: Tag[];
   
   // Board View Position
@@ -63,12 +63,14 @@ export interface Project {
   id: string;
   name: string;
   type: 'map' | 'image';
-  backgroundImage?: string; // Base64 string for image mode
+  backgroundImage?: string; // Base64 string for image mode, or 'stored' if stored separately
   createdAt: number;
   notes: Note[];
   connections?: Connection[]; // Connections between notes in board view
   frames?: Frame[]; // Frames for grouping notes in board view
   standardSizeScale?: number; // Global scale factor for standard note sizes (default 1)
+  version?: number; // Version number for incremental sync
+  storageVersion?: number; // Storage format version
 }
 
 export type ViewMode = 'map' | 'board' | 'table';

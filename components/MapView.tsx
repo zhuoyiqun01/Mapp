@@ -226,7 +226,7 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
 
 // Component to handle navigation to specific coordinates
 const MapNavigationHandler = ({ coords, onComplete }: { coords: { lat: number; lng: number } | null; onComplete?: () => void }) => {
-  const map = useMap();
+    const map = useMap();
   
   useEffect(() => {
     if (coords && map) {
@@ -419,7 +419,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
             
             const handleLocationFound = (e: L.LocationEvent) => {
                 console.log('Location found:', e.latlng);
-                map.flyTo(e.latlng, 16);
+            map.flyTo(e.latlng, 16);
                 // Clean up listeners
                 locationControl.off("locationfound", handleLocationFound);
                 locationControl.off("locationerror", handleLocationError);
@@ -486,14 +486,14 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
             onDoubleClick={(e) => e.stopPropagation()}
         >
             <div className="relative" ref={locateMenuRef}>
-                <button 
+            <button 
                     onClick={(e) => { 
                         e.stopPropagation(); 
                         setShowLocateMenu(!showLocateMenu);
                     }}
                     className="bg-white p-2 sm:p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
                     title="Locate"
-                >
+            >
                     <Locate size={18} className="sm:w-5 sm:h-5" />
                 </button>
                 {showLocateMenu && (
@@ -523,7 +523,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                             }`}
                         >
                             Locate to Latest Pin
-                        </button>
+            </button>
                     </div>
                 )}
             </div>
@@ -896,14 +896,14 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           boardX = maxX + spacing;
           boardY = minY;
         }
-      }
+        }
     }
-    
+
     const newNote: Partial<Note> = {
       id: generateId(),
       createdAt: Date.now(),
       coords: coords,
-      fontSize: 3,
+      fontSize: 3, 
       emoji: '', // No default emoji
       text: '',
       images: [],
@@ -1550,7 +1550,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           popupAnchor: [0, -40]
       });
   };
-  
+
   // Sort markers: bottom to top, left to right
   const sortNotes = useCallback((notes: Note[]): Note[] => {
     return [...notes].sort((a, b) => {
@@ -1836,9 +1836,9 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               // Single marker, display directly
               const note = cluster.notes[0];
               return (
-                <Marker 
-                  key={note.id}
-                  position={[note.coords.lat, note.coords.lng]}
+          <Marker 
+            key={note.id} 
+            position={[note.coords.lat, note.coords.lng]}
                   icon={createCustomIcon(note)}
                   eventHandlers={{ 
                     click: () => {

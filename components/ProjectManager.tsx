@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Project } from '../types';
 import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check, Upload, Palette } from 'lucide-react';
 import { generateId, fileToBase64, formatDate, exportToJpeg, exportToJpegCentered, compressImageFromBase64 } from '../utils';
+import { loadProject, loadNoteImages, loadBackgroundImage, saveProject, loadAllProjects } from '../utils/storage';
 import { getLastSyncTime, type SyncStatus } from '../utils/sync';
 import { THEME_COLOR, THEME_COLOR_DARK } from '../constants';
 import { ThemeColorPicker } from './ThemeColorPicker';
@@ -242,7 +243,8 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     const coordHeader = isMapProject ? 'Latitude, Longitude' : 'X, Y';
     
     // Create CSV content
-    const headers = [coordHeader, 'Text Content', 'Tag1', 'Tag2', 'Tag3', 'Group'];
+    // Support multiple groups: Group1, Group2, Group3
+    const headers = [coordHeader, 'Text Content', 'Tag1', 'Tag2', 'Tag3', 'Group1', 'Group2', 'Group3'];
     const rows = standardNotes.map(note => {
       // Coordinates: select based on project type
       const coords = isMapProject 
@@ -258,10 +260,18 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       const tag2 = tags[1]?.label || '';
       const tag3 = tags[2]?.label || '';
       
-      // Group
-      const group = note.groupName || '';
+      // Groups (support multiple groups)
+      const groupNames = note.groupNames || [];
+      // If no groupNames, use groupName (backward compatibility)
+      const allGroups = groupNames.length > 0 
+        ? groupNames 
+        : (note.groupName ? [note.groupName] : []);
       
-      return [coords, text, tag1, tag2, tag3, group];
+      const group1 = allGroups[0] || '';
+      const group2 = allGroups[1] || '';
+      const group3 = allGroups[2] || '';
+      
+      return [coords, text, tag1, tag2, tag3, group1, group2, group3];
     });
 
     // Convert to CSV format
@@ -281,29 +291,50 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   };
 
   // Export full project data for cross-device sharing
-  const handleExportFullProject = (project: Project) => {
-    // Export complete project data as JSON
-    const exportData = {
-      version: '1.0',
-      project: {
-        id: project.id,
-        name: project.name,
-        type: project.type,
-        backgroundImage: project.backgroundImage,
-        createdAt: project.createdAt,
-        notes: project.notes,
-        frames: project.frames || [],
-        connections: project.connections || []
+  const handleExportFullProject = async (project: Project) => {
+    try {
+      // Load full project with images for export
+      const fullProject = await loadProject(project.id, true);
+      if (!fullProject) {
+        alert('无法加载项目数据');
+        return;
       }
-    };
 
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `${project.name}-project.json`;
-    link.click();
-    
-    setOpenMenuId(null);
+      // Export complete project data as JSON (with all images loaded)
+      // Ensure frames and connections are included
+      const exportData = {
+        version: '1.0',
+        project: {
+          id: fullProject.id,
+          name: fullProject.name,
+          type: fullProject.type,
+          backgroundImage: fullProject.backgroundImage,
+          createdAt: fullProject.createdAt,
+          notes: fullProject.notes || [],
+          frames: fullProject.frames || [],
+          connections: fullProject.connections || []
+        }
+      };
+      
+      // Debug: log export data
+      console.log('Exporting project:', {
+        name: exportData.project.name,
+        notes: exportData.project.notes.length,
+        frames: exportData.project.frames.length,
+        connections: exportData.project.connections.length
+      });
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `${project.name}-project.json`;
+      link.click();
+      
+      setOpenMenuId(null);
+    } catch (error) {
+      console.error('导出失败:', error);
+      alert('导出项目失败');
+    }
   };
 
   // Compress all images in the project
@@ -439,11 +470,27 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         const noteIdMap = new Map<string, string>();
         const frameIdMap = new Map<string, string>();
         
-        // Generate new IDs for imported notes
+        // Generate new IDs for imported notes (import ALL notes including compact and text)
         const importedNotes = (newProject.notes || []).map(note => {
           const newId = generateId();
           noteIdMap.set(note.id, newId);
           return { ...note, id: newId };
+        });
+        
+        // Debug: count notes by variant
+        const noteCounts = {
+          standard: importedNotes.filter(n => !n.variant || n.variant === 'standard').length,
+          compact: importedNotes.filter(n => n.variant === 'compact').length,
+          text: importedNotes.filter(n => n.variant === 'text').length,
+          total: importedNotes.length
+        };
+        console.log('Merging notes into existing project:', {
+          totalNotes: noteCounts.total,
+          standard: noteCounts.standard,
+          compact: noteCounts.compact,
+          text: noteCounts.text,
+          frames: (newProject.frames || []).length,
+          connections: (newProject.connections || []).length
         });
         
         // Generate new IDs for imported frames
@@ -472,7 +519,15 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           const mergedNotes = [...activeProject.notes, ...uniqueImportedNotes];
           const updatedProject = { ...activeProject, notes: mergedNotes };
           
-          if (onUpdateProject) {
+          // Save project using new storage system (this will handle image separation)
+          await saveProject(updatedProject);
+          
+          // Reload the project to get the version with image IDs (not Base64)
+          const savedProject = await loadProject(updatedProject.id, false);
+          if (savedProject && onUpdateProject) {
+            onUpdateProject(savedProject);
+          } else if (onUpdateProject) {
+            // Fallback: use original project if reload fails
             onUpdateProject(updatedProject);
           }
           
@@ -587,7 +642,15 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
             connections: mergedConnections
           };
           
-          if (onUpdateProject) {
+          // Save project using new storage system (this will handle image separation)
+          await saveProject(updatedProject);
+          
+          // Reload the project to get the version with image IDs (not Base64)
+          const savedProject = await loadProject(updatedProject.id, false);
+          if (savedProject && onUpdateProject) {
+            onUpdateProject(savedProject);
+          } else if (onUpdateProject) {
+            // Fallback: use original project if reload fails
             onUpdateProject(updatedProject);
           }
           
@@ -640,22 +703,82 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           id: generateId()
         }));
         
-        onCreateProject({
+        // Debug: count notes by variant
+        const noteCounts = {
+          standard: regeneratedNotes.filter(n => !n.variant || n.variant === 'standard').length,
+          compact: regeneratedNotes.filter(n => n.variant === 'compact').length,
+          text: regeneratedNotes.filter(n => n.variant === 'text').length,
+          total: regeneratedNotes.length
+        };
+        console.log('Importing project:', projectToCreate.name, {
+          totalNotes: noteCounts.total,
+          standard: noteCounts.standard,
+          compact: noteCounts.compact,
+          text: noteCounts.text,
+          frames: regeneratedFrames.length,
+          connections: regeneratedConnections.length
+        });
+        
+        const projectToCreate = {
           ...newProject,
           notes: regeneratedNotes,
           frames: regeneratedFrames,
           connections: regeneratedConnections
-        });
+        };
         
-        const itemCounts = [];
-        if (regeneratedNotes.length > 0) itemCounts.push(`${regeneratedNotes.length} note(s)`);
-        if (regeneratedFrames.length > 0) itemCounts.push(`${regeneratedFrames.length} frame(s)`);
-        if (regeneratedConnections.length > 0) itemCounts.push(`${regeneratedConnections.length} connection(s)`);
+        // Save project using new storage system (this will handle image separation)
+        // This will convert Base64 images to image IDs
+        try {
+          await saveProject(projectToCreate);
+          console.log('Project saved successfully');
+        } catch (error) {
+          console.error('Error saving project:', error);
+          alert('Failed to save imported project: ' + (error instanceof Error ? error.message : 'Unknown error'));
+          return;
+        }
         
-        const message = itemCounts.length > 0 
-          ? `Successfully created new project "${newProject.name}" with ${itemCounts.join(', ')}.`
-          : `Successfully created new project "${newProject.name}".`;
-        alert(message);
+        // Reload the project to get the version with image IDs (not Base64)
+        const savedProject = await loadProject(projectToCreate.id, false);
+        if (savedProject) {
+          console.log('Project reloaded successfully, adding to list');
+          // Ensure frames and connections are included in reloaded project
+          const projectWithFramesAndConnections = {
+            ...savedProject,
+            frames: savedProject.frames || projectToCreate.frames || [],
+            connections: savedProject.connections || projectToCreate.connections || []
+          };
+          console.log('Project with frames and connections:', {
+            frames: projectWithFramesAndConnections.frames.length,
+            connections: projectWithFramesAndConnections.connections.length
+          });
+          // Add to projects list with separated images
+          onCreateProject(projectWithFramesAndConnections);
+          
+          const itemCounts = [];
+          if (regeneratedNotes.length > 0) itemCounts.push(`${regeneratedNotes.length} note(s)`);
+          if (regeneratedFrames.length > 0) itemCounts.push(`${regeneratedFrames.length} frame(s)`);
+          if (regeneratedConnections.length > 0) itemCounts.push(`${regeneratedConnections.length} connection(s)`);
+          
+          const message = itemCounts.length > 0 
+            ? `Successfully created new project "${newProject.name}" with ${itemCounts.join(', ')}.`
+            : `Successfully created new project "${newProject.name}".`;
+          alert(message);
+        } else {
+          console.error('Failed to reload project after save, trying to reload project list');
+          // Try to reload all projects to see if it's there
+          const allProjects = await loadAllProjects(false);
+          const foundProject = allProjects.find(p => p.id === projectToCreate.id);
+          if (foundProject) {
+            console.log('Project found in all projects, adding to list');
+            onCreateProject(foundProject);
+            alert(`Successfully imported project "${newProject.name}".`);
+          } else {
+            console.error('Project not found after save, using fallback');
+            // Fallback: use original project if reload fails
+            onCreateProject(projectToCreate);
+            alert(`Project "${newProject.name}" imported, but there may be an issue with image storage.`);
+          }
+        }
       }
       
       setShowImportDialog(false);

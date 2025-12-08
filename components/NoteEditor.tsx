@@ -119,7 +119,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const prevIsOpenRef = useRef(false);
   
   const prevNoteIdRef = useRef<string | undefined>(initialNote?.id);
-  
+
   useEffect(() => {
     // Only reset state when editor is opened (isOpen changes from false to true)
     // This prevents clearing user input when initialNote updates (e.g., when images are added)
@@ -200,12 +200,12 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         setEditingTagId(null);
       } else {
         // Create new tag
-        const newTag: Tag = {
-          id: generateId(),
-          label: newTagLabel.trim(),
-          color: newTagColor
-        };
-        setTags([...tags, newTag]);
+      const newTag: Tag = {
+        id: generateId(),
+        label: newTagLabel.trim(),
+        color: newTagColor
+      };
+      setTags([...tags, newTag]);
       }
       setNewTagLabel('');
       setIsAddingTag(false);
@@ -339,22 +339,22 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       />
       
       <div className="relative z-10 flex flex-col items-end">
-        <motion.div 
-          initial={{ scale: 0.9, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.9, opacity: 0 }}
-          // Explicit width w-[500px] to prevent auto-growing behavior. min-h-[500px] added when sketching to ensure full canvas.
+      <motion.div 
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.9, opacity: 0 }}
+        // Explicit width w-[500px] to prevent auto-growing behavior. min-h-[500px] added when sketching to ensure full canvas.
           className={`${isTextMode ? 'w-auto max-w-[95vw]' : 'w-[500px] max-w-[95vw]'} flex flex-col relative transition-colors duration-300 ${isTextMode ? 'max-h-[60vh]' : 'max-h-[90vh]'} ${isTextMode ? 'min-h-0' : 'min-h-[300px]'} ${isSketching ? 'min-h-[500px]' : ''}`}
-          style={{ 
-              backgroundColor: isTextMode ? 'transparent' : color,
+        style={{ 
+            backgroundColor: isTextMode ? 'transparent' : color,
               boxShadow: isTextMode ? 'none' : '0 25px 50px 12px rgba(0, 0, 0, 0.15)',
               border: isTextMode ? `2px solid ${THEME_COLOR}` : 'none',
               borderRadius: isTextMode ? '12px' : undefined,
               padding: isTextMode ? '6px' : '4px',
               overflow: isTextMode ? 'visible' : 'hidden'
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
         {isSketching && (
           <div className="absolute inset-0 z-50" onPointerDown={(e) => e.stopPropagation()}>
             <DrawingCanvas 
@@ -402,27 +402,29 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                     )}
                     {/* Upgrade button for compact notes */}
                     {isCompactMode && initialNote?.id && (
-                        <button 
+                    <button 
                             onClick={() => { 
                                 setShowEmojiPicker(false); 
                                 // Upgrade compact note to standard note
-                                const upgradedNote = {
-                                    ...getCurrentNoteData(),
+                                const currentData = getCurrentNoteData();
+                                const upgradedNote: Note = {
+                                    ...initialNote!,
+                                    ...currentData,
                                     variant: 'standard' as const,
-                                    coords: { lat: 0, lng: 0 } // Empty coords for upgraded note
+                                    coords: initialNote?.coords || { lat: 0, lng: 0 } // Keep existing coords if available
                                 };
                                 onSave(upgradedNote);
                                 onClose();
                             }}
                             className="text-green-400 hover:text-green-600 hover:bg-green-50 rounded-full p-1 transition-colors active:scale-90"
                             title="升级为标准便签"
-                        >
+                    >
                             <ArrowUp size={24} />
-                        </button>
+                    </button>
                     )}
                     {/* Show navigate to board button when in map view (only if onSwitchToMapView doesn't exist) */}
                     {initialNote?.boardX !== undefined && initialNote?.boardY !== undefined && onSwitchToBoardView && !onSwitchToMapView && (
-                        <button 
+                            <button 
                             onClick={() => { 
                                 setShowEmojiPicker(false); 
                                 // Calculate center coordinates of the note
@@ -434,9 +436,9 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                             }}
                             className="text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-full p-1 transition-colors active:scale-90"
                             title="定位到board视图"
-                        >
+                            >
                             <Locate size={24} />
-                        </button>
+                            </button>
                     )}
                     {/* Show navigate to map button when in board view (only if onSwitchToBoardView doesn't exist or both exist) */}
                     {initialNote?.coords && initialNote.coords.lat !== 0 && initialNote.coords.lng !== 0 && onSwitchToMapView && (
@@ -450,7 +452,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                         >
                             <Locate size={24} />
                         </button>
-                    )}
+                )}
                 <button 
                     onClick={() => { setShowEmojiPicker(false); handleSave(); }}
                         className="text-gray-400 hover:text-gray-600 hover:bg-black/5 rounded-full p-1 transition-colors active:scale-90"
@@ -682,9 +684,9 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                                     className="flex-shrink-0 h-6 px-2.5 rounded-full text-xs font-bold text-white shadow-sm flex items-center gap-1 cursor-pointer hover:opacity-80 transition-opacity" 
                                     style={{backgroundColor: tag.color}}
                                 >
-                                    {tag.label}
+                                {tag.label}
                                     <button onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(false); removeTag(tag.id); }}><X size={10}/></button>
-                                </span>
+                            </span>
                             )
                         ))}
                         {isAddingTag && !editingTagId ? (
@@ -770,7 +772,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
           <div className="px-3 py-1 text-base font-bold text-white">
             {currentIndex + 1} / {clusterNotes.length}
           </div>
-          <button
+                    <button 
             onClick={(e) => {
               e.stopPropagation();
               if (onNext && currentIndex < clusterNotes.length - 1) {
@@ -792,10 +794,10 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
               <path d="M9 18 L15 12 L9 6" />
             </svg>
-          </button>
+                    </button>
+                </div>
+            )}
         </div>
-      )}
-      </div>
 
       {/* Image Preview Modal */}
       {previewImage && (

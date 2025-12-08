@@ -209,7 +209,7 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({ onSave, onCancel, 
               // Pass empty string to indicate empty canvas
               onSave('');
           } else {
-              onSave(canvasRef.current.toDataURL());
+          onSave(canvasRef.current.toDataURL());
           }
       }
   };

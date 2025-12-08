@@ -35,7 +35,29 @@ function getDeviceId(): string {
 // Sync status type
 export type SyncStatus = 'idle' | 'syncing' | 'success' | 'error';
 
-// Sync all projects to cloud
+// Get last synced project versions
+function getLastSyncedVersions(): Map<string, number> {
+  const stored = localStorage.getItem('mapp-synced-versions');
+  if (!stored) return new Map();
+  
+  try {
+    const data = JSON.parse(stored);
+    return new Map(Object.entries(data).map(([id, version]) => [id, version as number]));
+  } catch {
+    return new Map();
+  }
+}
+
+// Save last synced project versions
+function saveLastSyncedVersions(projects: Project[]): void {
+  const versions: Record<string, number> = {};
+  projects.forEach(p => {
+    versions[p.id] = p.version || 0;
+  });
+  localStorage.setItem('mapp-synced-versions', JSON.stringify(versions));
+}
+
+// Sync all projects to cloud (with incremental sync support)
 export async function syncProjectsToCloud(projects: Project[]): Promise<{ success: boolean; error?: string }> {
   const client = getSupabaseClient();
   if (!client) {
@@ -45,7 +67,8 @@ export async function syncProjectsToCloud(projects: Project[]): Promise<{ succes
   const deviceId = getDeviceId();
 
   try {
-    // Convert project data to JSON
+    // For now, we still sync all projects (to maintain compatibility with current DB structure)
+    // But we track versions for future incremental sync optimization
     const projectsData = JSON.stringify(projects);
     const lastSyncTime = Date.now();
 
@@ -66,8 +89,9 @@ export async function syncProjectsToCloud(projects: Project[]): Promise<{ succes
       return { success: false, error: error.message };
     }
 
-    // Save last sync time
+    // Save last sync time and versions
     localStorage.setItem('mapp-last-sync-time', lastSyncTime.toString());
+    saveLastSyncedVersions(projects);
 
     return { success: true };
   } catch (err) {
@@ -145,7 +169,7 @@ export async function loadProjectsFromCloud(): Promise<{
   }
 }
 
-// Merge local and cloud data (resolve conflicts)
+// Merge local and cloud data (resolve conflicts using version numbers)
 export function mergeProjects(localProjects: Project[], cloudProjects: Project[]): Project[] {
   // Create project ID mapping
   const localMap = new Map(localProjects.map(p => [p.id, p]));
@@ -159,10 +183,17 @@ export function mergeProjects(localProjects: Project[], cloudProjects: Project[]
     const cloud = cloudMap.get(id);
 
     if (local && cloud) {
-      // Both exist, compare update time (using createdAt or last modified time)
-      // Here we simply use local version (because local is what user is currently using)
-      // You can adjust merge strategy based on actual needs
-      merged.push(local);
+      // Both exist, compare version numbers (higher version wins)
+      const localVersion = local.version || 0;
+      const cloudVersion = cloud.version || 0;
+      
+      if (localVersion >= cloudVersion) {
+        // Local is newer or same, use local
+        merged.push(local);
+      } else {
+        // Cloud is newer, use cloud
+        merged.push(cloud);
+      }
     } else if (local) {
       merged.push(local);
     } else if (cloud) {
@@ -171,6 +202,18 @@ export function mergeProjects(localProjects: Project[], cloudProjects: Project[]
   }
 
   return merged;
+}
+
+// Get changed projects (for incremental sync)
+export function getChangedProjects(
+  localProjects: Project[], 
+  lastSyncedVersions: Map<string, number>
+): Project[] {
+  return localProjects.filter(project => {
+    const lastSyncedVersion = lastSyncedVersions.get(project.id) || 0;
+    const currentVersion = project.version || 0;
+    return currentVersion > lastSyncedVersion;
+  });
 }
 
 // Check if sync is needed (based on time interval)
