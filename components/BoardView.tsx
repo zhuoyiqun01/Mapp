@@ -64,6 +64,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   const [layerVisibility, setLayerVisibility] = useState({
     frame: true,
     primary: true,
+    image: true,
     secondary: true,
     connects: true,
   });
@@ -261,6 +262,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   };
   
   const [showImportDialog, setShowImportDialog] = useState(false);
+  const imageFileInputRef = useRef<HTMLInputElement | null>(null);
   
   // Text measurement refs removed (text variant removed)
 
@@ -393,10 +395,11 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
     const x = note.boardX + (isDragging ? dragOffset.x : 0);
     const y = note.boardY + (isDragging ? dragOffset.y : 0);
     const isCompact = note.variant === 'compact';
+    const isImage = note.variant === 'image';
     
-    // For compact/standard notes, use fixed dimensions
-    const width = isCompact ? 180 : 256;
-    const height = isCompact ? 180 : 256;
+    // For compact/standard/image notes, use respective dimensions
+    const width = isImage ? (note.imageWidth || 256) : (isCompact ? 180 : 256);
+    const height = isImage ? (note.imageHeight || 256) : (isCompact ? 180 : 256);
     
     switch (side) {
       case 'top':
@@ -1433,14 +1436,32 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
     const files = e.dataTransfer.files;
     if (files && files.length > 0) {
       // Filter image and JSON files
-      const imageFiles = Array.from(files).filter((file: File) => file.type.startsWith('image/'));
-      const jsonFiles = Array.from(files).filter((file: File) => 
+      const imageFiles: File[] = Array.from(files as FileList).filter((file: File) => file.type.startsWith('image/'));
+      const jsonFiles: File[] = Array.from(files as FileList).filter((file: File) => 
         file.type === 'application/json' || file.name.endsWith('.json')
       );
 
       if (imageFiles.length > 0) {
-        // If editor is open and editing a standard note, add images to current note
-        if (editingNote && editingNote.variant !== 'compact') {
+        // 编辑模式下（且未打开便签编辑器）拖入图片：新增图片对象
+        if (isEditMode && !editingNote) {
+          try {
+            for (const file of imageFiles) {
+              const { base64, width, height } = await compressImageToBase64(file, 512);
+              // 计算投放位置（使用鼠标位置）
+              const rect = containerRef.current?.getBoundingClientRect();
+              let position;
+              if (rect) {
+                const worldX = (e.clientX - rect.left - transform.x) / transform.scale;
+                const worldY = (e.clientY - rect.top - transform.y) / transform.scale;
+                position = { x: worldX, y: worldY };
+              }
+              createImageNote(base64, width, height, position);
+            }
+          } catch (error) {
+            console.error('Failed to add image note:', error);
+          }
+        } else if (editingNote && editingNote.variant !== 'compact') {
+          // 如果正在编辑便签，仍然把图片加到当前便签
           try {
             const newImages: string[] = [];
             for (const file of imageFiles) {
@@ -1457,7 +1478,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
             console.error('Failed to add images to note:', error);
           }
         } else {
-          // For images, show import preview directly in BoardView
+          // 非编辑模式保持原有导入逻辑
           const dataTransfer = new DataTransfer();
           imageFiles.forEach((file) => {
             dataTransfer.items.add(file as File);
@@ -1471,7 +1492,86 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
     }
   };
 
-  const createNoteAtCenter = (variant: 'compact') => {
+const compressImageToBase64 = (file: File, targetShortSide = 512): Promise<{ base64: string; width: number; height: number }> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const { width, height } = img;
+      const scale = targetShortSide / Math.min(width, height);
+      const newWidth = Math.round(width * scale);
+      const newHeight = Math.round(height * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = newWidth;
+      canvas.height = newHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('Cannot get canvas context'));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, newWidth, newHeight);
+      const base64 = canvas.toDataURL('image/png');
+      resolve({ base64, width: newWidth, height: newHeight });
+    };
+    img.onerror = reject;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      img.src = ev.target?.result as string;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+};
+
+  const createImageNote = (base64: string, imgWidth: number, imgHeight: number, position?: { x: number; y: number }) => {
+    if (!containerRef.current) return;
+    const { width, height } = containerRef.current.getBoundingClientRect();
+    const centerX = position ? position.x : (width / 2 - transform.x) / transform.scale;
+    const centerY = position ? position.y : (height / 2 - transform.y) / transform.scale;
+
+    const boardWidth = imgWidth;
+    const boardHeight = imgHeight;
+    const spawnX = centerX - boardWidth / 2;
+    const spawnY = centerY - boardHeight / 2;
+
+    const newNote: Note = {
+      id: generateId(),
+      createdAt: Date.now(),
+      coords: { lat: 0, lng: 0 },
+      emoji: '',
+      text: '',
+      fontSize: 3,
+      images: [base64],
+      tags: [],
+      boardX: spawnX,
+      boardY: spawnY,
+      variant: 'image',
+      color: 'transparent',
+      imageWidth: boardWidth,
+      imageHeight: boardHeight,
+    };
+    onAddNote?.(newNote);
+  };
+
+  const handleImageInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const { base64, width, height } = await compressImageToBase64(file, 512);
+      createImageNote(base64, width, height);
+    } catch (error) {
+      console.error('Failed to add image note:', error);
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  const handleAddImageClick = () => {
+    if (imageFileInputRef.current) {
+      imageFileInputRef.current.click();
+    }
+  };
+
+const createNoteAtCenter = (variant: 'compact') => {
      if (!containerRef.current) return;
      const { width, height } = containerRef.current.getBoundingClientRect();
      
@@ -2454,6 +2554,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
       
       // 如果正在缩放，不触发点击
       if (isZooming) return;
+      if (note.variant === 'image') return;
       
       // 清除单击的延迟执行
       if (clickTimerRef.current) {
@@ -2661,6 +2762,13 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                 <p className="text-2xl font-bold text-gray-800">Drop images or JSON files here to import</p>
               </div>
             </div>
+            <input
+              type="file"
+              accept="image/*"
+              ref={imageFileInputRef}
+              className="hidden"
+              onChange={handleImageInputChange}
+            />
           </div>
         )}
         {/* Background */}
@@ -3440,11 +3548,13 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
             }).map((note) => {
               // Check layer visibility based on note variant
               const isCompact = note.variant === 'compact';
-              const isStandard = !isCompact;
+              const isImage = note.variant === 'image';
+              const isStandard = !isCompact && !isImage;
               
               // Determine if this note should be visible
               let shouldShow = false;
               if (isCompact && layerVisibility.secondary) shouldShow = true;
+              else if (isImage && layerVisibility.image) shouldShow = true;
               else if (isStandard && layerVisibility.primary) shouldShow = true;
               
               if (!shouldShow) return null;
@@ -3459,19 +3569,102 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
               const isInFrame = !!containingFrame;
 
               // For compact/standard notes, use fixed dimensions
-              const noteWidth: number = isCompact ? 180 : 256;
-              const noteHeight: number = isCompact ? 180 : 256;
+              const noteWidth: number = isImage ? (note.imageWidth || 256) : (isCompact ? 180 : 256);
+              const noteHeight: number = isImage ? (note.imageHeight || 256) : (isCompact ? 180 : 256);
 
               // Determine line clamp based on font size to ensure it fits the box
               // Compact/Standard notes have fixed height.
               let clampClass = '';
-              if (note.fontSize >= 4) clampClass = 'line-clamp-1';
-              else if (note.fontSize === 3) clampClass = 'line-clamp-2';
-              else if (note.fontSize === 2) clampClass = 'line-clamp-3';
-              else clampClass = 'line-clamp-4';
+              if (!isImage) {
+                if (note.fontSize >= 4) clampClass = 'line-clamp-1';
+                else if (note.fontSize === 3) clampClass = 'line-clamp-2';
+                else if (note.fontSize === 2) clampClass = 'line-clamp-3';
+                else clampClass = 'line-clamp-4';
+              }
 
               // Get global standard size scale, default to 1
               const standardSizeScale = project?.standardSizeScale || 1;
+
+              if (isImage) {
+                const standardSizeScale = project?.standardSizeScale || 1;
+                return (
+                  <motion.div
+                    key={note.id}
+                    initial={false}
+                    data-is-note="true"
+                    style={{ 
+                        position: 'absolute', 
+                        left: currentX, 
+                        top: currentY,
+                        zIndex: (selectedNoteId === note.id || selectedNoteIds.has(note.id) || isDragging || (isMultiSelectDragging && isInMultiSelect))
+                          ? 1000
+                          : 55,
+                        width: noteWidth,
+                        height: noteHeight,
+                        transform: `scale(${standardSizeScale})`,
+                        transformOrigin: 'center',
+                    }}
+                    className={`pointer-events-auto ${isEditMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer hover:scale-105 transition-transform'}`}
+                    onPointerDown={(e) => {
+                        lastMousePos.current = { x: e.clientX, y: e.clientY };
+                        handleNotePointerDown(e, note.id, note);
+                    }}
+                    onPointerMove={handleNotePointerMove}
+                    onPointerUp={(e) => handleNotePointerUp(e, note)}
+                    onClick={(e) => handleNoteClick(e, note)}
+                  >
+                    {isEditMode && (
+                      <>
+                        <button 
+                          onClick={(e) => handleDeleteClick(e, note.id)}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          className="absolute -top-3 -right-3 z-50 bg-red-500 text-white rounded-full p-1.5 shadow-md hover:scale-110 transition-transform"
+                        >
+                          <X size={14} />
+                        </button>
+                        {((selectedNoteId === note.id || selectedNoteIds.has(note.id)) || connectingFrom !== null) && (
+                          <>
+                            {(['top', 'right', 'bottom', 'left'] as const).map(side => {
+                              const point = getConnectionPoint(note, side, isDragging, dragOffset);
+                              return (
+                                <div
+                                  key={side}
+                                  className={`absolute z-50 w-6 h-6 -translate-x-1/2 -translate-y-1/2 border-2 border-white rounded-full shadow-lg cursor-crosshair transition-transform pointer-events-auto ${
+                                    connectingFrom?.noteId === note.id && connectingFrom?.side === side ? 'scale-125' : hoveringConnectionPoint?.noteId === note.id && hoveringConnectionPoint?.side === side ? 'scale-150 ring-4 ring-opacity-50' : 'hover:scale-110'
+                                  }`}
+                                  style={{ 
+                                    left: `${point.x - note.boardX}px`, 
+                                    top: `${point.y - note.boardY}px`, 
+                                    backgroundColor: themeColor,
+                                  }}
+                                  onPointerDown={(e) => handleConnectionPointDown(e, note.id, side)}
+                                />
+                              );
+                            })}
+                          </>
+                        )}
+                      </>
+                    )}
+                    <div 
+                        className={`w-full h-full shadow-xl flex flex-col overflow-hidden group rounded-sm transition-shadow ${isDragging ? 'shadow-2xl ring-4' : isInFrame ? 'ring-4 ring-[#EEEEEE]' : ''}`}
+                        style={{
+                            boxShadow: isDragging ? `0 0 0 4px ${themeColor}` : undefined,
+                            backgroundColor: 'transparent'
+                        }}
+                    >
+                        <div className="w-full h-full relative bg-white/60 flex items-center justify-center">
+                          {note.images && note.images[0] && (
+                            <img
+                              src={note.images[0]}
+                              className="w-full h-full object-contain pointer-events-none"
+                              alt="board-image"
+                            />
+                          )}
+                        </div>
+                    </div>
+                  </motion.div>
+  );
+};
 
               return (
                 <motion.div
@@ -3482,7 +3675,13 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                       position: 'absolute', 
                       left: currentX, 
                       top: currentY,
-                      zIndex: (selectedNoteId === note.id || selectedNoteIds.has(note.id) || isDragging || (isMultiSelectDragging && isInMultiSelect)) ? 1000 : (isCompact ? 60 : 50),
+                      zIndex: (selectedNoteId === note.id || selectedNoteIds.has(note.id) || isDragging || (isMultiSelectDragging && isInMultiSelect))
+                        ? 1000
+                        : isCompact
+                          ? 60
+                          : isImage
+                            ? 55
+                            : 50,
                       width: noteWidth,
                       height: noteHeight,
                       transform: `scale(${standardSizeScale})`,
@@ -3516,10 +3715,11 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                             {(['top', 'right', 'bottom', 'left'] as const).map(side => {
                               const point = getConnectionPoint(note, side, isDragging, dragOffset);
                               const isCompact = note.variant === 'compact';
+                              const isImage = note.variant === 'image';
                               
-                              // Use fixed dimensions for compact/standard notes
-                              const width = isCompact ? 180 : 256;
-                              const height = isCompact ? 180 : 256;
+                              // Use dimensions per variant
+                              const width = isImage ? (note.imageWidth || 256) : (isCompact ? 180 : 256);
+                              const height = isImage ? (note.imageHeight || 256) : (isCompact ? 180 : 256);
                               
                               let left = 0, top = 0;
                               switch (side) {
@@ -3959,6 +4159,16 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                     >
                             <StickyNote size={18} className="sm:w-5 sm:h-5" />
                     </button>
+                    <button
+                        onClick={handleAddImageClick}
+                            className="w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
+                            style={{ backgroundColor: 'transparent' }}
+                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${themeColor}1A`}
+                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                        title="Add Image"
+                    >
+                            <ImageIcon size={18} className="sm:w-5 sm:h-5" />
+                    </button>
                         <button
                             onClick={() => {
                                 setIsDrawingFrame(true);
@@ -4065,6 +4275,27 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                                     }`}
                                     style={{ 
                                         backgroundColor: layerVisibility.secondary ? themeColor : 'transparent',
+                                        borderColor: themeColor
+                                    }}
+                                />
+                            </div>
+                            {/* Image */}
+                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
+                                <div className="flex items-center gap-2">
+                                    <ImageIcon size={16} className="text-gray-600" strokeWidth={2} />
+                                    <span className="text-sm text-gray-700">Image</span>
+                                </div>
+                                <input
+                                    type="checkbox"
+                                    checked={layerVisibility.image}
+                                    onChange={() => setLayerVisibility(prev => ({ ...prev, image: !prev.image }))}
+                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
+                                        layerVisibility.image 
+                                            ? '' 
+                                            : 'bg-transparent'
+                                    }`}
+                                    style={{ 
+                                        backgroundColor: layerVisibility.image ? themeColor : 'transparent',
                                         borderColor: themeColor
                                     }}
                                 />
