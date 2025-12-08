@@ -490,10 +490,10 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                         e.stopPropagation(); 
                         setShowLocateMenu(!showLocateMenu);
                     }}
-                    className="bg-white p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-12 h-12 flex items-center justify-center"
+                    className="bg-white p-2 sm:p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
                     title="Locate"
                 >
-                    <Locate size={20} />
+                    <Locate size={18} className="sm:w-5 sm:h-5" />
                 </button>
                 {showLocateMenu && (
                     <div className="absolute left-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-[2000]">
@@ -531,14 +531,14 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                     e.stopPropagation(); 
                     onMapStyleChange(mapStyle === 'standard' ? 'satellite' : 'standard');
                 }}
-                className={`p-3 rounded-xl shadow-lg transition-colors w-12 h-12 flex items-center justify-center ${
+                className={`p-2 sm:p-3 rounded-xl shadow-lg transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${
                     mapStyle === 'satellite' 
                         ? 'bg-[#FFDD00] text-gray-900' 
                         : 'bg-white hover:bg-yellow-50 text-gray-700'
                 }`}
                 title={mapStyle === 'standard' ? 'Switch to Satellite' : 'Switch to Standard'}
             >
-                <Satellite size={20} />
+                <Satellite size={18} className="sm:w-5 sm:h-5" />
             </button>
             <div className="relative" ref={menuRef}>
                 <button 
@@ -546,10 +546,10 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                         e.stopPropagation(); 
                         setShowImportMenu(!showImportMenu);
                     }}
-                    className="bg-white p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-12 h-12 flex items-center justify-center"
+                    className="bg-white p-2 sm:p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
                     title="Import"
                 >
-                    <svg width="20" height="20" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <svg width="18" height="18" className="sm:w-5 sm:h-5" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" fill="none"/>
                         <path d="M8 11V5M5 8l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
@@ -564,10 +564,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                             }}
                             className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
                         >
-                            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" fill="none"/>
-                                <path d="M8 11V5M5 8l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                            </svg> Import from Photos
+                            <ImageIcon size={16} /> Import from Photos
                         </button>
                         <div className="h-px bg-gray-100 my-1" />
                         <button
@@ -1015,23 +1012,44 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       try {
         // Read EXIF data with comprehensive options for better compatibility
         // Support multiple phone manufacturers (Xiaomi, OPPO, etc.)
+        // For Android gallery picker, we need to read all EXIF segments
         let exifData = await exifr.parse(file, {
           gps: true,
           translateKeys: false,
           translateValues: false,
-          reviveValues: true
+          reviveValues: true,
+          pick: ['GPSLatitude', 'GPSLongitude', 'GPSLatitudeRef', 'GPSLongitudeRef', 'latitude', 'longitude', 'GPS']
         });
         
         // If GPS data not found, try reading all EXIF data without filters
         if (!exifData || (!exifData.latitude && !exifData.GPSLatitude && !exifData.GPS)) {
           console.log('GPS not found in primary parse, trying full EXIF read for:', file.name);
+          // Try reading with all segments enabled (important for Android gallery)
           exifData = await exifr.parse(file, {
             translateKeys: false,
             translateValues: false,
-            reviveValues: true
+            reviveValues: true,
+            pick: true  // Read all EXIF segments
           });
           
           console.log('Full EXIF data for', file.name, ':', exifData);
+        }
+        
+        // If still no GPS data, try reading as ArrayBuffer (better for Android)
+        if (!exifData || (!exifData.latitude && !exifData.GPSLatitude && !exifData.GPS)) {
+          console.log('GPS still not found, trying ArrayBuffer read for:', file.name);
+          try {
+            const arrayBuffer = await file.arrayBuffer();
+            exifData = await exifr.parse(arrayBuffer, {
+              translateKeys: false,
+              translateValues: false,
+              reviveValues: true,
+              pick: true
+            });
+            console.log('ArrayBuffer EXIF data for', file.name, ':', exifData);
+          } catch (arrayBufferError) {
+            console.warn('ArrayBuffer read failed:', arrayBufferError);
+          }
         }
         
         // Try multiple ways to extract GPS coordinates
@@ -1098,8 +1116,27 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         // Validate coordinates
         if (lat === null || lng === null || isNaN(lat) || isNaN(lng) || lat === 0 || lng === 0) {
           console.warn('Could not extract GPS coordinates from:', file.name);
+          console.warn('File type:', file.type);
+          console.warn('File size:', file.size);
           console.warn('Available EXIF keys:', exifData ? Object.keys(exifData) : 'No EXIF data');
-          console.warn('EXIF data sample:', exifData ? JSON.stringify(exifData, null, 2).substring(0, 500) : 'No data');
+          if (exifData) {
+            console.warn('EXIF data sample:', JSON.stringify(exifData, null, 2).substring(0, 1000));
+            // Log all GPS-related keys
+            const gpsKeys = Object.keys(exifData).filter(k => 
+              k.toLowerCase().includes('gps') || 
+              k.toLowerCase().includes('lat') || 
+              k.toLowerCase().includes('lon') || 
+              k.toLowerCase().includes('lng')
+            );
+            console.warn('GPS-related keys:', gpsKeys);
+            if (gpsKeys.length > 0) {
+              gpsKeys.forEach(key => {
+                console.warn(`  ${key}:`, exifData[key]);
+              });
+            }
+          } else {
+            console.warn('No EXIF data found at all');
+          }
           previews.push({
             file,
             imageUrl: URL.createObjectURL(file),
@@ -1883,7 +1920,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         ))}
 
         {isMapMode && (
-          <div className="absolute top-4 left-4 right-4 z-[500] flex gap-2 pointer-events-none items-start">
+          <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex gap-1.5 sm:gap-2 pointer-events-none items-start">
               <MapControls 
                 onImportPhotos={() => fileInputRef.current?.click()} 
                 onImportData={() => dataImportInputRef.current?.click()}
@@ -1935,7 +1972,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           </div>
         )}
 
-        <div className="absolute bottom-24 left-4 z-[500]">
+        <div className="fixed bottom-20 sm:bottom-24 left-2 sm:left-4 z-[500]">
            <MapZoomController 
              min={isMapMode ? 13 : minImageZoom} 
              max={isMapMode ? 19 : 4} 

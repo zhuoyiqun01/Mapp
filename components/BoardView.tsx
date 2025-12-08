@@ -3786,23 +3786,24 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                 onPointerDown={(e) => {
                   e.stopPropagation();
                 }}
-                className="flex items-center gap-2 px-2 bg-[#FFDD00] text-yellow-950 rounded-xl shadow-lg hover:bg-[#E6C700] font-bold h-full"
+                className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 bg-[#FFDD00] text-yellow-950 rounded-xl shadow-lg hover:bg-[#E6C700] font-bold h-full"
                 style={{ paddingTop: '6px', paddingBottom: '6px' }}
               >
-                  <Check size={18} /> Done
+                  <Check size={18} className="sm:w-5 sm:h-5" />
+                  <span className="hidden sm:inline">Done</span>
               </button>
           )}
         </div>
 
         {/* Edit Toolbar: Unified White Buttons at Top Left */}
             <div 
-            className={`fixed top-4 z-[500] pointer-events-auto animate-in fade-in flex items-center gap-2 ${isEditMode ? 'left-1/2 -translate-x-1/2' : 'left-4 slide-in-from-left-4'}`}
-            style={{ height: '48px' }}
+            className={`fixed top-2 sm:top-4 z-[500] pointer-events-auto animate-in fade-in flex items-center gap-1 sm:gap-2 ${isEditMode ? 'left-1/2 -translate-x-1/2' : 'left-2 sm:left-4 slide-in-from-left-4'}`}
+            style={{ height: '40px' }}
                 onPointerDown={(e) => e.stopPropagation()} 
             >
             {/* Layout Buttons: L+ and L- */}
             {isEditMode && (
-                <div className="bg-white rounded-xl border border-gray-100 flex gap-2 items-center p-1" style={{ height: '48px' }}>
+                <div className="bg-white rounded-xl border border-gray-100 flex gap-1 sm:gap-2 items-center p-0.5 sm:p-1" style={{ height: '40px' }}>
                     <button
                         onClick={() => {
                             if (!onUpdateProject || !project) return;
@@ -3841,10 +3842,10 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                                 standardSizeScale: newScale
                             });
                         }}
-                        className="p-3 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
+                        className="p-2 sm:p-3 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
                         title="放大布局"
                     >
-                        <span className="text-lg">L+</span>
+                        <span className="text-base sm:text-lg">L+</span>
                     </button>
                     <button
                         onClick={() => {
@@ -3884,49 +3885,49 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                                 standardSizeScale: newScale
                             });
                         }}
-                        className="p-3 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
+                        className="p-2 sm:p-3 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
                         title="缩小布局"
                     >
-                        <span className="text-lg">L-</span>
+                        <span className="text-base sm:text-lg">L-</span>
                     </button>
                 </div>
             )}
-            <div className={`bg-white rounded-xl border border-gray-100 flex gap-2 items-center ${isEditMode ? 'p-1' : ''}`} style={{ height: '48px' }}>
+            <div className={`bg-white rounded-xl border border-gray-100 flex gap-1 sm:gap-2 items-center ${isEditMode ? 'p-0.5 sm:p-1' : ''}`} style={{ height: '40px' }}>
                 {!isEditMode ? (
                     // 非编辑模式：显示进入编辑模式的按钮
                     <button
                         onClick={() => setIsEditMode(true)}
-                        className="bg-white p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-12 h-12 flex items-center justify-center"
+                        className="bg-white p-2 sm:p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
                         title="进入编辑模式"
                     >
-                        <Pencil size={20} />
+                        <Pencil size={18} className="sm:w-5 sm:h-5" />
                     </button>
                 ) : (
                     // 编辑模式：显示编辑工具
                     <>
                     <button
                         onClick={() => createNoteAtCenter('text')}
-                            className="p-3 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
+                            className="w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
                         title="Add Text"
                     >
-                            <Type size={20} />
+                            <Type size={18} className="sm:w-5 sm:h-5" />
                     </button>
                     <button
                         onClick={() => createNoteAtCenter('compact')}
-                            className="p-3 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
+                            className="w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
                         title="Add Sticky Note"
                     >
-                            <StickyNote size={20} />
+                            <StickyNote size={18} className="sm:w-5 sm:h-5" />
                     </button>
                         <button
                             onClick={() => {
                                 setIsDrawingFrame(true);
                                 setSelectedFrameId(null);
                             }}
-                            className={`p-3 flex items-center justify-center transition-colors active:scale-95 ${isDrawingFrame ? 'bg-[#FFDD00] text-yellow-900' : 'hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700'}`}
+                            className={`w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 flex items-center justify-center transition-colors active:scale-95 ${isDrawingFrame ? 'bg-[#FFDD00] text-yellow-900' : 'hover:bg-[#FFDD00]/10 text-gray-700 hover:text-yellow-700'}`}
                             title="Add Frame"
                         >
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <svg width="18" height="18" className="sm:w-5 sm:h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 {/* 左竖线 - 纵向出头更短，中间格子更大 */}
                                 <line x1="5" y1="2" x2="5" y2="22" />
                                 {/* 右竖线 - 纵向出头更短，中间格子更大 */}
@@ -3945,7 +3946,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
         {/* Layer button - horizontal layout with edit button (non-edit mode only) */}
         {!isEditMode && (
             <div 
-                className="fixed top-4 left-[70px] z-[500] pointer-events-auto"
+                className="fixed top-2 sm:top-4 left-[58px] sm:left-[70px] z-[500] pointer-events-auto"
                 onPointerDown={(e) => e.stopPropagation()}
             >
                 <div className="relative">
@@ -3954,10 +3955,10 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                             e.stopPropagation(); 
                             setShowLayerPanel(!showLayerPanel);
                         }}
-                        className={`bg-white p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-12 h-12 flex items-center justify-center ${showLayerPanel ? 'bg-yellow-50' : ''}`}
+                        className={`bg-white p-2 sm:p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${showLayerPanel ? 'bg-yellow-50' : ''}`}
                         title="图层"
                     >
-                        <Layers size={20} />
+                        <Layers size={18} className="sm:w-5 sm:h-5" />
                     </button>
                     {showLayerPanel && (
                         <div className="absolute left-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-[2000]">
@@ -4062,7 +4063,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
         {/* Import button - horizontal layout with edit and layer buttons (non-edit mode only) */}
         {!isEditMode && (
             <div 
-                className="fixed top-4 left-[124px] z-[500] pointer-events-auto flex flex-col gap-2"
+                className="fixed top-2 sm:top-4 left-[106px] sm:left-[124px] z-[500] pointer-events-auto flex flex-col gap-2"
                 ref={menuRef}
                 onPointerDown={(e) => e.stopPropagation()}
             >
@@ -4072,10 +4073,10 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                             e.stopPropagation(); 
                             setShowImportMenu(!showImportMenu);
                         }}
-                        className="bg-white p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-12 h-12 flex items-center justify-center"
+                        className="bg-white p-2 sm:p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
                         title="Import"
                     >
-                        <svg width="20" height="20" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <svg width="18" height="18" className="sm:w-5 sm:h-5" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" fill="none"/>
                             <path d="M8 11V5M5 8l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                         </svg>
@@ -4090,10 +4091,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
                                     }}
                                     className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
                                 >
-                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                        <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" fill="none"/>
-                                        <path d="M8 11V5M5 8l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                                    </svg> Import from Photos
+                                    <ImageIcon size={16} /> Import from Photos
                                 </button>
                                 <div className="h-px bg-gray-100 my-1" />
                                 <button
