@@ -374,7 +374,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
             <button onClick={() => { setShowEmojiPicker(false); adjustFontSize(1); }} className="p-1 bg-gray-50 text-gray-600 rounded-lg transition-all" style={{ border: 'none', outline: 'none' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = `${THEME_COLOR}1A`; e.currentTarget.style.color = THEME_COLOR; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; }}><Plus size={18}/></button>
             <button onClick={() => { setShowEmojiPicker(false); adjustFontSize(-1); }} className="p-1 bg-gray-50 text-gray-600 rounded-lg transition-all" style={{ border: 'none', outline: 'none' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = `${THEME_COLOR}1A`; e.currentTarget.style.color = THEME_COLOR; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; }}><Minus size={18}/></button>
             <div className="w-px h-6 bg-gray-200 mx-1"></div>
-            <button onClick={() => { setShowEmojiPicker(false); setIsBold(!isBold); }} className={`p-1 rounded-lg transition-all ${isBold ? 'text-yellow-900' : 'bg-gray-50 text-gray-600'}`} style={{ border: 'none', outline: 'none', backgroundColor: isBold ? THEME_COLOR : undefined }} onMouseEnter={(e) => !isBold && (e.currentTarget.style.backgroundColor = `${THEME_COLOR}1A`)} onMouseLeave={(e) => !isBold && (e.currentTarget.style.backgroundColor = '')}><Bold size={18}/></button>
+            <button onClick={() => { setShowEmojiPicker(false); setIsBold(!isBold); }} className={`p-1 rounded-lg transition-all ${isBold ? 'text-white' : 'bg-gray-50 text-gray-600'}`} style={{ border: 'none', outline: 'none', backgroundColor: isBold ? THEME_COLOR : undefined }} onMouseEnter={(e) => !isBold && (e.currentTarget.style.backgroundColor = `${THEME_COLOR}1A`)} onMouseLeave={(e) => !isBold && (e.currentTarget.style.backgroundColor = '')}><Bold size={18}/></button>
           </div>
         </div>
         
@@ -387,7 +387,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                     {initialNote?.id && onDelete && (
                         <button 
                             onClick={() => { setShowEmojiPicker(false); handleDelete(); }}
-                            className="text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full p-1 transition-colors active:scale-90"
+                            className="text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full p-1.5 transition-colors active:scale-90"
                         >
                             <Trash2 size={24} />
                         </button>
@@ -408,7 +408,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                                 onSave(upgradedNote);
                                 onClose();
                             }}
-                            className="text-green-400 hover:text-green-600 hover:bg-green-50 rounded-full p-1 transition-colors active:scale-90"
+                            className="text-green-400 hover:text-green-600 hover:bg-green-50 rounded-full p-1.5 transition-colors active:scale-90"
                             title="升级为标准便签"
                     >
                             <ArrowUp size={24} />
@@ -426,7 +426,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                                 const centerY = initialNote.boardY! + noteHeight / 2;
                                 onSwitchToBoardView({ x: centerX, y: centerY }); 
                             }}
-                            className="text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-full p-1 transition-colors active:scale-90"
+                            className="text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-full p-1.5 transition-colors active:scale-90"
                             title="定位到board视图"
                             >
                             <Locate size={24} />
@@ -439,7 +439,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                                 setShowEmojiPicker(false); 
                                 onSwitchToMapView(initialNote.coords); 
                             }}
-                            className="text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-full p-1 transition-colors active:scale-90"
+                            className="text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-full p-1.5 transition-colors active:scale-90"
                             title="定位到地图视图"
                         >
                             <Locate size={24} />
@@ -447,7 +447,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                 )}
                 <button 
                     onClick={() => { setShowEmojiPicker(false); handleSave(); }}
-                        className="text-gray-400 hover:text-gray-600 hover:bg-black/5 rounded-full p-1 transition-colors active:scale-90"
+                        className="text-gray-400 hover:text-gray-600 hover:bg-black/5 rounded-full p-1.5 transition-colors active:scale-90"
                 >
                     <Check size={28} />
                 </button>

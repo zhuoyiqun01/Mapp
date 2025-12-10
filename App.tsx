@@ -102,64 +102,72 @@ export default function App() {
         
         setIsLoading(false);
         
-        // 3. 然后从云端同步（后台进程）
-        try {
-          setSyncStatus('syncing');
-          const cloudResult = await loadProjectsFromCloud();
-          
-          if (cloudResult.success && cloudResult.projects) {
-            // 合并本地和云端数据
-            const merged = mergeProjects(localProjects, cloudResult.projects);
+        // 3. 然后从云端同步（后台进程，仅在 Supabase 配置时执行）
+        // 检查 Supabase 是否配置，避免不必要的尝试
+        const hasSupabaseConfig = import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY;
+        
+        if (hasSupabaseConfig) {
+          try {
+            setSyncStatus('syncing');
+            const cloudResult = await loadProjectsFromCloud();
             
-            // 如果合并后的数据与本地不同，更新本地
-            const localIds = new Set(localProjects.map(p => p.id));
-            const mergedIds = new Set(merged.map(p => p.id));
-            const hasChanges = localProjects.length !== merged.length ||
-              [...localIds].some(id => !mergedIds.has(id)) ||
-              merged.some(p => {
-                const local = localProjects.find(lp => lp.id === p.id);
-                return !local || (local.version || 0) < (p.version || 0);
-              });
-            
-            if (hasChanges) {
-              // 保存合并后的项目
-              for (const project of merged) {
-                await saveProject(project);
+            if (cloudResult.success && cloudResult.projects) {
+              // 合并本地和云端数据
+              const merged = mergeProjects(localProjects, cloudResult.projects);
+              
+              // 如果合并后的数据与本地不同，更新本地
+              const localIds = new Set(localProjects.map(p => p.id));
+              const mergedIds = new Set(merged.map(p => p.id));
+              const hasChanges = localProjects.length !== merged.length ||
+                [...localIds].some(id => !mergedIds.has(id)) ||
+                merged.some(p => {
+                  const local = localProjects.find(lp => lp.id === p.id);
+                  return !local || (local.version || 0) < (p.version || 0);
+                });
+              
+              if (hasChanges) {
+                // 保存合并后的项目
+                for (const project of merged) {
+                  await saveProject(project);
+                }
+                setProjects(merged);
               }
-              setProjects(merged);
+              
+              // 如果云端有更新，同步到云端
+              if (!cloudResult.isNewDevice) {
+                await syncProjectsToCloud(merged);
+              }
+              
+              setSyncStatus('success');
+              setTimeout(() => setSyncStatus('idle'), 2000);
+            } else if (cloudResult.error) {
+              console.warn('Cloud load failed, using local data:', cloudResult.error);
+              setSyncStatus('error');
+              setSyncError(cloudResult.error);
+              setTimeout(() => {
+                setSyncStatus('idle');
+                setSyncError(null);
+              }, 3000);
+            } else {
+              // 新设备，上传本地数据到云端
+              if (localProjects.length > 0) {
+                await syncProjectsToCloud(localProjects);
+              }
+              setSyncStatus('success');
+              setTimeout(() => setSyncStatus('idle'), 2000);
             }
-            
-            // 如果云端有更新，同步到云端
-            if (!cloudResult.isNewDevice) {
-              await syncProjectsToCloud(merged);
-            }
-            
-            setSyncStatus('success');
-            setTimeout(() => setSyncStatus('idle'), 2000);
-          } else if (cloudResult.error) {
-            console.warn('Cloud load failed, using local data:', cloudResult.error);
+          } catch (err) {
+            console.error("云端同步失败:", err);
             setSyncStatus('error');
-            setSyncError(cloudResult.error);
+            setSyncError(err instanceof Error ? err.message : '同步失败');
             setTimeout(() => {
               setSyncStatus('idle');
               setSyncError(null);
             }, 3000);
-          } else {
-            // 新设备，上传本地数据到云端
-            if (localProjects.length > 0) {
-              await syncProjectsToCloud(localProjects);
-            }
-            setSyncStatus('success');
-            setTimeout(() => setSyncStatus('idle'), 2000);
           }
-        } catch (err) {
-          console.error("云端同步失败:", err);
-          setSyncStatus('error');
-          setSyncError(err instanceof Error ? err.message : '同步失败');
-          setTimeout(() => {
-            setSyncStatus('idle');
-            setSyncError(null);
-          }, 3000);
+        } else {
+          // Supabase 未配置，直接跳过云端同步
+          setSyncStatus('idle');
         }
       } catch (err) {
         console.error("Failed to load projects", err);
@@ -207,39 +215,43 @@ export default function App() {
         }
       });
       
-      // 2. 延迟同步到云端（防抖，避免频繁同步）
-      if (syncTimeoutRef.current) {
-        clearTimeout(syncTimeoutRef.current);
-      }
+      // 2. 延迟同步到云端（防抖，避免频繁同步，仅在 Supabase 配置时执行）
+      const hasSupabaseConfig = import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY;
       
-      syncTimeoutRef.current = setTimeout(async () => {
-        if (shouldSync()) {
-          try {
-            setSyncStatus('syncing');
-            const result = await syncProjectsToCloud(projects);
-            
-            if (result.success) {
-              setSyncStatus('success');
-              setTimeout(() => setSyncStatus('idle'), 2000);
-            } else {
+      if (hasSupabaseConfig) {
+        if (syncTimeoutRef.current) {
+          clearTimeout(syncTimeoutRef.current);
+        }
+        
+        syncTimeoutRef.current = setTimeout(async () => {
+          if (shouldSync()) {
+            try {
+              setSyncStatus('syncing');
+              const result = await syncProjectsToCloud(projects);
+              
+              if (result.success) {
+                setSyncStatus('success');
+                setTimeout(() => setSyncStatus('idle'), 2000);
+              } else {
+                setSyncStatus('error');
+                setSyncError(result.error || '同步失败');
+                setTimeout(() => {
+                  setSyncStatus('idle');
+                  setSyncError(null);
+                }, 3000);
+              }
+            } catch (err) {
+              console.error("云端同步失败:", err);
               setSyncStatus('error');
-              setSyncError(result.error || '同步失败');
+              setSyncError(err instanceof Error ? err.message : '同步失败');
               setTimeout(() => {
                 setSyncStatus('idle');
                 setSyncError(null);
               }, 3000);
             }
-          } catch (err) {
-            console.error("云端同步失败:", err);
-            setSyncStatus('error');
-            setSyncError(err instanceof Error ? err.message : '同步失败');
-            setTimeout(() => {
-              setSyncStatus('idle');
-              setSyncError(null);
-            }, 3000);
           }
-        }
-      }, 2000); // 2秒后同步
+        }, 2000); // 2秒后同步
+      }
     }
     
     return () => {
@@ -483,7 +495,7 @@ export default function App() {
 
   if (isLoading) {
     return (
-      <div className="w-full min-h-screen flex flex-col items-center justify-center text-yellow-900" style={{ backgroundColor: themeColor }}>
+      <div className="w-full min-h-screen flex flex-col items-center justify-center text-white" style={{ backgroundColor: themeColor }}>
          <Loader2 size={48} className="animate-spin mb-4" />
          <div className="font-bold text-xl">Loading your maps...</div>
       </div>
@@ -519,13 +531,20 @@ export default function App() {
                initial={{ opacity: 0 }}
                animate={{ opacity: 1 }}
                exit={{ opacity: 0 }}
+               transition={{ duration: 0.2 }}
+               style={{ willChange: 'opacity' }}
              />
              <motion.div 
                className="relative h-full w-[62%] z-[2001] overflow-hidden"
-               initial={{ x: '-62%' }}
+               initial={{ x: '-100%' }}
                animate={{ x: 0 }}
-               exit={{ x: '-62%' }}
-               transition={{ type: "spring", damping: 25, stiffness: 200 }}
+               exit={{ x: '-100%' }}
+               transition={{ 
+                 type: "tween", 
+                 duration: 0.3, 
+                 ease: [0.4, 0, 0.2, 1]
+               }}
+               style={{ willChange: 'transform' }}
              >
               <ProjectManager 
                  isSidebar
@@ -609,7 +628,7 @@ export default function App() {
                  sidebarButtonDragRef.current.isDragging = false;
                }, 10);
              }}
-             className="absolute left-0 z-[900] pl-3 pr-4 rounded-r-xl shadow-lg text-yellow-950 transition-none cursor-move"
+            className="absolute left-0 z-[900] pl-3 pr-4 rounded-r-xl shadow-lg text-white transition-none cursor-move"
              style={{ 
                backgroundColor: themeColor,
                top: `${sidebarButtonY}px`, 
@@ -756,7 +775,7 @@ export default function App() {
             className={`
               flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
               ${viewMode === 'map' 
-                ? 'text-yellow-950 shadow-md scale-105' 
+                ? 'text-white shadow-md scale-105' 
                 : 'hover:bg-gray-100 text-gray-500'}
               ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
             `}
@@ -771,7 +790,7 @@ export default function App() {
             className={`
               flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
               ${viewMode === 'board' 
-                ? 'text-yellow-950 shadow-md scale-105' 
+                ? 'text-white shadow-md scale-105' 
                 : 'hover:bg-gray-100 text-gray-500'}
               ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
             `}
@@ -786,7 +805,7 @@ export default function App() {
             className={`
               flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
               ${viewMode === 'table' 
-                ? 'text-yellow-950 shadow-md scale-105' 
+                ? 'text-white shadow-md scale-105' 
                 : 'hover:bg-gray-100 text-gray-500'}
               ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
             `}

@@ -69,6 +69,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
     connects: true,
   });
   const [showLayerPanel, setShowLayerPanel] = useState(false);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
   
   // Layout state: global standard size scale is stored in project.standardSizeScale
   
@@ -115,6 +116,17 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   const [drawingFrameStart, setDrawingFrameStart] = useState<{ x: number; y: number } | null>(null);
   const [drawingFrameEnd, setDrawingFrameEnd] = useState<{ x: number; y: number } | null>(null);
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
+  const [resizingImage, setResizingImage] = useState<{
+    id: string;
+    corner: 'tl' | 'tr' | 'bl' | 'br';
+    startX: number;
+    startY: number;
+    startWidth: number;
+    startHeight: number;
+    startBoardX: number;
+    startBoardY: number;
+    aspect: number;
+  } | null>(null);
   // 在非编辑模式下选中的frames用于过滤显示（支持多frame）
   const [filterFrameIds, setFilterFrameIds] = useState<Set<string>>(new Set());
   const [editingFrameId, setEditingFrameId] = useState<string | null>(null);
@@ -1313,12 +1325,25 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
       // Generate new IDs and offset positions for imported notes
       // Also handle image separation for imported notes
       const newNotes = await Promise.all(uniqueImportedNotes.map(async (note: Note) => {
+        // 确保variant存在，如果没有则根据特征判断
+        let variant: 'standard' | 'compact' | 'image' = note.variant || 'standard';
+        if (!note.variant) {
+          if (note.imageWidth && note.imageHeight && note.images && note.images.length > 0) {
+            variant = 'image';
+          } else if (!note.emoji || note.emoji === '') {
+            variant = 'compact';
+          } else {
+            variant = 'standard';
+          }
+        }
+        
         const processedNote: Note = {
           ...note,
           id: generateId(),
           createdAt: Date.now() + Math.random(),
           boardX: (note.boardX || 0) + offsetX,
-          boardY: (note.boardY || 0) + (offsetY - (uniqueImportedNotes[0]?.boardY || 0))
+          boardY: (note.boardY || 0) + (offsetY - (uniqueImportedNotes[0]?.boardY || 0)),
+          variant: variant
         };
 
         // Process images: convert Base64 to image IDs if needed
@@ -1900,7 +1925,7 @@ const createNoteAtCenter = (variant: 'compact') => {
       }
       
       // Box selection mode (when box select mode is active and in edit mode)
-      if (e.button === 0 && isBoxSelecting && isEditMode && !draggingNoteId && !resizingFrame && !draggingFrameId && !isNoteClick) {
+      if (e.button === 0 && isBoxSelecting && isEditMode && !draggingNoteId && !resizingFrame && !draggingFrameId && !isNoteClick && !resizingImage) {
           const rect = containerRef.current?.getBoundingClientRect();
           if (!rect) return;
           const worldX = (e.clientX - rect.left - transform.x) / transform.scale;
@@ -1937,6 +1962,65 @@ const createNoteAtCenter = (variant: 'compact') => {
           onUpdateFrames?.(frames.map(f => 
               f.id === draggingFrameId ? { ...f, x: worldX - draggingFrameOffset.x, y: worldY - draggingFrameOffset.y } : f
           ));
+          return;
+      }
+      
+      // 如果正在调整图片大小（等比例缩放）
+      if (resizingImage) {
+          const rect = containerRef.current?.getBoundingClientRect();
+          if (!rect) return;
+          const worldX = (e.clientX - rect.left - transform.x) / transform.scale;
+          const worldY = (e.clientY - rect.top - transform.y) / transform.scale;
+          
+          const dx = worldX - resizingImage.startX;
+          const dy = worldY - resizingImage.startY;
+          
+          // 计算距离中心点的距离变化（用于等比例缩放）
+          const centerX = resizingImage.startBoardX + resizingImage.startWidth / 2;
+          const centerY = resizingImage.startBoardY + resizingImage.startHeight / 2;
+          
+          let distanceX = 0, distanceY = 0;
+          switch (resizingImage.corner) {
+              case 'tl':
+                  distanceX = centerX - worldX;
+                  distanceY = centerY - worldY;
+                  break;
+              case 'tr':
+                  distanceX = worldX - centerX;
+                  distanceY = centerY - worldY;
+                  break;
+              case 'bl':
+                  distanceX = centerX - worldX;
+                  distanceY = worldY - centerY;
+                  break;
+              case 'br':
+                  distanceX = worldX - centerX;
+                  distanceY = worldY - centerY;
+                  break;
+          }
+          
+          // 使用较大的距离变化来保持等比例
+          const distance = Math.max(Math.abs(distanceX), Math.abs(distanceY));
+          const scale = distance / (Math.min(resizingImage.startWidth, resizingImage.startHeight) / 2);
+          
+          // 保持宽高比
+          const newWidth = Math.max(50, resizingImage.startWidth * scale);
+          const newHeight = Math.max(50, resizingImage.startHeight * scale);
+          
+          // 计算新的位置（保持中心点不变）
+          const newBoardX = centerX - newWidth / 2;
+          const newBoardY = centerY - newHeight / 2;
+          
+          const note = notes.find(n => n.id === resizingImage.id);
+          if (note) {
+              onUpdateNote({
+                  ...note,
+                  boardX: newBoardX,
+                  boardY: newBoardY,
+                  imageWidth: newWidth,
+                  imageHeight: newHeight
+              });
+          }
           return;
       }
       
@@ -2018,8 +2102,10 @@ const createNoteAtCenter = (variant: 'compact') => {
           // When Shift is pressed, add to existing selection; otherwise replace selection
           const selectedIds = new Set<string>(isShiftPressed ? selectedNoteIds : new Set());
           notes.forEach(note => {
-              const noteWidth = note.variant === 'compact' ? 180 : 256;
-              const noteHeight = note.variant === 'compact' ? 180 : 256;
+              const isImage = note.variant === 'image';
+              const isCompact = note.variant === 'compact';
+              const noteWidth = isImage ? (note.imageWidth || 256) : (isCompact ? 180 : 256);
+              const noteHeight = isImage ? (note.imageHeight || 256) : (isCompact ? 180 : 256);
               const noteRight = note.boardX + noteWidth;
               const noteBottom = note.boardY + noteHeight;
               
@@ -2066,6 +2152,13 @@ const createNoteAtCenter = (variant: 'compact') => {
           return;
       }
       
+      // 如果正在调整图片大小，结束调整
+      if (resizingImage) {
+          setResizingImage(null);
+          (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+          return;
+      }
+      
       // 如果正在调整Frame大小，结束调整
       if (resizingFrame) {
           setResizingFrame(null);
@@ -2094,8 +2187,13 @@ const createNoteAtCenter = (variant: 'compact') => {
       
       // 点击空白处的退出逻辑（只在非拖动/非缩放状态下触发）
       // 如果发生了拖动，不应该触发点击计数
+      // 但如果是在多选拖动后，不要清除多选状态
       if (hasMoved) {
           resetBlankClickCount();
+          // 如果是多选拖动，不清除多选状态
+          if (isMultiSelectDragging) {
+              return;
+          }
           return;
       }
       
@@ -2131,6 +2229,18 @@ const createNoteAtCenter = (variant: 'compact') => {
       
       // 只有在没有拖动（点击）且没有缩放时才执行退出逻辑
       if (!hasMoved && !isZooming) {
+          // 0. 如果处于框选模式或frame创建模式，点击空白处退出这些模式（优先处理）
+          if (isBoxSelecting || isDrawingFrame) {
+              setIsBoxSelecting(false);
+              setIsDrawingFrame(false);
+              setBoxSelectStart(null);
+              setBoxSelectEnd(null);
+              setDrawingFrameStart(null);
+              setDrawingFrameEnd(null);
+              resetBlankClickCount();
+              return;
+          }
+          
           // 1. 如果有编辑中的Frame标题，先退出标题编辑
           if (editingFrameId) {
               setEditingFrameId(null);
@@ -2141,10 +2251,11 @@ const createNoteAtCenter = (variant: 'compact') => {
           // 2. 如果有选中状态，取消选中（Frame、Note或Connection）
           // 但如果按住 Shift 键且有多选，不清空多选
           // 如果正在拖动页面（isPanning），不清空多选
-          if (selectedFrameId || selectedNoteId || selectedConnectionId || (selectedNoteIds.size > 0 && !isShiftPressed && !e.shiftKey && !isPanning)) {
+          // 如果刚刚完成多选拖动，不清空多选状态
+          if (selectedFrameId || selectedNoteId || selectedConnectionId || (selectedNoteIds.size > 0 && !isShiftPressed && !e.shiftKey && !isPanning && !isMultiSelectDragging)) {
               setSelectedFrameId(null);
               setSelectedNoteId(null);
-              if (!isShiftPressed && !e.shiftKey && !isPanning) {
+              if (!isShiftPressed && !e.shiftKey && !isPanning && !isMultiSelectDragging) {
                 setSelectedNoteIds(new Set());
               }
               setSelectedConnectionId(null);
@@ -2455,6 +2566,14 @@ const createNoteAtCenter = (variant: 'compact') => {
       
       // 如果不在编辑模式，且是短按，打开编辑器
       if (!isEditMode) {
+          // 图片对象不应该打开编辑器
+          if (note.variant === 'image') {
+              currentNotePressIdRef.current = null;
+              lastMousePos.current = null;
+              notePressStartPosRef.current = null;
+              return;
+          }
+          
           // 检查是否在同一个note上按下和抬起
           const wasOnSameNote = currentNotePressIdRef.current === note.id;
           
@@ -2493,6 +2612,56 @@ const createNoteAtCenter = (variant: 'compact') => {
       
       // 如果正在缩放，不触发点击
       if (isZooming) return;
+      
+      // 图片对象在非编辑模式下点击后放大预览
+      if (note.variant === 'image' && note.images && note.images[0] && !isEditMode) {
+        setPreviewImage(note.images[0]);
+        return;
+      }
+      
+      // 图片对象在编辑模式下，单击选中（延迟执行，等待可能的双击）
+      if (note.variant === 'image' && isEditMode) {
+        const now = Date.now();
+        const timeSinceLastClick = now - lastClickTimeRef.current;
+        const isSameNote = lastClickNoteIdRef.current === note.id;
+        
+        // 如果距离上次点击时间很短（小于300ms）且是同一个图片，可能是双击的开始
+        if (clickTimerRef.current) {
+          clearTimeout(clickTimerRef.current);
+        }
+        
+        // 延迟执行选中逻辑，等待可能的双击
+        clickTimerRef.current = setTimeout(() => {
+          if (!isShiftPressed && !e.shiftKey) {
+            // Single select mode: clear multi-select and select only this note
+            setSelectedNoteId(note.id);
+            setSelectedNoteIds(new Set([note.id]));
+          } else {
+            // Multi-select mode: toggle selection
+            setSelectedNoteIds(prev => {
+              const newSet = new Set(prev);
+              if (newSet.has(note.id)) {
+                newSet.delete(note.id);
+                if (newSet.size === 0) {
+                  setSelectedNoteId(null);
+                }
+              } else {
+                newSet.add(note.id);
+                setSelectedNoteId(note.id);
+              }
+              return newSet;
+            });
+          }
+          setConnectingFrom(null);
+          setConnectingTo(null);
+          setHoveringConnectionPoint(null);
+          resetBlankClickCount();
+        }, 300); // Wait 300ms to see if it's a double click
+        
+        lastClickNoteIdRef.current = note.id;
+        lastClickTimeRef.current = now;
+        return;
+      }
       
       if (!isEditMode) {
         setEditingNote(note);
@@ -2554,7 +2723,17 @@ const createNoteAtCenter = (variant: 'compact') => {
       
       // 如果正在缩放，不触发点击
       if (isZooming) return;
-      if (note.variant === 'image') return;
+      
+      // 图片对象双击打开预览
+      if (note.variant === 'image' && note.images && note.images[0]) {
+        // 清除单击的延迟执行
+        if (clickTimerRef.current) {
+          clearTimeout(clickTimerRef.current);
+          clickTimerRef.current = null;
+        }
+        setPreviewImage(note.images[0]);
+        return;
+      }
       
       // 清除单击的延迟执行
       if (clickTimerRef.current) {
@@ -2762,15 +2941,15 @@ const createNoteAtCenter = (variant: 'compact') => {
                 <p className="text-2xl font-bold text-gray-800">Drop images or JSON files here to import</p>
               </div>
             </div>
-            <input
-              type="file"
-              accept="image/*"
-              ref={imageFileInputRef}
-              className="hidden"
-              onChange={handleImageInputChange}
-            />
           </div>
         )}
+        <input
+          type="file"
+          accept="image/*"
+          ref={imageFileInputRef}
+          className="hidden"
+          onChange={handleImageInputChange}
+        />
         {/* Background */}
         <div 
           className="absolute inset-0 pointer-events-none z-0"
@@ -3136,7 +3315,7 @@ const createNoteAtCenter = (variant: 'compact') => {
           
           {/* Frame Titles Layer - Above Notes - 标题始终显示以便多选 */}
           {layerVisibility.frame && frames.map((frame) => (
-            <>
+            <React.Fragment key={frame.id}>
               {/* Frame border in title layer with 5% opacity - 只在frame框体显示时显示边框 */}
               {(filterFrameIds.size === 0 || filterFrameIds.has(frame.id)) && (
                 <div
@@ -3321,7 +3500,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                 </button>
               )}
             </div>
-            </>
+            </React.Fragment>
           ))}
 
           {layerVisibility.connects && (
@@ -3576,10 +3755,10 @@ const createNoteAtCenter = (variant: 'compact') => {
               // Compact/Standard notes have fixed height.
               let clampClass = '';
               if (!isImage) {
-                if (note.fontSize >= 4) clampClass = 'line-clamp-1';
-                else if (note.fontSize === 3) clampClass = 'line-clamp-2';
-                else if (note.fontSize === 2) clampClass = 'line-clamp-3';
-                else clampClass = 'line-clamp-4';
+                  if (note.fontSize >= 4) clampClass = 'line-clamp-1';
+                  else if (note.fontSize === 3) clampClass = 'line-clamp-2';
+                  else if (note.fontSize === 2) clampClass = 'line-clamp-3';
+                  else clampClass = 'line-clamp-4';
               }
 
               // Get global standard size scale, default to 1
@@ -3587,57 +3766,97 @@ const createNoteAtCenter = (variant: 'compact') => {
 
               if (isImage) {
                 const standardSizeScale = project?.standardSizeScale || 1;
-                return (
-                  <motion.div
-                    key={note.id}
-                    initial={false}
+              return (
+                <motion.div
+                  key={note.id}
+                  initial={false}
                     data-is-note="true"
-                    style={{ 
-                        position: 'absolute', 
-                        left: currentX, 
-                        top: currentY,
+                  style={{ 
+                      position: 'absolute', 
+                      left: currentX, 
+                      top: currentY,
                         zIndex: (selectedNoteId === note.id || selectedNoteIds.has(note.id) || isDragging || (isMultiSelectDragging && isInMultiSelect))
                           ? 1000
                           : 55,
-                        width: noteWidth,
-                        height: noteHeight,
+                      width: noteWidth,
+                      height: noteHeight,
                         transform: `scale(${standardSizeScale})`,
                         transformOrigin: 'center',
-                    }}
-                    className={`pointer-events-auto ${isEditMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer hover:scale-105 transition-transform'}`}
+                  }}
+                  className={`pointer-events-auto ${isEditMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer hover:scale-105 transition-transform'}`}
                     onPointerDown={(e) => {
                         lastMousePos.current = { x: e.clientX, y: e.clientY };
                         handleNotePointerDown(e, note.id, note);
                     }}
-                    onPointerMove={handleNotePointerMove}
-                    onPointerUp={(e) => handleNotePointerUp(e, note)}
-                    onClick={(e) => handleNoteClick(e, note)}
-                  >
-                    {isEditMode && (
+                  onPointerMove={handleNotePointerMove}
+                  onPointerUp={(e) => handleNotePointerUp(e, note)}
+                  onClick={(e) => handleNoteClick(e, note)}
+                >
+                  {isEditMode && (
                       <>
-                        <button 
-                          onClick={(e) => handleDeleteClick(e, note.id)}
-                          onPointerDown={(e) => e.stopPropagation()}
-                          className="absolute -top-3 -right-3 z-50 bg-red-500 text-white rounded-full p-1.5 shadow-md hover:scale-110 transition-transform"
-                        >
-                          <X size={14} />
-                        </button>
-                        {((selectedNoteId === note.id || selectedNoteIds.has(note.id)) || connectingFrom !== null) && (
+                      <button 
+                        onClick={(e) => handleDeleteClick(e, note.id)}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        className="absolute -top-3 -right-3 z-50 bg-red-500 text-white rounded-full p-1.5 shadow-md hover:scale-110 transition-transform"
+                      >
+                        <X size={14} />
+                      </button>
+                        {/* Resize handles for image notes - show when selected */}
+                        {((selectedNoteId === note.id || selectedNoteIds.has(note.id)) && !connectingFrom) && (
                           <>
-                            {(['top', 'right', 'bottom', 'left'] as const).map(side => {
-                              const point = getConnectionPoint(note, side, isDragging, dragOffset);
+                            {(['tl', 'tr', 'bl', 'br'] as const).map(corner => {
+                              const width = noteWidth;
+                              const height = noteHeight;
+                              
+                              let left = 0, top = 0;
+                              switch (corner) {
+                                case 'tl':
+                                  left = 0;
+                                  top = 0;
+                                  break;
+                                case 'tr':
+                                  left = width;
+                                  top = 0;
+                                  break;
+                                case 'bl':
+                                  left = 0;
+                                  top = height;
+                                  break;
+                                case 'br':
+                                  left = width;
+                                  top = height;
+                                  break;
+                              }
+                              
                               return (
                                 <div
-                                  key={side}
-                                  className={`absolute z-50 w-6 h-6 -translate-x-1/2 -translate-y-1/2 border-2 border-white rounded-full shadow-lg cursor-crosshair transition-transform pointer-events-auto ${
-                                    connectingFrom?.noteId === note.id && connectingFrom?.side === side ? 'scale-125' : hoveringConnectionPoint?.noteId === note.id && hoveringConnectionPoint?.side === side ? 'scale-150 ring-4 ring-opacity-50' : 'hover:scale-110'
-                                  }`}
-                                  style={{ 
-                                    left: `${point.x - note.boardX}px`, 
-                                    top: `${point.y - note.boardY}px`, 
+                                  key={corner}
+                                  className="absolute z-50 w-4 h-4 -translate-x-1/2 -translate-y-1/2 border-2 border-white rounded-full shadow-lg cursor-nwse-resize transition-transform pointer-events-auto hover:scale-125"
+                            style={{ 
                                     backgroundColor: themeColor,
+                                    left: `${left}px`, 
+                                    top: `${top}px`
                                   }}
-                                  onPointerDown={(e) => handleConnectionPointDown(e, note.id, side)}
+                                  onPointerDown={(e) => {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    const rect = containerRef.current?.getBoundingClientRect();
+                                    if (!rect) return;
+                                    const worldX = (e.clientX - rect.left - transform.x) / transform.scale;
+                                    const worldY = (e.clientY - rect.top - transform.y) / transform.scale;
+                                    setResizingImage({
+                                      id: note.id,
+                                      corner,
+                                      startX: worldX,
+                                      startY: worldY,
+                                      startWidth: noteWidth,
+                                      startHeight: noteHeight,
+                                      startBoardX: note.boardX,
+                                      startBoardY: note.boardY,
+                                      aspect: noteWidth / noteHeight
+                                    });
+                                    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                                  }}
                                 />
                               );
                             })}
@@ -3647,7 +3866,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                     )}
                     <div 
                         className={`w-full h-full shadow-xl flex flex-col overflow-hidden group rounded-sm transition-shadow ${isDragging ? 'shadow-2xl ring-4' : isInFrame ? 'ring-4 ring-[#EEEEEE]' : ''}`}
-                        style={{
+                            style={{ 
                             boxShadow: isDragging ? `0 0 0 4px ${themeColor}` : undefined,
                             backgroundColor: 'transparent'
                         }}
@@ -3660,11 +3879,11 @@ const createNoteAtCenter = (variant: 'compact') => {
                               alt="board-image"
                             />
                           )}
-                        </div>
+                      </div>
                     </div>
                   </motion.div>
-  );
-};
+                );
+              }
 
               return (
                 <motion.div
@@ -3699,7 +3918,6 @@ const createNoteAtCenter = (variant: 'compact') => {
                 >
                   {isEditMode && (
                       <>
-                        {!isCompact && (
                       <button 
                         onClick={(e) => handleDeleteClick(e, note.id)}
                         onPointerDown={(e) => e.stopPropagation()}
@@ -3707,19 +3925,17 @@ const createNoteAtCenter = (variant: 'compact') => {
                       >
                         <X size={14} />
                       </button>
-                        )}
                         
-                        {/* Connection points - show when selected (single or multi) or when connecting */}
-                        {((selectedNoteId === note.id || selectedNoteIds.has(note.id)) || connectingFrom !== null) && (
+                        {/* Connection points - show when selected (single or multi) or when connecting, but not for image notes */}
+                        {((selectedNoteId === note.id || selectedNoteIds.has(note.id)) || connectingFrom !== null) && !isImage && (
                           <>
                             {(['top', 'right', 'bottom', 'left'] as const).map(side => {
                               const point = getConnectionPoint(note, side, isDragging, dragOffset);
                               const isCompact = note.variant === 'compact';
-                              const isImage = note.variant === 'image';
                               
                               // Use dimensions per variant
-                              const width = isImage ? (note.imageWidth || 256) : (isCompact ? 180 : 256);
-                              const height = isImage ? (note.imageHeight || 256) : (isCompact ? 180 : 256);
+                              const width = isCompact ? 180 : 256;
+                              const height = isCompact ? 180 : 256;
                               
                               let left = 0, top = 0;
                               switch (side) {
@@ -3750,7 +3966,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                                   className={`absolute z-50 w-6 h-6 -translate-x-1/2 -translate-y-1/2 border-2 border-white rounded-full shadow-lg cursor-crosshair transition-transform pointer-events-auto ${
                                     isActive ? 'scale-125' : isHovering ? 'scale-150 ring-4 ring-opacity-50' : 'hover:scale-110'
                                   }`}
-                                  style={{ 
+                          style={{
                                     backgroundColor: themeColor,
                                     boxShadow: isHovering ? `0 0 0 4px ${themeColor}80` : undefined,
                                     left: `${left}px`, 
@@ -3765,7 +3981,69 @@ const createNoteAtCenter = (variant: 'compact') => {
                       </>
                   )}
 
-                  {!isCompact && (
+                  {isCompact ? (
+                      <div 
+                          className={`w-full h-full shadow-xl flex flex-col overflow-hidden group rounded-sm transition-shadow ${isDragging ? 'shadow-2xl ring-4' : ''}`}
+                          style={{
+                              boxShadow: isDragging ? `0 0 0 4px ${themeColor}` : undefined,
+                              backgroundColor: note.color || '#FFFDF5',
+                              border: `5px solid ${themeColor}`,
+                              boxSizing: 'border-box'
+                          }}
+                      >
+                          <div className="w-full h-full flex flex-col relative p-4 gap-1">
+                              <div className="relative z-10 pointer-events-none flex flex-col h-full">
+                                  <p 
+                                    className={`text-gray-800 leading-none flex-1 overflow-hidden break-words ${clampClass} ${note.isBold ? 'font-bold' : 'font-medium'}`} 
+                            style={{ 
+                                        fontSize: note.fontSize === 1 ? '1.2rem' : note.fontSize === 2 ? '1.6rem' : note.fontSize === 3 ? '2.2rem' : note.fontSize === 4 ? '2.4rem' : '3.0rem'
+                                    }}
+                                  >
+                                      {note.text || <span className="text-gray-400 italic font-normal text-base">Empty...</span>}
+                                  </p>
+                                  {isCompact && (
+                                    <div className="mt-auto flex items-center justify-end">
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                e.preventDefault(); // 阻止默认行为和进一步冒泡
+                                                // Upgrade compact note to standard note
+                                                const upgradedNote: Note = {
+                                                    ...note,
+                                                    variant: 'standard' as const,
+                                                    // Keep existing coords if available
+                                                    coords: note.coords || { lat: 0, lng: 0 }
+                                                };
+                                                onUpdateNote(upgradedNote);
+                                                
+                                                // 退出框选模式和frame创建模式
+                                                setIsBoxSelecting(false);
+                                                setIsDrawingFrame(false);
+                                                setBoxSelectStart(null);
+                                                setBoxSelectEnd(null);
+                                                setDrawingFrameStart(null);
+                                                setDrawingFrameEnd(null);
+                                                
+                                                // 如果正在编辑这个note，更新editingNote并保持编辑模式打开
+                                                if (editingNote && editingNote.id === note.id) {
+                                                    setEditingNote(upgradedNote);
+                                                } else {
+                                                    // 如果没有在编辑，打开编辑模式并设置editingNote
+                                                    setEditingNote(upgradedNote);
+                                                    onToggleEditor(true);
+                                                }
+                                            }}
+                                            className="p-1.5 rounded-full bg-white/80 hover:bg-white shadow-sm transition-colors opacity-0 group-hover:opacity-100 pointer-events-auto"
+                                            title="升级为标准便签"
+                                        >
+                                            <ArrowUp size={14} className="text-gray-700" />
+                                        </button>
+                                    </div>
+                                  )}
+                              </div>
+                          </div>
+                      </div>
+                  ) : (
                       <div 
                           className={`w-full h-full shadow-xl flex flex-col overflow-hidden group rounded-sm transition-shadow ${isDragging ? 'shadow-2xl ring-4' : isInFrame ? 'ring-4 ring-[#EEEEEE]' : ''}`}
                           style={{
@@ -3774,7 +4052,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                               backgroundColor: note.color || '#FFFDF5'
                           }}
                       >
-                          <div className={`w-full h-full flex flex-col relative ${isCompact ? 'p-4 gap-1' : 'p-6 gap-2'}`}>
+                          <div className="w-full h-full flex flex-col relative p-6 gap-2">
                               {!isCompact && (note.sketch && note.sketch !== '') && (note.images && note.images.length > 0) && (
                                   <div className="absolute inset-0 opacity-35 pointer-events-none z-0">
                                       <img 
@@ -3818,6 +4096,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                                         <button
                                             onClick={(e) => {
                                                 e.stopPropagation();
+                                                e.preventDefault(); // 阻止默认行为和进一步冒泡
                                                 // Upgrade compact note to standard note
                                                 const upgradedNote: Note = {
                                                     ...note,
@@ -3826,6 +4105,23 @@ const createNoteAtCenter = (variant: 'compact') => {
                                                     coords: note.coords || { lat: 0, lng: 0 }
                                                 };
                                                 onUpdateNote(upgradedNote);
+                                                
+                                                // 退出框选模式和frame创建模式
+                                                setIsBoxSelecting(false);
+                                                setIsDrawingFrame(false);
+                                                setBoxSelectStart(null);
+                                                setBoxSelectEnd(null);
+                                                setDrawingFrameStart(null);
+                                                setDrawingFrameEnd(null);
+                                                
+                                                // 如果正在编辑这个note，更新editingNote并保持编辑模式打开
+                                                if (editingNote && editingNote.id === note.id) {
+                                                    setEditingNote(upgradedNote);
+                                                } else {
+                                                    // 如果没有在编辑，打开编辑模式并设置editingNote
+                                                    setEditingNote(upgradedNote);
+                                                    onToggleEditor(true);
+                                                }
                                             }}
                                             className="p-1.5 rounded-full bg-white/80 hover:bg-white shadow-sm transition-colors opacity-0 group-hover:opacity-100 pointer-events-auto"
                                             title="升级为标准便签"
@@ -3979,7 +4275,7 @@ const createNoteAtCenter = (variant: 'compact') => {
               }}
               className={`w-8 h-12 rounded-full shadow-lg flex items-center justify-center transition-all ${
                 isShiftPressed 
-                  ? 'text-yellow-950' 
+                  ? 'text-white' 
                   : 'bg-white text-gray-700 hover:bg-gray-50'
               }`}
                 style={isShiftPressed ? { backgroundColor: themeColor } : undefined}
@@ -4013,7 +4309,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                 onPointerDown={(e) => {
                   e.stopPropagation();
                 }}
-                className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 text-yellow-950 rounded-xl shadow-lg font-bold h-full"
+                className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 text-white rounded-xl shadow-lg font-bold h-full"
                 style={{ backgroundColor: themeColor, paddingTop: '6px', paddingBottom: '6px' }}
                 onMouseEnter={(e) => {
                   const darkR = Math.max(0, Math.floor(parseInt(themeColor.slice(1, 3), 16) * 0.9));
@@ -4036,7 +4332,7 @@ const createNoteAtCenter = (variant: 'compact') => {
         {/* Edit Toolbar: Unified White Buttons at Top Left */}
             <div 
             className={`fixed top-2 sm:top-4 z-[500] pointer-events-auto animate-in fade-in flex items-center gap-1 sm:gap-2 ${isEditMode ? 'left-1/2 -translate-x-1/2' : 'left-2 sm:left-4 slide-in-from-left-4'}`}
-            style={{ height: '40px' }}
+            style={{ height: '40px', alignItems: 'center' }}
                 onPointerDown={(e) => e.stopPropagation()} 
             >
             {/* Layout Buttons: L+ and L- */}
@@ -4047,7 +4343,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                             if (!onUpdateProject || !project) return;
                             
                             // Get current global standard size scale, default to 1
-                            const currentScale = project.standardSizeScale || 1;
+                            const currentScale = project?.standardSizeScale || 1;
                             const newScale = currentScale * 2;
                             
                             // Update all notes to use new standard size scale
@@ -4093,7 +4389,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                             if (!onUpdateProject || !project) return;
                             
                             // Get current global standard size scale, default to 1
-                            const currentScale = project.standardSizeScale || 1;
+                            const currentScale = project?.standardSizeScale || 1;
                             const newScale = currentScale * 0.5;
                             
                             // Update all notes to use new standard size scale
@@ -4160,7 +4456,10 @@ const createNoteAtCenter = (variant: 'compact') => {
                             <StickyNote size={18} className="sm:w-5 sm:h-5" />
                     </button>
                     <button
-                        onClick={handleAddImageClick}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            handleAddImageClick();
+                        }}
                             className="w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
                             style={{ backgroundColor: 'transparent' }}
                             onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${themeColor}1A`}
@@ -4172,9 +4471,12 @@ const createNoteAtCenter = (variant: 'compact') => {
                         <button
                             onClick={() => {
                                 setIsDrawingFrame(true);
+                                setIsBoxSelecting(false); // 确保框选模式退出
+                                setBoxSelectStart(null);
+                                setBoxSelectEnd(null);
                                 setSelectedFrameId(null);
                             }}
-                            className={`w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 flex items-center justify-center transition-colors active:scale-95 ${isDrawingFrame ? 'text-yellow-900' : 'text-gray-700 hover:text-yellow-700'}`}
+                            className={`w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 flex items-center justify-center transition-colors active:scale-95 ${isDrawingFrame ? 'text-white' : 'text-gray-700 hover:text-yellow-700'}`}
                             style={isDrawingFrame ? { backgroundColor: themeColor } : undefined}
                             onMouseEnter={(e) => !isDrawingFrame && (e.currentTarget.style.backgroundColor = `${themeColor}1A`)}
                             onMouseLeave={(e) => !isDrawingFrame && (e.currentTarget.style.backgroundColor = '')}
@@ -4199,6 +4501,14 @@ const createNoteAtCenter = (variant: 'compact') => {
                                 // Clear selection when entering box select mode
                                 setSelectedNoteIds(new Set());
                                 setSelectedNoteId(null);
+                                // 确保frame创建模式退出
+                                setIsDrawingFrame(false);
+                                setDrawingFrameStart(null);
+                                setDrawingFrameEnd(null);
+                            } else {
+                                // 退出框选模式时也清除相关状态
+                                setBoxSelectStart(null);
+                                setBoxSelectEnd(null);
                             }
                         }}
                         className={`w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95 ${isBoxSelecting ? 'bg-yellow-200' : ''}`}
@@ -4219,7 +4529,8 @@ const createNoteAtCenter = (variant: 'compact') => {
         {/* Layer button - horizontal layout with edit button (non-edit mode only) */}
         {!isEditMode && (
             <div 
-                className="fixed top-2 sm:top-4 left-[58px] sm:left-[70px] z-[500] pointer-events-auto"
+                className="fixed top-2 sm:top-4 left-[58px] sm:left-[70px] z-[500] pointer-events-auto flex items-center"
+                style={{ height: '40px' }}
                 onPointerDown={(e) => e.stopPropagation()}
             >
                 <div className="relative">
@@ -4356,7 +4667,8 @@ const createNoteAtCenter = (variant: 'compact') => {
         {/* Import button - horizontal layout with edit and layer buttons (non-edit mode only) */}
         {!isEditMode && (
             <div 
-                className="fixed top-2 sm:top-4 left-[106px] sm:left-[124px] z-[500] pointer-events-auto flex flex-col gap-2"
+                className="fixed top-2 sm:top-4 left-[106px] sm:left-[124px] z-[500] pointer-events-auto flex items-center"
+                style={{ height: '40px' }}
                 ref={menuRef}
                 onPointerDown={(e) => e.stopPropagation()}
             >
@@ -4435,9 +4747,21 @@ const createNoteAtCenter = (variant: 'compact') => {
               onSave={(updated) => {
                   // Text variant removed
                   if (updated.id && notes.some(n => n.id === updated.id)) {
-                      onUpdateNote(updated as Note);
+                      // 确保保留原始note的variant
+                      const existingNote = notes.find(n => n.id === updated.id);
+                      const fullNote: Note = {
+                          ...existingNote!,
+                          ...updated,
+                          variant: updated.variant || existingNote!.variant
+                      };
+                      onUpdateNote(fullNote);
                   } else if (onAddNote && updated.id) {
-                      onAddNote(updated as Note);
+                      // 新Note必须指定variant，如果没有则默认为standard
+                      const fullNote: Note = {
+                          ...updated,
+                          variant: updated.variant || 'standard'
+                      } as Note;
+                      onAddNote(fullNote);
                   }
               }}
           />
@@ -4521,7 +4845,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                           </div>
                         </div>
                       ) : (
-                        <div className="absolute top-2 right-2 bg-green-500 text-white rounded-full p-1">
+                        <div className="absolute top-2 right-2 bg-green-500 text-white rounded-full p-1.5">
                           <Check size={12} />
                         </div>
                       )}
@@ -4576,6 +4900,37 @@ const createNoteAtCenter = (variant: 'compact') => {
                   Confirm Import ({importPreview.filter(p => !p.error && !p.isDuplicate).length})
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+        
+        {/* Image Preview Modal */}
+        {previewImage && (
+          <div 
+            className="fixed inset-0 z-[10000] bg-black/80 flex items-center justify-center"
+            onClick={() => setPreviewImage(null)}
+          >
+            <div 
+              className="relative max-w-[90vw] max-h-[90vh] p-4 pointer-events-none"
+            >
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPreviewImage(null);
+                }}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                }}
+                className="absolute -top-2 -right-2 z-10 bg-white rounded-full p-2 shadow-lg hover:bg-gray-100 transition-colors pointer-events-auto"
+              >
+                <X size={20} />
+              </button>
+              <img
+                src={previewImage}
+                alt="Preview"
+                className="max-w-full max-h-[90vh] object-contain rounded-lg pointer-events-auto"
+                onClick={(e) => e.stopPropagation()}
+              />
             </div>
           </div>
         )}

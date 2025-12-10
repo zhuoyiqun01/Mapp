@@ -26,9 +26,9 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
   const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0]);
   const [editorNoteId, setEditorNoteId] = useState<string | null>(null);
 
-  // Only show standard notes
+  // Only show standard notes (exclude compact and image)
   const standardNotes = useMemo(() => 
-    project.notes.filter(note => note.variant !== 'compact'),
+    project.notes.filter(note => note.variant === 'standard'),
     [project.notes]
   );
 

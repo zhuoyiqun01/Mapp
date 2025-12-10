@@ -45,7 +45,7 @@ const MenuDropdown: React.FC<{
   return (
     <div 
       ref={menuRef}
-      className={`absolute right-0 w-48 max-h-[60vh] overflow-auto bg-white rounded-xl shadow-xl z-50 border border-gray-100 py-1 animate-in fade-in zoom-in-95 origin-top-right ${
+      className={`absolute right-0 w-48 max-h-[60vh] overflow-auto bg-white rounded-xl shadow-xl z-[2030] border border-gray-100 py-1 animate-in fade-in zoom-in-95 origin-top-right ${
         position === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'
       }`}
     >
@@ -474,12 +474,23 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         const importedNotes = (newProject.notes || []).map(note => {
           const newId = generateId();
           noteIdMap.set(note.id, newId);
-          return { ...note, id: newId };
+          // 确保variant存在
+          let variant: 'standard' | 'compact' | 'image' = note.variant || 'standard';
+          if (!note.variant) {
+            if (note.imageWidth && note.imageHeight && note.images && note.images.length > 0) {
+              variant = 'image';
+            } else if (!note.emoji || note.emoji === '') {
+              variant = 'compact';
+            } else {
+              variant = 'standard';
+            }
+          }
+          return { ...note, id: newId, variant };
         });
         
         // Debug: count notes by variant
         const noteCounts = {
-          standard: importedNotes.filter(n => !n.variant || n.variant === 'standard').length,
+          standard: importedNotes.filter(n => n.variant === 'standard').length,
           compact: importedNotes.filter(n => n.variant === 'compact').length,
           total: importedNotes.length
         };
@@ -487,7 +498,6 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           totalNotes: noteCounts.total,
           standard: noteCounts.standard,
           compact: noteCounts.compact,
-          text: noteCounts.text,
           frames: (newProject.frames || []).length,
           connections: (newProject.connections || []).length
         });
@@ -590,12 +600,26 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
             importedNotesCount: importedNotes.length
           });
           
-          const offsetNotes = importedNotes.map(note => ({
-            ...note,
-            boardX: note.boardX + offsetX,
-            boardY: note.boardY + offsetY,
-            createdAt: Date.now() + Math.random() // Ensure new timestamps
-          }));
+          const offsetNotes = importedNotes.map(note => {
+            // 确保variant存在
+            let variant: 'standard' | 'compact' | 'image' = note.variant || 'standard';
+            if (!note.variant) {
+              if (note.imageWidth && note.imageHeight && note.images && note.images.length > 0) {
+                variant = 'image';
+              } else if (!note.emoji || note.emoji === '') {
+                variant = 'compact';
+              } else {
+                variant = 'standard';
+              }
+            }
+            return {
+              ...note,
+              variant,
+              boardX: note.boardX + offsetX,
+              boardY: note.boardY + offsetY,
+              createdAt: Date.now() + Math.random() // Ensure new timestamps
+            };
+          });
           
           // Update connection IDs and note references
           const importedConnections = (newProject.connections || []).map(conn => {
@@ -689,10 +713,24 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         }
       } else {
         // Create as new project - regenerate all IDs
-        const regeneratedNotes = (newProject.notes || []).map(note => ({
-          ...note,
-          id: generateId()
-        }));
+        const regeneratedNotes = (newProject.notes || []).map(note => {
+          // 确保variant存在
+          let variant: 'standard' | 'compact' | 'image' = note.variant || 'standard';
+          if (!note.variant) {
+            if (note.imageWidth && note.imageHeight && note.images && note.images.length > 0) {
+              variant = 'image';
+            } else if (!note.emoji || note.emoji === '') {
+              variant = 'compact';
+            } else {
+              variant = 'standard';
+            }
+          }
+          return {
+            ...note,
+            id: generateId(),
+            variant
+          };
+        });
         const regeneratedFrames = (newProject.frames || []).map(frame => ({
           ...frame,
           id: generateId()
@@ -704,18 +742,10 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         
         // Debug: count notes by variant
         const noteCounts = {
-          standard: regeneratedNotes.filter(n => !n.variant || n.variant === 'standard').length,
+          standard: regeneratedNotes.filter(n => n.variant === 'standard').length,
           compact: regeneratedNotes.filter(n => n.variant === 'compact').length,
           total: regeneratedNotes.length
         };
-        console.log('Importing project:', projectToCreate.name, {
-          totalNotes: noteCounts.total,
-          standard: noteCounts.standard,
-          compact: noteCounts.compact,
-          text: noteCounts.text,
-          frames: regeneratedFrames.length,
-          connections: regeneratedConnections.length
-        });
         
         const projectToCreate = {
           ...newProject,
@@ -829,9 +859,9 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     const files = e.dataTransfer.files;
     if (files && files.length > 0) {
       const fileArray = Array.from(files);
-      const jsonFile = fileArray.find((file) => 
-        file.type === 'application/json' || file.name.endsWith('.json')
-      ) as File | undefined;
+      const jsonFile = fileArray.find((file): file is File => 
+        file instanceof File && (file.type === 'application/json' || file.name.endsWith('.json'))
+      );
       
       if (jsonFile) {
         // Always merge when dragging (import data mode)
@@ -902,38 +932,40 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           >
             <Home size={24} />
           </button>
-          {activeProject && syncStatus === 'idle' && getLastSyncTime() && (
-            <div
-              className="absolute top-4 right-20 flex items-center justify-center w-8 h-8 p-2 rounded-xl text-white transition-colors z-[2010] cursor-help"
-              style={{ backgroundColor: themeColor }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = themeColorDark}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
-              title={`Synced: ${new Date(getLastSyncTime()!).toLocaleString('en-US')}`}
-            >
-              <Cloud size={20} />
-            </div>
-          )}
-          {activeProject && (
+          <div className="absolute top-4 right-4 z-[2000] flex items-center gap-0">
+            {activeProject && syncStatus === 'idle' && getLastSyncTime() && (
+              <div
+                className="flex items-center justify-center w-10 h-10 rounded-xl text-white transition-colors cursor-help"
+                style={{ backgroundColor: themeColor }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = themeColorDark}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
+                title={`Synced: ${new Date(getLastSyncTime()!).toLocaleString('en-US')}`}
+              >
+                <Cloud size={20} />
+              </div>
+            )}
+            {activeProject && (
+              <button 
+                onClick={handleExportCurrentView}
+                className="w-10 h-10 p-2 rounded-xl text-white transition-colors flex items-center justify-center"
+                style={{ backgroundColor: themeColor }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = themeColorDark}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
+                title="Export Current View"
+              >
+                <Download size={24} />
+              </button>
+            )}
             <button 
-              onClick={handleExportCurrentView}
-              className="absolute top-4 right-12 p-2 rounded-xl text-white transition-colors z-[2010]"
+              onClick={onCloseSidebar} 
+              className="w-10 h-10 p-2 rounded-xl text-white transition-colors flex items-center justify-center"
               style={{ backgroundColor: themeColor }}
               onMouseEnter={(e) => e.currentTarget.style.backgroundColor = themeColorDark}
               onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
-              title="Export Current View"
             >
-              <Download size={24} />
+              <X size={24} />
             </button>
-          )}
-          <button 
-            onClick={onCloseSidebar} 
-            className="absolute top-4 right-4 p-2 rounded-xl text-white transition-colors z-[2010]"
-            style={{ backgroundColor: themeColor }}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = themeColorDark}
-            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
-          >
-            <X size={24} />
-          </button>
+          </div>
         </>
       )}
 
@@ -949,7 +981,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
             {/* New Project Button */}
             <button 
               onClick={() => setIsCreating(true)}
-              className="mt-8 px-8 py-4 bg-white text-yellow-900 rounded-full font-bold text-lg shadow-xl hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
+              className="mt-8 px-8 py-4 bg-white text-black rounded-full font-bold text-lg shadow-xl hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
             >
               <Plus size={24} /> New Project
             </button>
@@ -995,9 +1027,9 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
               key={p.id} 
               className={`group relative flex items-center justify-between p-4 rounded-2xl transition-all ${
                 p.id === currentProjectId 
-                  ? 'bg-white shadow-lg ring-2 text-yellow-950' 
+                  ? 'bg-white shadow-lg ring-2 text-black' 
                   : isSidebar 
-                    ? 'text-yellow-900 border' 
+                    ? 'border' 
                     : 'bg-white/90 hover:bg-white shadow-lg text-gray-800'
               }`}
               style={p.id === currentProjectId 
@@ -1059,7 +1091,12 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                   </div>
                 ) : (
                   <>
-                    <div className="font-bold text-lg leading-tight">{p.name}</div>
+                    <div
+                      className="font-bold text-lg leading-tight"
+                      style={{ color: p.id === currentProjectId ? '#000' : (isSidebar ? 'rgba(0,0,0,0.4)' : undefined) }}
+                    >
+                      {p.name}
+                    </div>
                     <div className="text-xs flex items-center gap-1 mt-1" style={{ color: 'rgba(0,0,0,0.4)' }}>
                       {p.type === 'map' ? <MapIcon size={12}/> : <ImageIcon size={12}/>}
                       {formatDate(p.createdAt)}
@@ -1096,7 +1133,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
 
                 {openMenuId === p.id && (
                   <>
-                    <div className="fixed inset-0 z-[45] bg-black/20" onClick={() => setOpenMenuId(null)} />
+                    <div className="fixed inset-0 z-[2020] bg-black/20 pointer-events-auto" onClick={() => setOpenMenuId(null)} />
                     {isSidebar ? (
                       <MenuDropdown 
                         project={p}
@@ -1244,7 +1281,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
               <button 
                 onClick={handleCreate}
                 disabled={!newProjectName.trim()}
-                className="flex-1 py-3 text-yellow-950 font-bold rounded-xl shadow-lg disabled:opacity-50 disabled:shadow-none"
+                className="flex-1 py-3 text-white font-bold rounded-xl shadow-lg disabled:opacity-50 disabled:shadow-none"
                 style={{ backgroundColor: themeColor }}
                 onMouseEnter={(e) => !e.currentTarget.disabled && (e.currentTarget.style.backgroundColor = themeColorDark)}
                 onMouseLeave={(e) => !e.currentTarget.disabled && (e.currentTarget.style.backgroundColor = themeColor)}
@@ -1287,7 +1324,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
               </button>
               <button 
                 onClick={() => importFileInputRef.current?.click()}
-                className="flex-1 py-3 text-yellow-950 font-bold rounded-xl shadow-lg"
+                className="flex-1 py-3 text-white font-bold rounded-xl shadow-lg"
                 style={{ backgroundColor: themeColor }}
                 onMouseEnter={(e) => e.currentTarget.style.backgroundColor = themeColorDark}
                 onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}

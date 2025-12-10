@@ -276,7 +276,7 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({ onSave, onCancel, 
 
          <div className="w-px h-6 bg-gray-200"></div>
 
-         <button onClick={handleDone} className="p-2 text-yellow-950 rounded-full shadow-sm active:scale-95 transition-all" style={{ backgroundColor: THEME_COLOR }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = THEME_COLOR_DARK} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = THEME_COLOR}>
+        <button onClick={handleDone} className="p-2 text-white rounded-full shadow-sm active:scale-95 transition-all" style={{ backgroundColor: THEME_COLOR }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = THEME_COLOR_DARK} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = THEME_COLOR}>
             <Check size={20} />
          </button>
       </div>
