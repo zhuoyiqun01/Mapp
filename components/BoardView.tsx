@@ -1456,7 +1456,17 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
     const files = e.dataTransfer.files;
     if (files && files.length > 0) {
       // Filter image and JSON files
-      const imageFiles: File[] = Array.from(files as FileList).filter((file: File) => file.type.startsWith('image/'));
+      const imageFiles: File[] = Array.from(files as FileList).filter((file: File) => {
+        if (file.type && file.type.startsWith('image/')) return true;
+        const name = file.name.toLowerCase();
+        return (
+          name.endsWith('.jpg') || name.endsWith('.jpeg') ||
+          name.endsWith('.png') || name.endsWith('.webp') ||
+          name.endsWith('.gif') || name.endsWith('.bmp') ||
+          name.endsWith('.tif') || name.endsWith('.tiff') ||
+          name.endsWith('.heic') || name.endsWith('.heif')
+        );
+      });
       const jsonFiles: File[] = Array.from(files as FileList).filter((file: File) => 
         file.type === 'application/json' || file.name.endsWith('.json')
       );

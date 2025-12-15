@@ -74,7 +74,7 @@ const MenuDropdown: React.FC<{
         onClick={() => { onCompressImages(project); onClose(); }}
         className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
       >
-        <ImageIcon size={16} /> Compress Images
+        <ImageIcon size={16} /> Data Check
       </button>
       <div className="h-px bg-gray-100 my-1" />
       <button 
@@ -337,21 +337,34 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     }
   };
 
-  // Compress all images in the project
+  // 数据检查：删除重复便签 + 压缩图片
   const handleCompressImages = async (project: Project) => {
     if (!onUpdateProject) {
-      alert('Cannot compress images: project update function not available');
+      alert('无法执行数据检查：缺少项目更新方法');
       return;
     }
 
-    const confirmCompress = confirm(`This will compress all images in "${project.name}". This may take a while. Continue?`);
+    const confirmCompress = confirm(`将对项目「${project.name}」执行数据检查：\n1) 删除重复便签\n2) 压缩所有图片（含背景/手绘）\n\n可能耗时较长，是否继续？`);
     if (!confirmCompress) return;
 
     try {
+      // 1) 删除重复便签
+      let duplicateCount = 0;
+      const dedupedNotes: Note[] = [];
+      for (const note of project.notes) {
+        const found = dedupedNotes.find((n) => isDuplicateNote(n, note, project.type));
+        if (found) {
+          duplicateCount++;
+          continue;
+        }
+        dedupedNotes.push(note);
+      }
+
+      // 2) 压缩图片
       let compressedCount = 0;
       let errorCount = 0;
       const updatedNotes = await Promise.all(
-        project.notes.map(async (note) => {
+        dedupedNotes.map(async (note) => {
           const updatedNote = { ...note };
           
           // Compress images array
@@ -408,15 +421,15 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
 
       onUpdateProject(updatedProject);
       
-      let message = `Compression complete! ${compressedCount} image(s) compressed.`;
+      let message = `数据检查完成！删除重复便签 ${duplicateCount} 个，压缩图片 ${compressedCount} 张。`;
       if (errorCount > 0) {
-        message += ` ${errorCount} image(s) failed to compress.`;
+        message += ` 有 ${errorCount} 张图片压缩失败（已保留原图）。`;
       }
       alert(message);
       setOpenMenuId(null);
     } catch (error) {
-      console.error('Error compressing images:', error);
-      alert('Failed to compress images. Please try again.');
+      console.error('数据检查失败:', error);
+      alert('数据检查失败，请重试。');
     }
   };
 
@@ -1175,7 +1188,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                           onClick={() => handleCompressImages(p)}
                         className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
                       >
-                          <ImageIcon size={16} /> Compress Images
+                          <ImageIcon size={16} /> Data Check
                       </button>
                       <div className="h-px bg-gray-100 my-1" />
                       <button 
