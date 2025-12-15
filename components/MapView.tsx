@@ -189,12 +189,33 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
        // If clicked on marker, don't clear timer (let marker click event handle it)
        if (e && isUIElement(e.target)) {
          // Marker click, don't handle long press logic
+         // Clear timer immediately to prevent long press from firing
          if (timerRef.current) {
            clearTimeout(timerRef.current);
            timerRef.current = null;
          }
          startPosRef.current = null;
          return;
+       }
+       
+       // For non-marker clicks, also check if we moved significantly
+       // If we moved, it was a drag, not a click, so don't trigger long press
+       if (e && startPosRef.current) {
+         const clientX = 'touches' in e ? (e.touches.length > 0 ? e.touches[0].clientX : 0) : (e as MouseEvent).clientX;
+         const clientY = 'touches' in e ? (e.touches.length > 0 ? e.touches[0].clientY : 0) : (e as MouseEvent).clientY;
+         const dx = clientX - startPosRef.current.x;
+         const dy = clientY - startPosRef.current.y;
+         const dist = Math.sqrt(dx*dx + dy*dy);
+         
+         if (dist > 10) {
+           // Moved significantly, it was a drag
+           if (timerRef.current) {
+             clearTimeout(timerRef.current);
+             timerRef.current = null;
+           }
+           startPosRef.current = null;
+           return;
+         }
        }
        
        if (timerRef.current) {
@@ -309,12 +330,13 @@ const MapNavigationHandler = ({ coords, onComplete }: { coords: { lat: number; l
   return null;
 };
 
-const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange, mapNotes }: { 
+const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange, mapNotes, themeColor = THEME_COLOR }: { 
     onImportPhotos: () => void;
     onImportData: () => void;
     mapStyle: 'standard' | 'satellite';
     onMapStyleChange: (style: 'standard' | 'satellite') => void;
     mapNotes: Note[];
+    themeColor?: string;
 }) => {
     const map = useMap();
     const [showImportMenu, setShowImportMenu] = useState(false);
@@ -491,6 +513,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                         e.stopPropagation(); 
                         setShowLocateMenu(!showLocateMenu);
                     }}
+                    onPointerDown={(e) => e.stopPropagation()}
                     className="bg-white p-2 sm:p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
                     title="Locate"
             >
@@ -504,6 +527,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                                 locateToCurrentPosition();
                                 setShowLocateMenu(false);
                             }}
+                            onPointerDown={(e) => e.stopPropagation()}
                             className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 text-gray-700 whitespace-nowrap"
                         >
                             Locate to my Position
@@ -515,6 +539,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                                 locateToLatestPin();
                                 setShowLocateMenu(false);
                             }}
+                            onPointerDown={(e) => e.stopPropagation()}
                             disabled={mapNotes.length === 0}
                             className={`w-full text-left px-4 py-2.5 text-sm ${
                                 mapNotes.length === 0 
@@ -532,6 +557,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                     e.stopPropagation(); 
                     onMapStyleChange(mapStyle === 'standard' ? 'satellite' : 'standard');
                 }}
+                onPointerDown={(e) => e.stopPropagation()}
                 className={`p-2 sm:p-3 rounded-xl shadow-lg transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${
                     mapStyle === 'satellite' 
                         ? 'text-gray-900' 
@@ -548,6 +574,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                         e.stopPropagation(); 
                         setShowImportMenu(!showImportMenu);
                     }}
+                    onPointerDown={(e) => e.stopPropagation()}
                     className="bg-white p-2 sm:p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
                     title="Import"
                 >
@@ -564,6 +591,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                                 onImportPhotos();
                                 setShowImportMenu(false);
                             }}
+                            onPointerDown={(e) => e.stopPropagation()}
                             className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
                         >
                             <ImageIcon size={16} /> Import from Photos
@@ -575,6 +603,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                                 onImportData();
                                 setShowImportMenu(false);
                             }}
+                            onPointerDown={(e) => e.stopPropagation()}
                             className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
                         >
                             <FileJson size={16} /> Import from Data
@@ -651,6 +680,9 @@ const MapCenterHandler = ({ center, zoom }: { center: [number, number], zoom: nu
 };
 
 export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, onNavigateComplete, onSwitchToBoardView, themeColor = THEME_COLOR }) => {
+  if (!project) {
+    return null;
+  }
   const notes = project.notes;
   const [editingNote, setEditingNote] = useState<Partial<Note> | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
@@ -659,6 +691,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
+  const mapInitRef = useRef<WeakSet<L.Map>>(new WeakSet());
   
   const [imageDimensions, setImageDimensions] = useState<[number, number] | null>(null);
   const [minImageZoom, setMinImageZoom] = useState(-20);
@@ -811,7 +844,14 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const defaultCenter: [number, number] = [28.1847, 112.9467];
   const isMapMode = project.type === 'map';
   const mapNotes = useMemo(() => 
-    notes.filter(n => n.variant === 'standard' || !n.variant),
+    notes.filter(n => 
+      n.variant === 'standard' && 
+      n.coords && 
+      typeof n.coords.lat === 'number' && 
+      typeof n.coords.lng === 'number' &&
+      !isNaN(n.coords.lat) && 
+      !isNaN(n.coords.lng)
+    ),
     [notes]
   );
 
@@ -918,7 +958,13 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     onToggleEditor(true);
   };
 
-  const handleMarkerClick = (note: Note) => {
+  const handleMarkerClick = (note: Note, e?: L.LeafletMouseEvent) => {
+    // Prevent event propagation to avoid conflicts with map events
+    if (e) {
+      e.originalEvent?.stopPropagation();
+      e.originalEvent?.stopImmediatePropagation();
+    }
+    
     // When clicking marker, always edit the passed note (for clustered markers, pass the bottommost one)
     console.log('Marker clicked:', note.id);
     setCurrentClusterNotes([]);
@@ -929,7 +975,13 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   };
 
   // Handle cluster marker click - set up cluster navigation
-  const handleClusterClick = (clusterNotes: Note[]) => {
+  const handleClusterClick = (clusterNotes: Note[], e?: L.LeafletMouseEvent) => {
+    // Prevent event propagation to avoid conflicts with map events
+    if (e) {
+      e.originalEvent?.stopPropagation();
+      e.originalEvent?.stopImmediatePropagation();
+    }
+    
     // Sort notes: from south to north, from west to east
     const sortedClusterNotes = sortNotes(clusterNotes);
     const firstNote = sortedClusterNotes[0];
@@ -945,14 +997,26 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   // Save current note without closing editor
   const saveCurrentNoteWithoutClose = (noteData: Partial<Note>) => {
     if (noteData.id && notes.some(n => n.id === noteData.id)) {
-      onUpdateNote(noteData as Note);
+      // 确保保留原始note的variant
+      const existingNote = notes.find(n => n.id === noteData.id);
+      const fullNote: Note = {
+        ...existingNote!,
+        ...noteData,
+        variant: noteData.variant || existingNote!.variant
+      } as Note;
+      onUpdateNote(fullNote);
       // Update the note in currentClusterNotes to reflect changes
       const updatedClusterNotes = currentClusterNotes.map(note => 
-        note.id === noteData.id ? { ...note, ...noteData } as Note : note
+        note.id === noteData.id ? { ...note, ...noteData, variant: noteData.variant || note.variant } as Note : note
       );
       setCurrentClusterNotes(updatedClusterNotes);
     } else {
-      onAddNote(noteData as Note);
+      // 新Note必须指定variant
+      const fullNote: Note = {
+        ...noteData,
+        variant: noteData.variant || 'standard'
+      } as Note;
+      onAddNote(fullNote);
     }
   };
 
@@ -976,9 +1040,21 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
   const handleSaveNote = (noteData: Partial<Note>) => {
     if (noteData.id && notes.some(n => n.id === noteData.id)) {
-        onUpdateNote(noteData as Note);
+      // 确保保留原始note的variant
+      const existingNote = notes.find(n => n.id === noteData.id);
+      const fullNote: Note = {
+        ...existingNote!,
+        ...noteData,
+        variant: noteData.variant || existingNote!.variant
+      } as Note;
+      onUpdateNote(fullNote);
     } else {
-        onAddNote(noteData as Note);
+      // 新Note必须指定variant
+      const fullNote: Note = {
+        ...noteData,
+        variant: noteData.variant || 'standard'
+      } as Note;
+      onAddNote(fullNote);
     }
   };
 
@@ -994,12 +1070,14 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const handleImageImport = async (files: FileList | null, showLimitMessage = false) => {
     if (!files || files.length === 0) return;
     
-    const fileArray = Array.from(files).slice(0, 9); // Maximum 9 images
+    // Filter to include HEIC files
+    const imageFiles = Array.from(files).filter((file: File) => 
+      file.type.startsWith('image/') || 
+      file.name.toLowerCase().endsWith('.heic') ||
+      file.name.toLowerCase().endsWith('.heif')
+    );
     
-    // Show message if more than 9 files
-    if (showLimitMessage && files.length > 9) {
-      alert(`Only the first 9 images will be imported (${files.length} files selected)`);
-    }
+    const fileArray = imageFiles; // No limit on number of images
     const previews: Array<{
       file: File;
       imageUrl: string;
@@ -1012,10 +1090,124 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     
     for (const file of fileArray) {
       try {
+        // Convert HEIC to JPEG if needed before processing
+        let processedFile = file;
+        const isHeic = file.type === 'image/heic' || 
+                       file.type === 'image/heif' || 
+                       file.name.toLowerCase().endsWith('.heic') ||
+                       file.name.toLowerCase().endsWith('.heif');
+        
+        if (isHeic) {
+          try {
+            // Dynamically import heic2any to avoid issues with ESM/CommonJS
+            const heic2anyModule = await import('heic2any');
+            // heic2any can be exported as default or named export
+            const heic2anyFn = (heic2anyModule as any).default || heic2anyModule;
+            
+            // Try multiple conversion methods for better compatibility with iPhone 15 Pro HEIF
+            const conversionMethods = [
+              { toType: 'image/jpeg', quality: 0.9, extension: '.jpg', mimeType: 'image/jpeg' },
+              { toType: 'image/jpeg', quality: 0.8, extension: '.jpg', mimeType: 'image/jpeg' },
+              { toType: 'image/png', quality: undefined, extension: '.png', mimeType: 'image/png' }
+            ];
+            
+            let lastError: any = null;
+            let converted = false;
+            
+            for (const method of conversionMethods) {
+              try {
+                const options: any = {
+                  blob: file,
+                  toType: method.toType
+                };
+                if (method.quality !== undefined) {
+                  options.quality = method.quality;
+                }
+                
+                const convertedBlob = await heic2anyFn(options);
+                
+                // heic2any returns an array, get the first item
+                const blob = Array.isArray(convertedBlob) ? convertedBlob[0] : convertedBlob;
+                
+                if (!blob) {
+                  throw new Error('Conversion returned empty result');
+                }
+                
+                // Create a new File object from the converted blob
+                const newFileName = file.name.replace(/\.(heic|heif)$/i, method.extension);
+                processedFile = new File([blob], newFileName, {
+                  type: method.mimeType,
+                  lastModified: file.lastModified
+                });
+                converted = true;
+                break;
+              } catch (error: any) {
+                console.log(`HEIC conversion failed with ${method.toType} (quality: ${method.quality}):`, error);
+                lastError = error;
+                // Continue to next method
+                continue;
+              }
+            }
+            
+            if (!converted) {
+              // All conversion methods failed
+              console.error('All HEIC conversion methods failed. Last error:', lastError);
+              const errorMessage = lastError?.message || 'Unknown error';
+              
+              // Check for specific error types
+              let userFriendlyError = `HEIC/HEIF 图片转换失败: ${errorMessage}\n\n请尝试将图片转换为 JPEG/PNG 格式后重试。`;
+              if (errorMessage.includes('ERR_LIBHEIF') || errorMessage.includes('format not supported')) {
+                userFriendlyError = `无法转换此 HEIC/HEIF 文件
+
+可能原因：
+• iPhone 15 Pro 等新设备使用了更新的 HEIF 格式
+• 浏览器端转换库暂不支持此格式
+
+解决方案（推荐按顺序尝试）：
+1. 【最简单】在 iPhone 上更改设置：
+   设置 > 相机 > 格式 > 选择"兼容性最佳"
+   这样新照片会直接保存为 JPEG 格式
+
+2. 使用 Mac 预览应用转换：
+   打开图片 > 文件 > 导出 > 选择 JPEG 格式
+
+3. 使用在线转换工具：
+   • https://cloudconvert.com/heic-to-jpg
+   • https://convertio.co/zh/heic-jpg/
+   • https://heictojpeg.com/
+
+4. 使用 App Store 中的转换应用
+
+注意：这是浏览器端转换库的技术限制，不是应用的问题。`;
+              }
+              
+              previews.push({
+                file,
+                imageUrl: URL.createObjectURL(file),
+                lat: 0,
+                lng: 0,
+                error: userFriendlyError
+              });
+              continue;
+            }
+          } catch (error: any) {
+            console.error('HEIC conversion failed:', error);
+            const errorMessage = error?.message || 'Unknown error';
+            previews.push({
+              file,
+              imageUrl: URL.createObjectURL(file),
+              lat: 0,
+              lng: 0,
+              error: `HEIC/HEIF 图片转换失败: ${errorMessage}。请将图片转换为 JPEG/PNG 格式后重试。`
+            });
+            continue;
+          }
+        }
+        
         // Read EXIF data with comprehensive options for better compatibility
         // Support multiple phone manufacturers (Xiaomi, OPPO, etc.)
         // For Android gallery picker, we need to read all EXIF segments
-        let exifData = await exifr.parse(file, {
+        let exifData = await exifr.parse(processedFile, {
           gps: true,
           translateKeys: false,
           translateValues: false,
@@ -1025,30 +1217,30 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         
         // If GPS data not found, try reading all EXIF data without filters
         if (!exifData || (!exifData.latitude && !exifData.GPSLatitude && !exifData.GPS)) {
-          console.log('GPS not found in primary parse, trying full EXIF read for:', file.name);
+          console.log('GPS not found in primary parse, trying full EXIF read for:', processedFile.name);
           // Try reading with all segments enabled (important for Android gallery)
-          exifData = await exifr.parse(file, {
+          exifData = await exifr.parse(processedFile, {
             translateKeys: false,
             translateValues: false,
             reviveValues: true,
-            pick: true  // Read all EXIF segments
+            pick: true as any  // Read all EXIF segments
           });
           
-          console.log('Full EXIF data for', file.name, ':', exifData);
+          console.log('Full EXIF data for', processedFile.name, ':', exifData);
         }
         
         // If still no GPS data, try reading as ArrayBuffer (better for Android)
         if (!exifData || (!exifData.latitude && !exifData.GPSLatitude && !exifData.GPS)) {
-          console.log('GPS still not found, trying ArrayBuffer read for:', file.name);
+          console.log('GPS still not found, trying ArrayBuffer read for:', processedFile.name);
           try {
-            const arrayBuffer = await file.arrayBuffer();
+            const arrayBuffer = await processedFile.arrayBuffer();
             exifData = await exifr.parse(arrayBuffer, {
               translateKeys: false,
               translateValues: false,
               reviveValues: true,
-              pick: true
+              pick: true as any
             });
-            console.log('ArrayBuffer EXIF data for', file.name, ':', exifData);
+            console.log('ArrayBuffer EXIF data for', processedFile.name, ':', exifData);
           } catch (arrayBufferError) {
             console.warn('ArrayBuffer read failed:', arrayBufferError);
           }
@@ -1117,9 +1309,9 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         
         // Validate coordinates
         if (lat === null || lng === null || isNaN(lat) || isNaN(lng) || lat === 0 || lng === 0) {
-          console.warn('Could not extract GPS coordinates from:', file.name);
-          console.warn('File type:', file.type);
-          console.warn('File size:', file.size);
+          console.warn('Could not extract GPS coordinates from:', processedFile.name);
+          console.warn('File type:', processedFile.type);
+          console.warn('File size:', processedFile.size);
           console.warn('Available EXIF keys:', exifData ? Object.keys(exifData) : 'No EXIF data');
           if (exifData) {
             console.warn('EXIF data sample:', JSON.stringify(exifData, null, 2).substring(0, 1000));
@@ -1140,8 +1332,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             console.warn('No EXIF data found at all');
           }
           previews.push({
-            file,
-            imageUrl: URL.createObjectURL(file),
+            file: processedFile,
+            imageUrl: URL.createObjectURL(processedFile),
             lat: 0,
             lng: 0,
             error: 'Missing location data'
@@ -1150,8 +1342,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         }
         
         // Calculate image fingerprint
-        const imageUrl = URL.createObjectURL(file);
-        const imageFingerprint = await calculateImageFingerprint(file, imageUrl, lat, lng);
+        const imageUrl = URL.createObjectURL(processedFile);
+        const imageFingerprint = await calculateImageFingerprint(processedFile, imageUrl, lat, lng);
         
         // Check if this image has already been imported (lightweight comparison, no filename)
         let isDuplicate = false;
@@ -1201,7 +1393,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         }
         
         previews.push({
-          file,
+          file: processedFile,
           imageUrl: imageUrl,
           lat: lat,
           lng: lng,
@@ -1295,7 +1487,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     for (let i = 0; i < validPreviews.length; i++) {
       const preview = validPreviews[i];
       try {
-        // Convert image to base64 (with compression)
+        // Convert image to base64 (with compression, HEIC already converted)
         const base64 = await fileToBase64(preview.file);
         
         // Calculate board position for this note (offset by index)
@@ -1564,17 +1756,32 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   }, []);
   
   // Pin clustering distance threshold (in screen pixels)
-  const CLUSTER_DISTANCE_THRESHOLD = 25;
+  // Increased from 25 to 40 for better clustering
+  const CLUSTER_DISTANCE_THRESHOLD = 40;
   
   // Calculate distance between two pins on the map (in screen pixels)
   // Returns null if calculation fails
   const calculatePinDistance = useCallback((map: L.Map, note1: Note, note2: Note): number | null => {
     try {
+      const container = map.getContainer();
+      if (!container) {
+        return null;
+      }
+      
+      // Try to calculate distance - latLngToContainerPoint should work even during zoom
       const point1 = map.latLngToContainerPoint([note1.coords.lat, note1.coords.lng]);
       const point2 = map.latLngToContainerPoint([note2.coords.lat, note2.coords.lng]);
-      return point1.distanceTo(point2);
+      
+      // Validate points
+      if (!point1 || !point2 || isNaN(point1.x) || isNaN(point1.y) || isNaN(point2.x) || isNaN(point2.y)) {
+        return null;
+      }
+      
+      const distance = point1.distanceTo(point2);
+      return distance;
     } catch (e) {
-      console.warn('Failed to calculate pin distance:', e);
+      // Log error for debugging
+      console.warn('Distance calculation error:', e);
       return null;
     }
   }, []);
@@ -1612,6 +1819,9 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         if (distance !== null && distance < threshold) {
           cluster.push(otherNote);
           processed.add(otherNote.id);
+        } else if (distance === null && note.id === sortedNotes[0]?.id) {
+          // Debug: log first note's distance calculation failures
+          console.warn('Distance calculation failed for note:', note.id, 'to', otherNote.id);
         }
       });
       
@@ -1627,6 +1837,12 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     return clusters;
   }, [sortNotes, calculatePinDistance]);
   
+  // Use ref to store mapInstance to avoid closure issues
+  const mapInstanceRef = useRef<L.Map | null>(null);
+  useEffect(() => {
+    mapInstanceRef.current = mapInstance;
+  }, [mapInstance]);
+  
   // Update clustered markers
   useEffect(() => {
     if (!isMapMode || !mapInstance || mapNotes.length === 0) {
@@ -1634,37 +1850,128 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       return;
     }
     
+    let updateTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    let rafId: number | null = null;
+    let isZooming = false;
+    
     const updateClusters = () => {
-      if (!mapInstance) return;
+      const currentMap = mapInstanceRef.current;
+      if (!currentMap) return;
       
-      // Ensure map is ready
-      mapInstance.whenReady(() => {
+      // Cancel any pending timeout updates (but allow RAF updates during zoom)
+      if (updateTimeoutId) {
+        clearTimeout(updateTimeoutId);
+        updateTimeoutId = null;
+      }
+      
+      // Cancel any pending RAF
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      
+      // Use requestAnimationFrame for smooth updates
+      const requestedRafId = requestAnimationFrame(() => {
+        const currentMap = mapInstanceRef.current;
+        if (!currentMap) return;
+        
         try {
-          const clusters = detectClusters(mapNotes, mapInstance);
+          const container = currentMap.getContainer();
+          if (!container || !container.offsetParent) {
+            // Map not ready, retry after a short delay
+            updateTimeoutId = setTimeout(updateClusters, 50);
+            return;
+          }
+          
+          // Ensure map pane is ready
+          const mapPane = currentMap.getPane('mapPane');
+          if (!mapPane) {
+            updateTimeoutId = setTimeout(updateClusters, 50);
+            return;
+          }
+          
+          // Calculate clusters
+          const clusters = detectClusters(mapNotes, currentMap);
           setClusteredMarkers(clusters);
         } catch (e) {
           console.warn('Failed to update clusters:', e);
+          // Retry after a short delay if calculation fails
+          updateTimeoutId = setTimeout(updateClusters, 50);
         }
       });
+      rafId = requestedRafId;
     };
     
-    // Delay execution to ensure map is fully initialized
+    // Initial update with delay to ensure map is fully initialized
     const timeoutId = setTimeout(() => {
       updateClusters();
     }, 100);
     
-    // Listen to map zoom and move events
-    mapInstance.on('zoomend', updateClusters);
-    mapInstance.on('moveend', updateClusters);
+    // Real-time update during zoom (using RAF for immediate feedback)
+    const handleZoom = () => {
+      isZooming = true;
+      // Cancel any pending timeout updates
+      if (updateTimeoutId) {
+        clearTimeout(updateTimeoutId);
+        updateTimeoutId = null;
+      }
+      // Use RAF for immediate, smooth updates during zoom
+      updateClusters();
+    };
+    
+    // Update after zoom animation completes
+    const handleZoomEnd = () => {
+      isZooming = false;
+      // Cancel any pending updates
+      if (updateTimeoutId) {
+        clearTimeout(updateTimeoutId);
+        updateTimeoutId = null;
+      }
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      
+      // Delay update to ensure map is fully stable after zoom animation
+      updateTimeoutId = setTimeout(() => {
+        updateClusters();
+        // Backup update after longer delay to ensure stability
+        updateTimeoutId = setTimeout(() => {
+          updateClusters();
+        }, 150);
+      }, 100);
+    };
+    
+    const handleMoveEnd = () => {
+      if (isZooming) return; // Don't update during zoom
+      // Delay update to ensure map is fully stable after move animation
+      if (updateTimeoutId) clearTimeout(updateTimeoutId);
+      updateTimeoutId = setTimeout(() => {
+        updateClusters();
+      }, 50);
+    };
+    
+    // Listen to zoom events (during animation) for real-time updates
+    mapInstance.on('zoom', handleZoom);
+    // Listen to zoomend (after animation completes)
+    mapInstance.on('zoomend', handleZoomEnd);
+    mapInstance.on('moveend', handleMoveEnd);
     
     return () => {
       clearTimeout(timeoutId);
+      if (updateTimeoutId) {
+        clearTimeout(updateTimeoutId);
+      }
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
       if (mapInstance) {
-        mapInstance.off('zoomend', updateClusters);
-        mapInstance.off('moveend', updateClusters);
+        mapInstance.off('zoom', handleZoom);
+        mapInstance.off('zoomend', handleZoomEnd);
+        mapInstance.off('moveend', handleMoveEnd);
       }
     };
-  }, [mapInstance, mapNotes, isMapMode, detectClusters]);
+  }, [mapInstance, mapNotes, isMapMode]);
 
   // Drag and drop handlers
   const handleDragEnter = (e: React.DragEvent) => {
@@ -1709,8 +2016,12 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
     const files = e.dataTransfer.files;
     if (files && files.length > 0) {
-      // Filter image and JSON files
-      const imageFiles = Array.from(files).filter((file: File) => file.type.startsWith('image/'));
+      // Filter image and JSON files (including HEIC)
+      const imageFiles = Array.from(files).filter((file: File) => 
+        file.type.startsWith('image/') || 
+        file.name.toLowerCase().endsWith('.heic') ||
+        file.name.toLowerCase().endsWith('.heif')
+      );
       const jsonFiles = Array.from(files).filter((file: File) => 
         file.type === 'application/json' || file.name.endsWith('.json')
       );
@@ -1774,7 +2085,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 </svg>
               </div>
               <div className="text-xl font-bold text-gray-800">Drop images or JSON files here to import</div>
-              <div className="text-sm text-gray-600 mt-2">Maximum 9 images</div>
             </div>
           </div>
         </div>
@@ -1794,16 +2104,69 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         crs={isMapMode ? L.CRS.EPSG3857 : L.CRS.Simple}
         style={{ height: '100%', width: '100%' }}
         zoomControl={false}
-        ref={setMapInstance}
+        ref={(map) => {
+          // Only set when map is available; avoid setting null to prevent effect thrash
+          if (map && map !== mapInstance) {
+            setMapInstance(map);
+          }
+          
+          if (map && isMapMode && !mapInitRef.current.has(map)) {
+            // Mark this map instance as initialized
+            mapInitRef.current.add(map);
+            
+            map.whenReady(() => {
+              // Helper function to safely invalidate size and update view
+              const safeInvalidateAndUpdate = () => {
+                if (!map || !map.getContainer()) return false;
+                
+                // Check if map pane is initialized before calling invalidateSize
+                const mapPane = map.getPane('mapPane');
+                if (!mapPane) {
+                  return false; // Not ready yet
+                }
+                
+                try {
+                  map.invalidateSize();
+                  // Force a view update to trigger tile loading
+                  const center = map.getCenter();
+                  const zoom = map.getZoom();
+                  if (center && typeof center.lat === 'number' && typeof center.lng === 'number') {
+                    map.setView(center, zoom, { animate: false });
+                  }
+                  return true; // Success
+                } catch (error) {
+                  console.warn('Error updating map view:', error);
+                  return false;
+                }
+              };
+              
+              // Try immediately (map should be ready after whenReady)
+              if (!safeInvalidateAndUpdate()) {
+                // If not ready, try after a short delay
+                setTimeout(() => {
+                  if (!safeInvalidateAndUpdate()) {
+                    // If still not ready, try one more time after longer delay
+                    setTimeout(() => {
+                      safeInvalidateAndUpdate();
+                    }, 200);
+                  }
+                }, 100);
+              }
+            });
+          }
+        }}
         doubleClickZoom={false}
       >
         <MapNavigationHandler coords={navigateToCoords} onComplete={onNavigateComplete} />
         {isMapMode ? (
            <TileLayer 
+             key={mapStyle}
              attribution={MAP_ATTRIBUTION} 
              url={mapStyle === 'satellite' ? MAP_SATELLITE_URL : MAP_TILE_URL}
              maxNativeZoom={19}
              maxZoom={19}
+             tileSize={256}
+             zoomOffset={0}
            />
         ) : (
            <>
@@ -1841,8 +2204,10 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             position={[note.coords.lat, note.coords.lng]}
                   icon={createCustomIcon(note)}
                   eventHandlers={{ 
-                    click: () => {
-                      handleMarkerClick(note);
+                    click: (e) => {
+                      e.originalEvent?.stopPropagation();
+                      e.originalEvent?.stopImmediatePropagation();
+                      handleMarkerClick(note, e);
                     }
                   }}
                 />
@@ -1855,8 +2220,10 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                   position={cluster.position}
                   icon={createCustomIcon(cluster.notes[0], cluster.notes.length)}
                   eventHandlers={{ 
-                    click: () => {
-                      handleClusterClick(cluster.notes);
+                    click: (e) => {
+                      e.originalEvent?.stopPropagation();
+                      e.originalEvent?.stopImmediatePropagation();
+                      handleClusterClick(cluster.notes, e);
                     }
                   }}
                 />
@@ -1865,14 +2232,16 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           })
         ) : (
           // Show single markers (non-map mode or when no clustering)
-          mapNotes.map(note => (
+          isMapMode && mapNotes.map(note => (
             <Marker 
               key={note.id} 
               position={[note.coords.lat, note.coords.lng]}
               icon={createCustomIcon(note)}
               eventHandlers={{ 
-                click: () => {
-                  handleMarkerClick(note);
+                click: (e) => {
+                  e.originalEvent?.stopPropagation();
+                  e.originalEvent?.stopImmediatePropagation();
+                  handleMarkerClick(note, e);
                 }
               }}
             />
@@ -1931,6 +2300,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 mapStyle={mapStyle}
                 onMapStyleChange={setMapStyle}
                 mapNotes={mapNotes}
+                themeColor={themeColor}
               />
               <div 
                   className="flex-1 max-w-md relative group pointer-events-auto"
@@ -2061,7 +2431,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                         </div>
                       </div>
                     ) : (
-                      <div className="absolute top-2 right-2 bg-green-500 text-white rounded-full p-1">
+                      <div className="absolute top-2 right-2 bg-green-500 text-white rounded-full p-1.5">
                         <Check size={12} />
                       </div>
                     )}

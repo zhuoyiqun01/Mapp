@@ -455,12 +455,21 @@ export default function App() {
     link.click();
   };
 
-  const handleCreateProject = (project: Project) => {
+  const handleCreateProject = async (project: Project) => {
     setProjects(prev => [...prev, project]);
     setCurrentProjectId(project.id);
     setViewMode('map');
     // 确保创建项目后侧边栏保持关闭
     setIsSidebarOpen(false);
+    // 立即加载项目以确保能正确显示
+    try {
+      const fullProject = await loadProject(project.id, true);
+      if (fullProject) {
+        setActiveProject(fullProject);
+      }
+    } catch (error) {
+      console.error('Failed to load project after creation:', error);
+    }
   };
 
   const handleDeleteProject = async (id: string) => {
