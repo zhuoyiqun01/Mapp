@@ -44,7 +44,7 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
-  
+
   // Cloud Sync State
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -124,7 +124,7 @@ export default function App() {
                   const local = localProjects.find(lp => lp.id === p.id);
                   return !local || (local.version || 0) < (p.version || 0);
                 });
-              
+        
               if (hasChanges) {
                 // 保存合并后的项目
                 for (const project of merged) {
@@ -148,7 +148,7 @@ export default function App() {
                 setSyncStatus('idle');
                 setSyncError(null);
               }, 3000);
-            } else {
+        } else {
               // 新设备，上传本地数据到云端
               if (localProjects.length > 0) {
                 await syncProjectsToCloud(localProjects);
@@ -164,7 +164,7 @@ export default function App() {
               setSyncStatus('idle');
               setSyncError(null);
             }, 3000);
-          }
+             }
         } else {
           // Supabase 未配置，直接跳过云端同步
           setSyncStatus('idle');
@@ -176,7 +176,7 @@ export default function App() {
     };
     loadProjects();
   }, []);
-  
+
   // Disable browser two-finger zoom
   useEffect(() => {
     const preventZoom = (e: TouchEvent) => {

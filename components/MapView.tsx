@@ -8,6 +8,7 @@ import { Search, Locate, Loader2, X, Check, Satellite, Plus, Image as ImageIcon,
 import exifr from 'exifr';
 import { NoteEditor } from './NoteEditor';
 import { generateId, fileToBase64 } from '../utils';
+import { loadImage } from '../utils/storage';
 import { ZoomSlider } from './ZoomSlider';
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -832,6 +833,23 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       return lat !== null && lng !== null ? `${lat.toFixed(6)}_${lng.toFixed(6)}` : 'unknown';
     }
   };
+
+  // 读取已有图片（可能是存储的图片 ID），用于指纹对比
+  const getImageDataForFingerprint = async (imageRef: string): Promise<string | null> => {
+    if (!imageRef) return null;
+    // 如果是存储的图片 ID，先从 IndexedDB 取出 Base64
+    if (imageRef.startsWith('img-')) {
+      try {
+        const loaded = await loadImage(imageRef);
+        if (loaded) return loaded;
+      } catch (err) {
+        console.warn('Failed to load stored image for fingerprint:', err);
+        return null;
+      }
+    }
+    // 已经是 Base64 数据
+    return imageRef;
+  };
   
   // Drag and drop state
   const [isDragging, setIsDragging] = useState(false);
@@ -949,6 +967,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       images: [],
       tags: [],
       variant: 'standard',
+      isFavorite: false,
       color: '#FFFDF5',
       boardX: boardX,
       boardY: boardY
@@ -1045,14 +1064,16 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       const fullNote: Note = {
         ...existingNote!,
         ...noteData,
-        variant: noteData.variant || existingNote!.variant
+        variant: noteData.variant || existingNote!.variant,
+        isFavorite: noteData.isFavorite ?? existingNote?.isFavorite ?? false
       } as Note;
       onUpdateNote(fullNote);
     } else {
       // 新Note必须指定variant
       const fullNote: Note = {
         ...noteData,
-        variant: noteData.variant || 'standard'
+        variant: noteData.variant || 'standard',
+        isFavorite: noteData.isFavorite ?? false
       } as Note;
       onAddNote(fullNote);
     }
@@ -1088,6 +1109,9 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       imageFingerprint?: string;
     }> = [];
     
+    // 缓存已加载的图片数据，避免重复从 IndexedDB 读取
+    const fingerprintCache = new Map<string, string>();
+
     for (const file of fileArray) {
       try {
         // Convert HEIC to JPEG if needed before processing
@@ -1353,7 +1377,16 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           
           for (const existingImage of note.images) {
             try {
-              const existingFingerprint = await calculateFingerprintFromBase64(existingImage);
+              let imageData = fingerprintCache.get(existingImage) || null;
+              if (!imageData) {
+                imageData = await getImageDataForFingerprint(existingImage);
+                if (imageData) {
+                  fingerprintCache.set(existingImage, imageData);
+                }
+              }
+              if (!imageData) continue;
+
+              const existingFingerprint = await calculateFingerprintFromBase64(imageData, note);
               
               // Debug: log fingerprints for comparison
               console.log('Comparing fingerprints:', {
@@ -1372,10 +1405,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               const currentParts = imageFingerprint.split('_');
               const existingParts = existingFingerprint.split('_');
               
-              // Fingerprint format: width_height_firstPixel
-              // So indices are: [0]=width, [1]=height, [2]=firstPixel
+              // Fingerprint format: lat_lng_topLeft_bottomLeft_bottomRight
               if (currentParts.length >= 2 && existingParts.length >= 2) {
-                // Compare width and height (first 2 parts)
                 const currentBase = currentParts.slice(0, 2).join('_');
                 const existingBase = existingParts.slice(0, 2).join('_');
                 
@@ -1505,6 +1536,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           images: [base64],
           createdAt: Date.now(),
           variant: 'standard',
+          isFavorite: false,
           emoji: '',
           tags: [],
           fontSize: 3,
@@ -1585,6 +1617,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       // Generate new IDs for imported notes
       const newNotes = uniqueImportedNotes.map((note: Note) => ({
         ...note,
+        isFavorite: note.isFavorite ?? false,
         id: generateId(),
         createdAt: Date.now() + Math.random()
       }));
@@ -1643,13 +1676,20 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   };
 
   const createCustomIcon = (note: Note, count?: number) => {
+      const isFavorite = note.isFavorite === true;
+      const scale = isFavorite ? 2 : 1;
+      const baseSize = 40;
+      const size = baseSize * scale;
+      const borderWidth = 3; // 收藏时不加粗描边
+      const badgeSize = 20 * scale;
+      const badgeOffset = 8 * scale;
       const countBadge = count && count > 1 ? `
         <div style="
           position: absolute;
-          top: -8px;
-          right: -8px;
-          width: 20px;
-          height: 20px;
+          top: -${badgeOffset}px;
+          right: -${badgeOffset}px;
+          width: ${badgeSize}px;
+          height: ${badgeSize}px;
           background-color: white;
           border-radius: 50%;
           display: flex;
@@ -1661,7 +1701,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         ">
           <span style="
             color: ${themeColor};
-            font-size: 12px;
+            font-size: ${12 * scale}px;
             font-weight: bold;
             line-height: 1;
           ">${count}</span>
@@ -1723,29 +1763,33 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           html: `<div style="
             position: relative;
             background-color: ${backgroundColor}; 
-            width: 40px; 
-            height: 40px; 
+            width: ${size}px; 
+            height: ${size}px; 
             border-radius: 50% 50% 50% 0; 
-            transform: rotate(-45deg);
+            transform: rotate(-45deg) ${isFavorite ? 'scale(1)' : ''};
             display: flex;
             align-items: center;
             justify-content: center;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
-            border: 3px solid ${themeColor};
+            border: ${borderWidth}px solid ${themeColor};
             overflow: hidden;
           ">
             ${content}
           </div>
           ${countBadge}`,
-          iconSize: [40, 40],
-          iconAnchor: [20, 40],
-          popupAnchor: [0, -40]
+          iconSize: [size, size],
+          iconAnchor: [size / 2, size],
+          popupAnchor: [0, -size]
       });
   };
 
   // Sort markers: bottom to top, left to right
   const sortNotes = useCallback((notes: Note[]): Note[] => {
     return [...notes].sort((a, b) => {
+      // 收藏优先
+      const favA = a.isFavorite ? 1 : 0;
+      const favB = b.isFavorite ? 1 : 0;
+      if (favA !== favB) return favB - favA;
       // First by latitude (bottom to top, smaller latitude is below)
       if (Math.abs(a.coords.lat - b.coords.lat) > 0.0001) {
         return a.coords.lat - b.coords.lat;

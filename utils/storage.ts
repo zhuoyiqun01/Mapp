@@ -69,9 +69,26 @@ export async function deleteSketch(sketchId: string): Promise<void> {
   await del(`${SKETCH_PREFIX}${sketchId}`);
 }
 
+// 确保Note有variant字段
+function ensureNoteVariant(note: Note): Note {
+  if (!note.variant) {
+    // 根据特征判断：如果有imageWidth和imageHeight，且images有内容，可能是image类型
+    if (note.imageWidth && note.imageHeight && note.images && note.images.length > 0) {
+      return { ...note, variant: 'image' };
+    }
+    // 如果没有emoji，可能是compact类型
+    if (!note.emoji || note.emoji === '') {
+      return { ...note, variant: 'compact' };
+    }
+    // 默认是standard
+    return { ...note, variant: 'standard' };
+  }
+  return note;
+}
+
 // 转换 Note 的图片从 Base64 到图片 ID（用于迁移）
 async function migrateNoteImages(note: Note): Promise<Note> {
-  const migratedNote = { ...note };
+  const migratedNote = ensureNoteVariant({ ...note });
   
   // 迁移 images 数组
   if (note.images && note.images.length > 0) {
@@ -186,6 +203,11 @@ export async function loadProject(projectId: string, loadImages: boolean = false
   const project = await get<Project>(`${PROJECT_PREFIX}${projectId}`);
   if (!project) {
     return null;
+  }
+  
+  // 确保所有notes都有variant
+  if (project.notes) {
+    project.notes = project.notes.map(ensureNoteVariant);
   }
   
   // 如果需要加载图片，则加载所有图片

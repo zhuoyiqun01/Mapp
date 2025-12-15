@@ -963,8 +963,8 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
               onMouseEnter={(e) => e.currentTarget.style.backgroundColor = themeColorDark}
               onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
             >
-              <X size={24} />
-            </button>
+          <X size={24} />
+        </button>
           </div>
         </>
       )}
@@ -972,19 +972,19 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       <div className={isSidebar ? "p-6 pt-28 border-b flex-shrink-0" : "flex flex-col items-center"} style={isSidebar ? { borderColor: `${themeColor}33` } : undefined}>
         {!isSidebar && (
           <>
-            <h1 className={titleClass}>
-              <span>START</span>
-              <span>YOUR</span>
-              <span>MAPPING</span>
-            </h1>
-            
+          <h1 className={titleClass}>
+            <span>START</span>
+            <span>YOUR</span>
+            <span>MAPPING</span>
+          </h1>
+        
             {/* New Project Button */}
-            <button 
-              onClick={() => setIsCreating(true)}
+          <button 
+            onClick={() => setIsCreating(true)}
               className="mt-8 px-8 py-4 bg-white text-black rounded-full font-bold text-lg shadow-xl hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
-            >
-              <Plus size={24} /> New Project
-            </button>
+          >
+            <Plus size={24} /> New Project
+          </button>
           </>
         )}
       </div>
@@ -1098,9 +1098,9 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                       {p.name}
                     </div>
                     <div className="text-xs flex items-center gap-1 mt-1" style={{ color: 'rgba(0,0,0,0.4)' }}>
-                      {p.type === 'map' ? <MapIcon size={12}/> : <ImageIcon size={12}/>}
-                      {formatDate(p.createdAt)}
-                    </div>
+                  {p.type === 'map' ? <MapIcon size={12}/> : <ImageIcon size={12}/>}
+                  {formatDate(p.createdAt)}
+                </div>
                   </>
                 )}
               </div>

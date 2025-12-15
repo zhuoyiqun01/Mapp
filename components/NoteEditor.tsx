@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { Note, Tag } from '../types';
 import { EMOJI_LIST, EMOJI_CATEGORIES, TAG_COLORS, THEME_COLOR } from '../constants';
 import { createTag, fileToBase64, generateId } from '../utils';
-import { X, Camera, Plus, Check, PenTool, Minus, Bold, Image as ImageIcon, Trash2, ArrowLeft, ArrowRight, Locate, ArrowUp } from 'lucide-react';
+import { X, Camera, Plus, Check, PenTool, Minus, Bold, Image as ImageIcon, Trash2, ArrowLeft, ArrowRight, Locate, ArrowUp, Star } from 'lucide-react';
 import { DrawingCanvas } from './DrawingCanvas';
 import { motion } from 'framer-motion';
 
@@ -53,6 +53,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const [text, setText] = useState(initialNote?.text || '');
   const [fontSize, setFontSize] = useState<number>(initialNote?.fontSize || 3); 
   const [isBold, setIsBold] = useState(initialNote?.isBold || false);
+  const [isFavorite, setIsFavorite] = useState<boolean>(initialNote?.isFavorite ?? false);
   const [color, setColor] = useState(initialNote?.color || DEFAULT_BG);
   const [tags, setTags] = useState<Tag[]>(initialNote?.tags || []);
   const [images, setImages] = useState<string[]>(initialNote?.images || []);
@@ -127,6 +128,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       setText(initialNote?.text || '');
       setFontSize(initialNote?.fontSize || 3);
       setIsBold(initialNote?.isBold || false);
+      setIsFavorite(initialNote?.isFavorite ?? false);
       setColor(initialNote?.color || DEFAULT_BG);
       setTags(initialNote?.tags || []);
       setImages(initialNote?.images || []);
@@ -141,6 +143,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       setText(initialNote?.text || '');
       setFontSize(initialNote?.fontSize || 3);
       setIsBold(initialNote?.isBold || false);
+      setIsFavorite(initialNote?.isFavorite ?? false);
       setColor(initialNote?.color || DEFAULT_BG);
       setTags(initialNote?.tags || []);
       setImages(initialNote?.images || []);
@@ -264,6 +267,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       text,
       fontSize,
       isBold,
+      isFavorite,
       color,
       tags: isCompactMode ? [] : tags,
       images,
@@ -384,6 +388,16 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                 <div></div>
                 
                 <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => { setShowEmojiPicker(false); setIsFavorite(!isFavorite); }}
+                      className={`rounded-full p-1.5 transition-colors active:scale-90 ${
+                        isFavorite ? 'text-white' : 'text-gray-400 hover:text-gray-600 hover:bg-black/5'
+                      }`}
+                      style={isFavorite ? { backgroundColor: THEME_COLOR } : undefined}
+                      title={isFavorite ? '取消收藏' : '收藏'}
+                    >
+                      <Star size={24} fill={isFavorite ? THEME_COLOR : 'none'} />
+                    </button>
                     {initialNote?.id && onDelete && (
                         <button 
                             onClick={() => { setShowEmojiPicker(false); handleDelete(); }}

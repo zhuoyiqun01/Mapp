@@ -3858,10 +3858,19 @@ const createNoteAtCenter = (variant: 'compact') => {
               // Compact/Standard notes have fixed height.
               let clampClass = '';
               if (!isImage) {
-                  if (note.fontSize >= 4) clampClass = 'line-clamp-1';
-                  else if (note.fontSize === 3) clampClass = 'line-clamp-2';
-                  else if (note.fontSize === 2) clampClass = 'line-clamp-3';
-                  else clampClass = 'line-clamp-4';
+                  // 让预览更宽容，减少在句中出现省略号：
+                  // Compact 高度更小，但仍给 2~5 行；Standard 给 3~6 行
+                  if (isCompact) {
+                    if (note.fontSize >= 4) clampClass = 'line-clamp-2';
+                    else if (note.fontSize === 3) clampClass = 'line-clamp-3';
+                    else if (note.fontSize === 2) clampClass = 'line-clamp-4';
+                    else clampClass = 'line-clamp-5';
+                  } else {
+                    if (note.fontSize >= 4) clampClass = 'line-clamp-3';
+                    else if (note.fontSize === 3) clampClass = 'line-clamp-4';
+                    else if (note.fontSize === 2) clampClass = 'line-clamp-5';
+                    else clampClass = 'line-clamp-6';
+                  }
               }
 
               // Get global standard size scale, default to 1
@@ -4097,7 +4106,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                           <div className="w-full h-full flex flex-col relative p-4 gap-1">
                               <div className="relative z-10 pointer-events-none flex flex-col h-full">
                                   <p 
-                                    className={`text-gray-800 leading-none flex-1 overflow-hidden break-words ${clampClass} ${note.isBold ? 'font-bold' : 'font-medium'}`} 
+                                    className={`text-gray-800 leading-none flex-1 overflow-hidden break-words whitespace-pre-wrap ${clampClass} ${note.isBold ? 'font-bold' : 'font-medium'}`} 
                             style={{ 
                                         fontSize: note.fontSize === 1 ? '1.2rem' : note.fontSize === 2 ? '1.6rem' : note.fontSize === 3 ? '2.2rem' : note.fontSize === 4 ? '2.4rem' : '3.0rem'
                                     }}
@@ -4186,7 +4195,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                               <div className="relative z-10 pointer-events-none flex flex-col h-full">
                                   {!isCompact && <div className={`${isCompact ? 'text-2xl mb-1' : 'text-3xl mb-2'} drop-shadow-sm`}>{note.emoji}</div>}
                                   <p 
-                                    className={`text-gray-800 leading-none flex-1 overflow-hidden break-words ${clampClass} ${note.isBold ? 'font-bold' : 'font-medium'}`} 
+                                    className={`text-gray-800 leading-none flex-1 overflow-hidden break-words whitespace-pre-wrap ${clampClass} ${note.isBold ? 'font-bold' : 'font-medium'}`} 
                                     style={{ 
                                         // Sticky Note: 缩小到40% (1.2rem to 2.8rem)
                                         fontSize: note.fontSize === 1 ? '1.2rem' : note.fontSize === 2 ? '1.6rem' : note.fontSize === 3 ? '2.2rem' : note.fontSize === 4 ? '2.4rem' : '3.0rem'

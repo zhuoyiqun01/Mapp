@@ -18,6 +18,7 @@ export interface Note {
   text: string;
   fontSize: number; // 1 to 5 scale
   isBold?: boolean;
+  isFavorite?: boolean; // 收藏标记
   color?: string; // Background color
   images: string[]; // Image IDs (format: "img-xxx") or Base64 strings (legacy)
   sketch?: string; // Sketch ID (format: "img-xxx") or Base64 string (legacy)
@@ -28,7 +29,7 @@ export interface Note {
   boardY: number;
   
   // Type of note
-  variant?: 'standard' | 'compact' | 'image';
+  variant: 'standard' | 'compact' | 'image';
   imageWidth?: number;
   imageHeight?: number;
   
