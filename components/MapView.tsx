@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { MapContainer, TileLayer, Marker, ImageOverlay, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { Note, Coordinates, Project } from '../types';
-import { MAP_TILE_URL, MAP_TILE_URL_FALLBACK, MAP_SATELLITE_URL, MAP_ATTRIBUTION, THEME_COLOR, THEME_COLOR_DARK } from '../constants';
+import { MAP_TILE_URL, MAP_TILE_URL_FALLBACK, MAP_SATELLITE_URL, MAP_ATTRIBUTION, THEME_COLOR, THEME_COLOR_DARK, MAP_STYLE_OPTIONS } from '../constants';
 import { Search, Locate, Loader2, X, Check, Satellite, Plus, Image as ImageIcon, FileJson } from 'lucide-react';
 import exifr from 'exifr';
 import { NoteEditor } from './NoteEditor';
@@ -30,6 +30,7 @@ interface MapViewProps {
   onNavigateComplete?: () => void;
   onSwitchToBoardView?: (coords?: { x: number; y: number }) => void;
   themeColor?: string;
+  mapStyleId?: string;
 }
 
 const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinates) => void }) => {
@@ -426,56 +427,77 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
             console.warn('Failed to check permission state:', e);
         }
         
-        // Use Leaflet's locate directly - it handles permission requests internally
-        // and is more reliable than calling navigator.geolocation separately
-        try {
-            const locationControl = map.locate({
-                setView: false,
-                watch: false,
-                enableHighAccuracy: true,
-                timeout: 15000,
-                maximumAge: 0
+        // Try locating with a fallback strategy for OPPO and other Android devices
+        // Strategy: Try high accuracy first, then fallback to lower accuracy if it fails
+        const tryLocate = (highAccuracy: boolean, timeoutMs: number, maxAge: number): Promise<void> => {
+            return new Promise((resolve, reject) => {
+                try {
+                    const locationControl = map.locate({
+                        setView: false,
+                        watch: false,
+                        enableHighAccuracy: highAccuracy,
+                        timeout: timeoutMs,
+                        maximumAge: maxAge
+                    });
+                    
+                    const currentPermissionState = permissionState;
+                    let resolved = false;
+                    
+                    const handleLocationFound = (e: L.LocationEvent) => {
+                        if (resolved) return;
+                        resolved = true;
+                        console.log('Location found:', e.latlng, `(highAccuracy: ${highAccuracy})`);
+                        map.flyTo(e.latlng, 16);
+                        // Clean up listeners
+                        locationControl.off("locationfound", handleLocationFound);
+                        locationControl.off("locationerror", handleLocationError);
+                        resolve();
+                    };
+                    
+                    const handleLocationError = (e: L.ErrorEvent) => {
+                        if (resolved) return;
+                        console.warn("Location error:", e, `(highAccuracy: ${highAccuracy})`);
+                        console.warn("Error code:", e.code);
+                        console.warn("Error message:", e.message);
+                        
+                        // Clean up listeners
+                        locationControl.off("locationfound", handleLocationFound);
+                        locationControl.off("locationerror", handleLocationError);
+                        reject(e);
+                    };
+                    
+                    locationControl.on("locationfound", handleLocationFound);
+                    locationControl.on("locationerror", handleLocationError);
+                } catch (error: any) {
+                    reject(error);
+                }
             });
+        };
+        
+        // Try high accuracy first (for better precision)
+        try {
+            await tryLocate(true, 15000, 60000); // 15s timeout, allow 60s cached location
+        } catch (firstError: any) {
+            console.warn("High accuracy location failed, trying lower accuracy:", firstError);
             
-            // Store permission state in closure for error handler
-            const currentPermissionState = permissionState;
-            
-            const handleLocationFound = (e: L.LocationEvent) => {
-                console.log('Location found:', e.latlng);
-            map.flyTo(e.latlng, 16);
-                // Clean up listeners
-                locationControl.off("locationfound", handleLocationFound);
-                locationControl.off("locationerror", handleLocationError);
-            };
-            
-            const handleLocationError = (e: L.ErrorEvent) => {
-                console.warn("Location error:", e);
-                console.warn("Error code:", e.code);
-                console.warn("Error message:", e.message);
+            // Fallback to lower accuracy (better compatibility with OPPO and other Android devices)
+            try {
+                await tryLocate(false, 15000, 300000); // 15s timeout, allow 5min cached location
+            } catch (secondError: any) {
+                console.warn("Lower accuracy location also failed:", secondError);
                 
-                // Check permission state again in case it changed
+                // Both attempts failed, show error message
+                const finalError = secondError || firstError;
                 checkLocationPermission().then(state => {
-                    const errorMsg = getLocationErrorMessage(e, state || currentPermissionState);
+                    const errorMsg = getLocationErrorMessage(finalError, state || permissionState);
                     setLocationErrorMessage(errorMsg);
                     setShowLocationError(true);
                 }).catch(() => {
-                    const errorMsg = getLocationErrorMessage(e, currentPermissionState);
+                    const errorMsg = getLocationErrorMessage(finalError, permissionState);
                     setLocationErrorMessage(errorMsg);
                     setShowLocationError(true);
                 });
-                
-                // Clean up listeners
-                locationControl.off("locationfound", handleLocationFound);
-                locationControl.off("locationerror", handleLocationError);
-            };
-            
-            locationControl.on("locationfound", handleLocationFound);
-            locationControl.on("locationerror", handleLocationError);
-        } catch (error: any) {
-            console.warn("Failed to start location request:", error);
-            const errorMsg = getLocationErrorMessage(error, permissionState);
-            setLocationErrorMessage(errorMsg);
-            setShowLocationError(true);
+            }
         }
     };
     
@@ -680,7 +702,7 @@ const MapCenterHandler = ({ center, zoom }: { center: [number, number], zoom: nu
     return null;
 };
 
-export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, onNavigateComplete, onSwitchToBoardView, themeColor = THEME_COLOR }) => {
+export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, onNavigateComplete, onSwitchToBoardView, themeColor = THEME_COLOR, mapStyleId = 'carto-light-nolabels' }) => {
   if (!project) {
     return null;
   }
@@ -854,8 +876,12 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   // Drag and drop state
   const [isDragging, setIsDragging] = useState(false);
   
-  // Map style state
-  const [mapStyle, setMapStyle] = useState<'standard' | 'satellite'>('standard');
+  // Map style state - satellite toggle is independent from mapStyleId
+  // mapStyleId is for base map style (from settings), localMapStyle is for satellite toggle
+  const [localMapStyle, setLocalMapStyle] = useState<'standard' | 'satellite'>('standard');
+  // If satellite is active, use satellite; otherwise use mapStyleId or default
+  const effectiveMapStyle = localMapStyle === 'satellite' ? 'satellite' : (mapStyleId || 'carto-light-nolabels');
+  const mapStyle = localMapStyle; // For the toggle button
   
   // Current marker index being viewed
 
@@ -2203,15 +2229,26 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       >
         <MapNavigationHandler coords={navigateToCoords} onComplete={onNavigateComplete} />
         {isMapMode ? (
-           <TileLayer 
-             key={mapStyle}
-             attribution={MAP_ATTRIBUTION} 
-             url={mapStyle === 'satellite' ? MAP_SATELLITE_URL : MAP_TILE_URL}
-             maxNativeZoom={19}
-             maxZoom={19}
-             tileSize={256}
-             zoomOffset={0}
-           />
+           (() => {
+             const isSatellite = effectiveMapStyle === 'satellite';
+             const selectedStyle = isSatellite 
+               ? null 
+               : (MAP_STYLE_OPTIONS.find(s => s.id === effectiveMapStyle) || MAP_STYLE_OPTIONS[0]);
+             return (
+               <TileLayer 
+                 key={effectiveMapStyle}
+                 attribution={isSatellite 
+                   ? 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+                   : selectedStyle!.attribution
+                 } 
+                 url={isSatellite ? MAP_SATELLITE_URL : selectedStyle!.url}
+                 maxNativeZoom={19}
+                 maxZoom={19}
+                 tileSize={256}
+                 zoomOffset={0}
+               />
+             );
+           })()
         ) : (
            <>
               {project.backgroundImage && imageDimensions && (
@@ -2342,7 +2379,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 onImportPhotos={() => fileInputRef.current?.click()} 
                 onImportData={() => dataImportInputRef.current?.click()}
                 mapStyle={mapStyle}
-                onMapStyleChange={setMapStyle}
+                onMapStyleChange={(style) => setLocalMapStyle(style)}
                 mapNotes={mapNotes}
                 themeColor={themeColor}
               />

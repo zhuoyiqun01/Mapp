@@ -17,6 +17,46 @@ export const MAP_TILE_URL_FALLBACK = "https://{s}.tile.openstreetmap.org/{z}/{x}
 export const MAP_SATELLITE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 export const MAP_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
 
+// Map Style Options
+export interface MapStyleOption {
+  id: string;
+  name: string;
+  url: string;
+  attribution: string;
+  preview?: string; // Preview color or description
+}
+
+export const MAP_STYLE_OPTIONS: MapStyleOption[] = [
+  {
+    id: 'carto-light-nolabels',
+    name: 'Carto Light (No Labels)',
+    url: 'https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    preview: 'https://a.basemaps.cartocdn.com/light_nolabels/10/512/512.png'
+  },
+  {
+    id: 'carto-light',
+    name: 'Carto Light (With Labels)',
+    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    preview: 'https://a.basemaps.cartocdn.com/light_all/10/512/512.png'
+  },
+  {
+    id: 'carto-dark',
+    name: 'Carto Dark Matter',
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    preview: 'https://a.basemaps.cartocdn.com/dark_all/10/512/512.png'
+  },
+  {
+    id: 'osm-standard',
+    name: 'OpenStreetMap Standard',
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    preview: 'https://tile.openstreetmap.org/10/512/512.png'
+  }
+];
+
 // Theme Colors
 export const THEME_COLOR = '#FFDD00';
 export const THEME_COLOR_DARK = '#E6C700'; // Hover/dark variant

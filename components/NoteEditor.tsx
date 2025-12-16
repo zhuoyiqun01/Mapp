@@ -70,6 +70,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
 
   // Image preview state
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [previewImageIndex, setPreviewImageIndex] = useState<number>(0);
 
   // Keyboard height detection
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -238,20 +239,51 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
+    if (e.target.files && e.target.files.length > 0) {
       try {
-        const base64 = await fileToBase64(e.target.files[0]);
-        setImages([...images, base64]);
+        const files = Array.from(e.target.files);
+        const base64Promises = files.map(file => fileToBase64(file));
+        const base64Images = await Promise.all(base64Promises);
+        setImages([...images, ...base64Images]);
+        // Reset input to allow selecting the same files again
+        e.target.value = '';
       } catch (err) {
         console.error("Failed to convert image", err);
       }
     }
   };
 
-  const removeImage = (e: React.MouseEvent) => {
+  const removeImage = (e: React.MouseEvent, index?: number) => {
     e.stopPropagation();
     e.preventDefault();
-    setImages([]); 
+    if (index !== undefined) {
+      // Remove specific image
+      const newImages = images.filter((_, i) => i !== index);
+      setImages(newImages);
+      // Update preview if needed
+      if (previewImage) {
+        if (previewImageIndex === index) {
+          // If previewing the removed image, switch to another or close
+          if (newImages.length > 0) {
+            const newIndex = Math.min(index, newImages.length - 1);
+            setPreviewImageIndex(newIndex);
+            setPreviewImage(newImages[newIndex]);
+          } else {
+            setPreviewImage(null);
+          }
+        } else if (previewImageIndex > index) {
+          // If previewing an image after the removed one, adjust index
+          const newIndex = previewImageIndex - 1;
+          setPreviewImageIndex(newIndex);
+          setPreviewImage(newImages[newIndex]);
+        }
+        // If previewing an image before the removed one, no change needed
+      }
+    } else {
+      // Remove all images (backward compatibility)
+      setImages([]);
+      setPreviewImage(null);
+    }
   };
 
   const removeSketch = (e: React.MouseEvent) => {
@@ -504,8 +536,8 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                 
                 {/* Media Row */}
                 {!isCompactMode && (
-                  <div className="px-3 pt-1 flex gap-3">
-                      <div className="relative group">
+                  <div className="px-3 pt-1 flex gap-3 overflow-x-auto scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' }}>
+                      <div className="relative group flex-shrink-0">
                         <div 
                           ref={emojiButtonRef}
                           onClick={() => {
@@ -625,25 +657,44 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                           document.body
                         )}
                       </div>
-                      <label className="w-20 h-20 bg-white/60 hover:bg-white shadow-sm rounded-2xl flex items-center justify-center cursor-pointer transition-colors relative overflow-hidden group" style={{ border: 'none' }}>
-                          {images.length > 0 ? (
-                              <img 
-                                  src={images[images.length - 1]} 
-                                  className="w-full h-full object-cover cursor-pointer" 
-                                  onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      setShowEmojiPicker(false);
-                                      setPreviewImage(images[images.length - 1]);
-                                  }}
-                              />
-                          ) : <Camera size={24} className="text-gray-500"/>}
-                          <input type="file" accept="image/*" className="hidden" onChange={(e) => { setShowEmojiPicker(false); handleImageUpload(e); }} />
-                          {images.length > 0 && <button onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(false); removeImage(e); }} className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"><X size={12}/></button>}
+                      {/* Images - scrollable list */}
+                      {images.map((image, index) => (
+                        <div key={index} className="relative group flex-shrink-0">
+                          <div 
+                            className="w-20 h-20 bg-white/60 shadow-sm rounded-2xl overflow-hidden cursor-pointer"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setShowEmojiPicker(false);
+                              setPreviewImageIndex(index);
+                              setPreviewImage(image);
+                            }}
+                          >
+                            <img 
+                              src={image} 
+                              className="w-full h-full object-cover" 
+                            />
+                          </div>
+                          <button 
+                            onClick={(e) => { 
+                              e.stopPropagation(); 
+                              setShowEmojiPicker(false); 
+                              removeImage(e, index); 
+                            }} 
+                            className="absolute -top-1 -right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                          >
+                            <X size={12}/>
+                          </button>
+                        </div>
+                      ))}
+                      {/* Upload button - always visible */}
+                      <label className="w-20 h-20 bg-white/60 hover:bg-white shadow-sm rounded-2xl flex items-center justify-center cursor-pointer transition-colors relative flex-shrink-0" style={{ border: 'none' }}>
+                          <Camera size={24} className="text-gray-500"/>
+                          <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { setShowEmojiPicker(false); handleImageUpload(e); }} />
                       </label>
                       <button 
                         onClick={() => { setShowEmojiPicker(false); setIsSketching(true); }}
-                        className="w-20 h-20 bg-white/60 hover:bg-white shadow-sm rounded-2xl flex items-center justify-center transition-colors relative overflow-hidden group"
+                        className="w-20 h-20 bg-white/60 hover:bg-white shadow-sm rounded-2xl flex items-center justify-center transition-colors relative overflow-hidden group flex-shrink-0"
                         style={{ border: 'none' }}
                       >
                           {sketch && sketch !== '' ? (
@@ -806,24 +857,69 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         </div>
 
       {/* Image Preview Modal */}
-      {previewImage && (
+      {previewImage && images.length > 0 && (
         <div 
           className="fixed inset-0 z-[1000] bg-black/80 flex items-center justify-center p-4"
           onClick={() => setPreviewImage(null)}
         >
-          <div className="relative max-w-full max-h-full">
-            <button
-              onClick={() => setPreviewImage(null)}
-              className="absolute -top-12 right-0 text-white hover:text-gray-300 transition-colors"
-            >
-              <X size={32} />
-            </button>
-            <img 
-              src={previewImage} 
-              alt="Preview" 
-              className="max-w-full max-h-[90vh] object-contain"
-              onClick={(e) => e.stopPropagation()}
-            />
+          <div className="relative max-w-full max-h-full flex items-center gap-4">
+            {/* Previous Button */}
+            {images.length > 1 && previewImageIndex > 0 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const newIndex = previewImageIndex - 1;
+                  setPreviewImageIndex(newIndex);
+                  setPreviewImage(images[newIndex]);
+                }}
+                className="text-white hover:text-gray-300 transition-colors p-2"
+                style={{ zIndex: 1001 }}
+              >
+                <ArrowLeft size={32} />
+              </button>
+            )}
+            {images.length > 1 && previewImageIndex === 0 && (
+              <div className="w-[40px]" /> // Spacer for alignment
+            )}
+            
+            <div className="relative max-w-full max-h-full flex flex-col items-center">
+              <button
+                onClick={() => setPreviewImage(null)}
+                className="absolute -top-12 right-0 text-white hover:text-gray-300 transition-colors z-10"
+              >
+                <X size={32} />
+              </button>
+              <img 
+                src={previewImage} 
+                alt="Preview" 
+                className="max-w-full max-h-[90vh] object-contain"
+                onClick={(e) => e.stopPropagation()}
+              />
+              {images.length > 1 && (
+                <div className="mt-4 text-white text-sm">
+                  {previewImageIndex + 1} / {images.length}
+                </div>
+              )}
+            </div>
+            
+            {/* Next Button */}
+            {images.length > 1 && previewImageIndex < images.length - 1 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const newIndex = previewImageIndex + 1;
+                  setPreviewImageIndex(newIndex);
+                  setPreviewImage(images[newIndex]);
+                }}
+                className="text-white hover:text-gray-300 transition-colors p-2"
+                style={{ zIndex: 1001 }}
+              >
+                <ArrowRight size={32} />
+              </button>
+            )}
+            {images.length > 1 && previewImageIndex === images.length - 1 && (
+              <div className="w-[40px]" /> // Spacer for alignment
+            )}
           </div>
         </div>
       )}

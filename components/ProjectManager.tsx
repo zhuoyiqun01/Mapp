@@ -1,12 +1,13 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Project } from '../types';
-import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check, Upload, Palette } from 'lucide-react';
+import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check, Upload, Palette, Settings } from 'lucide-react';
 import { generateId, fileToBase64, formatDate, exportToJpeg, exportToJpegCentered, compressImageFromBase64 } from '../utils';
 import { loadProject, loadNoteImages, loadBackgroundImage, saveProject, loadAllProjects } from '../utils/storage';
 import { getLastSyncTime, type SyncStatus } from '../utils/sync';
 import { THEME_COLOR, THEME_COLOR_DARK } from '../constants';
 import { ThemeColorPicker } from './ThemeColorPicker';
+import { SettingsPanel } from './SettingsPanel';
 
 // Menu dropdown component that adjusts position to avoid going off-screen
 const MenuDropdown: React.FC<{
@@ -103,6 +104,8 @@ interface ProjectManagerProps {
   syncStatus?: SyncStatus;
   themeColor?: string;
   onThemeColorChange?: (color: string) => void;
+  currentMapStyle?: string;
+  onMapStyleChange?: (styleId: string) => void;
 }
 
 export const ProjectManager: React.FC<ProjectManagerProps> = ({ 
@@ -120,7 +123,9 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   activeProject,
   onExportCSV,
   themeColor = THEME_COLOR,
-  onThemeColorChange
+  onThemeColorChange,
+  currentMapStyle = 'carto-light-nolabels',
+  onMapStyleChange
 }) => {
   // Helper function to calculate darker version of theme color
   const getDarkerColor = (color: string): string => {
@@ -151,6 +156,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   const importFileInputRef = React.useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [showThemeColorPicker, setShowThemeColorPicker] = useState(false);
+  const [showSettingsPanel, setShowSettingsPanel] = useState(false);
 
   const handleCreate = () => {
     if (!newProjectName.trim()) return;
@@ -945,7 +951,17 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           >
             <Home size={24} />
           </button>
-          <div className="absolute top-4 right-4 z-[2000] flex items-center gap-0">
+          <div className="absolute top-4 right-4 z-[2000] flex items-center gap-2">
+            <button 
+              onClick={() => setShowSettingsPanel(true)}
+              className="w-10 h-10 p-2 rounded-xl text-white transition-colors flex items-center justify-center"
+              style={{ backgroundColor: themeColor }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = themeColorDark}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
+              title="设置"
+            >
+              <Settings size={20} />
+            </button>
             {activeProject && syncStatus === 'idle' && getLastSyncTime() && (
               <div
                 className="flex items-center justify-center w-10 h-10 rounded-xl text-white transition-colors cursor-help"
@@ -1158,7 +1174,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                         onClose={() => setOpenMenuId(null)}
                       />
                     ) : (
-                      <div className="fixed inset-x-4 bottom-6 z-[50] bg-white rounded-3xl shadow-2xl border border-gray-200 py-2 animate-in slide-in-from-bottom-4" onClick={(e) => e.stopPropagation()}>
+                      <div className="fixed inset-x-4 bottom-6 z-[2030] bg-white rounded-3xl shadow-2xl border border-gray-200 py-2 animate-in slide-in-from-bottom-4" onClick={(e) => e.stopPropagation()}>
                         <div className="px-4 pt-2 pb-1">
                           <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Project</div>
                           <div className="text-sm font-bold text-gray-800 truncate">{p.name}</div>
@@ -1356,6 +1372,18 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           onClose={() => setShowThemeColorPicker(false)}
           currentColor={themeColor}
           onColorChange={onThemeColorChange}
+        />
+      )}
+
+      {/* Settings Panel */}
+      {onThemeColorChange && onMapStyleChange && (
+        <SettingsPanel
+          isOpen={showSettingsPanel}
+          onClose={() => setShowSettingsPanel(false)}
+          themeColor={themeColor}
+          onThemeColorChange={onThemeColorChange}
+          currentMapStyle={currentMapStyle}
+          onMapStyleChange={onMapStyleChange}
         />
       )}
     </div>

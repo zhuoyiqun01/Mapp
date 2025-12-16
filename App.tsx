@@ -8,7 +8,7 @@ import { TableView } from './components/TableView';
 import { ProjectManager } from './components/ProjectManager';
 import { Note, ViewMode, Project } from './types';
 import { get, set } from 'idb-keyval';
-import { THEME_COLOR, THEME_COLOR_DARK } from './constants';
+import { THEME_COLOR, THEME_COLOR_DARK, MAP_STYLE_OPTIONS } from './constants';
 import { 
   syncProjectsToCloud, 
   loadProjectsFromCloud, 
@@ -53,6 +53,9 @@ export default function App() {
 
   // Theme Color State
   const [themeColor, setThemeColor] = useState<string>(THEME_COLOR);
+  
+  // Map Style State
+  const [mapStyle, setMapStyle] = useState<string>('carto-light-nolabels');
 
   // Load Theme Color from IndexedDB
   useEffect(() => {
@@ -84,6 +87,21 @@ export default function App() {
       }
     };
     loadThemeColor();
+  }, []);
+
+  // Load Map Style from IndexedDB
+  useEffect(() => {
+    const loadMapStyle = async () => {
+      try {
+        const savedStyle = await get<string>('mapp-map-style');
+        if (savedStyle) {
+          setMapStyle(savedStyle);
+        }
+      } catch (err) {
+        console.error("Failed to load map style", err);
+      }
+    };
+    loadMapStyle();
   }, []);
 
   // Load Projects from IndexedDB and Cloud
@@ -461,7 +479,10 @@ export default function App() {
     setViewMode('map');
     // 确保创建项目后侧边栏保持关闭
     setIsSidebarOpen(false);
-    // 立即加载项目以确保能正确显示
+    // 立即设置 activeProject 以确保界面立即切换到项目视图
+    // 使用传入的 project 对象，因为它已经包含了所有必要的信息
+    setActiveProject(project);
+    // 异步加载完整项目（包含图片）以更新 activeProject
     try {
       const fullProject = await loadProject(project.id, true);
       if (fullProject) {
@@ -469,6 +490,7 @@ export default function App() {
       }
     } catch (error) {
       console.error('Failed to load project after creation:', error);
+      // 即使加载失败，也保持使用传入的 project，确保界面能正常显示
     }
   };
 
@@ -571,6 +593,11 @@ export default function App() {
                   syncStatus={syncStatus}
                   themeColor={themeColor}
                   onThemeColorChange={handleThemeColorChange}
+                  currentMapStyle={mapStyle}
+                  onMapStyleChange={(styleId) => {
+                    setMapStyle(styleId);
+                    set('mapp-map-style', styleId);
+                  }}
               />
              </motion.div>
         </div>
@@ -689,6 +716,7 @@ export default function App() {
               });
             }}
             themeColor={themeColor}
+            mapStyleId={mapStyle}
           />
         ) : viewMode === 'board' ? (
           <BoardView 
