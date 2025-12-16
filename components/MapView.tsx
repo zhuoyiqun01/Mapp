@@ -1140,6 +1140,63 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
     for (const file of fileArray) {
       try {
+        // IMPORTANT: Read EXIF data from original file FIRST (before any processing)
+        // This is crucial for OPPO and other Android devices where gallery picker
+        // may return processed files without EXIF, or HEIC conversion may lose EXIF
+        let exifDataFromOriginal = null;
+        let lat = null;
+        let lng = null;
+        
+        // Try to read EXIF from original file first (before HEIC conversion)
+        try {
+          exifDataFromOriginal = await exifr.parse(file, {
+            gps: true,
+            translateKeys: false,
+            translateValues: false,
+            reviveValues: true,
+            pick: ['GPSLatitude', 'GPSLongitude', 'GPSLatitudeRef', 'GPSLongitudeRef', 'latitude', 'longitude', 'GPS']
+          });
+          
+          // If GPS not found, try full EXIF read
+          if (!exifDataFromOriginal || (!exifDataFromOriginal.latitude && !exifDataFromOriginal.GPSLatitude && !exifDataFromOriginal.GPS)) {
+            exifDataFromOriginal = await exifr.parse(file, {
+              translateKeys: false,
+              translateValues: false,
+              reviveValues: true,
+              pick: true as any
+            });
+          }
+          
+          // Extract GPS from original file if found
+          if (exifDataFromOriginal) {
+            if (exifDataFromOriginal.latitude !== undefined && exifDataFromOriginal.longitude !== undefined) {
+              lat = Number(exifDataFromOriginal.latitude);
+              lng = Number(exifDataFromOriginal.longitude);
+            } else if (exifDataFromOriginal.GPSLatitude !== undefined && exifDataFromOriginal.GPSLongitude !== undefined) {
+              lat = Number(exifDataFromOriginal.GPSLatitude);
+              lng = Number(exifDataFromOriginal.GPSLongitude);
+              if (exifDataFromOriginal.GPSLatitudeRef === 'S') lat = -lat;
+              if (exifDataFromOriginal.GPSLongitudeRef === 'W') lng = -lng;
+            } else if (exifDataFromOriginal.GPS) {
+              if (exifDataFromOriginal.GPS.latitude !== undefined && exifDataFromOriginal.GPS.longitude !== undefined) {
+                lat = Number(exifDataFromOriginal.GPS.latitude);
+                lng = Number(exifDataFromOriginal.GPS.longitude);
+              } else if (exifDataFromOriginal.GPS.GPSLatitude !== undefined && exifDataFromOriginal.GPS.GPSLongitude !== undefined) {
+                lat = Number(exifDataFromOriginal.GPS.GPSLatitude);
+                lng = Number(exifDataFromOriginal.GPS.GPSLongitude);
+                if (exifDataFromOriginal.GPS.GPSLatitudeRef === 'S') lat = -lat;
+                if (exifDataFromOriginal.GPS.GPSLongitudeRef === 'W') lng = -lng;
+              }
+            }
+            
+            if (lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
+              console.log('GPS found in original file:', file.name, { lat, lng });
+            }
+          }
+        } catch (originalExifError) {
+          console.warn('Failed to read EXIF from original file:', originalExifError);
+        }
+        
         // Convert HEIC to JPEG if needed before processing
         let processedFile = file;
         const isHeic = file.type === 'image/heic' || 
@@ -1254,54 +1311,59 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           }
         }
         
-        // Read EXIF data with comprehensive options for better compatibility
-        // Support multiple phone manufacturers (Xiaomi, OPPO, etc.)
-        // For Android gallery picker, we need to read all EXIF segments
-        let exifData = await exifr.parse(processedFile, {
-          gps: true,
-          translateKeys: false,
-          translateValues: false,
-          reviveValues: true,
-          pick: ['GPSLatitude', 'GPSLongitude', 'GPSLatitudeRef', 'GPSLongitudeRef', 'latitude', 'longitude', 'GPS']
-        });
+        // If GPS was already extracted from original file, use it
+        // Otherwise, try reading from processed file (for cases where original file didn't have EXIF)
+        let exifData = null;
         
-        // If GPS data not found, try reading all EXIF data without filters
-        if (!exifData || (!exifData.latitude && !exifData.GPSLatitude && !exifData.GPS)) {
-          console.log('GPS not found in primary parse, trying full EXIF read for:', processedFile.name);
-          // Try reading with all segments enabled (important for Android gallery)
+        if (lat === null || lng === null) {
+          // GPS not found in original file, try reading from processed file
+          console.log('GPS not found in original file, trying processed file:', processedFile.name);
+          
+          // Read EXIF data with comprehensive options for better compatibility
+          // Support multiple phone manufacturers (Xiaomi, OPPO, etc.)
+          // For Android gallery picker, we need to read all EXIF segments
           exifData = await exifr.parse(processedFile, {
+            gps: true,
             translateKeys: false,
             translateValues: false,
             reviveValues: true,
-            pick: true as any  // Read all EXIF segments
+            pick: ['GPSLatitude', 'GPSLongitude', 'GPSLatitudeRef', 'GPSLongitudeRef', 'latitude', 'longitude', 'GPS']
           });
           
-          console.log('Full EXIF data for', processedFile.name, ':', exifData);
-        }
-        
-        // If still no GPS data, try reading as ArrayBuffer (better for Android)
-        if (!exifData || (!exifData.latitude && !exifData.GPSLatitude && !exifData.GPS)) {
-          console.log('GPS still not found, trying ArrayBuffer read for:', processedFile.name);
-          try {
-            const arrayBuffer = await processedFile.arrayBuffer();
-            exifData = await exifr.parse(arrayBuffer, {
+          // If GPS data not found, try reading all EXIF data without filters
+          if (!exifData || (!exifData.latitude && !exifData.GPSLatitude && !exifData.GPS)) {
+            console.log('GPS not found in primary parse, trying full EXIF read for:', processedFile.name);
+            // Try reading with all segments enabled (important for Android gallery)
+            exifData = await exifr.parse(processedFile, {
               translateKeys: false,
               translateValues: false,
               reviveValues: true,
-              pick: true as any
+              pick: true as any  // Read all EXIF segments
             });
-            console.log('ArrayBuffer EXIF data for', processedFile.name, ':', exifData);
-          } catch (arrayBufferError) {
-            console.warn('ArrayBuffer read failed:', arrayBufferError);
+            
+            console.log('Full EXIF data for', processedFile.name, ':', exifData);
           }
-        }
-        
-        // Try multiple ways to extract GPS coordinates
-        // Different manufacturers may store GPS data in different formats
-        let lat = null;
-        let lng = null;
-        
-        if (exifData) {
+          
+          // If still no GPS data, try reading as ArrayBuffer (better for Android)
+          if (!exifData || (!exifData.latitude && !exifData.GPSLatitude && !exifData.GPS)) {
+            console.log('GPS still not found, trying ArrayBuffer read for:', processedFile.name);
+            try {
+              const arrayBuffer = await processedFile.arrayBuffer();
+              exifData = await exifr.parse(arrayBuffer, {
+                translateKeys: false,
+                translateValues: false,
+                reviveValues: true,
+                pick: true as any
+              });
+              console.log('ArrayBuffer EXIF data for', processedFile.name, ':', exifData);
+            } catch (arrayBufferError) {
+              console.warn('ArrayBuffer read failed:', arrayBufferError);
+            }
+          }
+          
+          // Try multiple ways to extract GPS coordinates from processed file
+          // Different manufacturers may store GPS data in different formats
+          if (exifData) {
           // Method 1: Direct latitude/longitude (standard format, most common)
           if (exifData.latitude !== undefined && exifData.longitude !== undefined) {
             lat = Number(exifData.latitude);
