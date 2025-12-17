@@ -5183,7 +5183,6 @@ const createNoteAtCenter = (variant: 'compact') => {
                       // Update editingNote state to reflect the saved changes
                       // This ensures that if the editor is reopened, it will use the updated data
                       setEditingNote(fullNote);
-                      console.log('BoardView: Saved note with images:', fullNote.images);
                   } else if (onAddNote && updated.id) {
                       // 新Note必须指定variant，如果没有则默认为standard
                       const fullNote: Note = {

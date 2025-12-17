@@ -167,14 +167,11 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const hasUnsavedChangesRef = useRef(false);
 
   useEffect(() => {
-    console.log('NoteEditor: useEffect triggered, isOpen:', isOpen, 'prevIsOpen:', prevIsOpenRef.current, 'hasUnsavedChanges:', hasUnsavedChangesRef.current, 'current images:', images);
     // Only reset state when editor is opened (isOpen changes from false to true)
     // This prevents clearing user input when initialNote updates (e.g., when images are added)
     if (isOpen && !prevIsOpenRef.current) {
-      console.log('NoteEditor: Editor opening, hasUnsavedChanges:', hasUnsavedChangesRef.current);
       // If we have unsaved changes, don't reset the state - preserve user edits
       if (!hasUnsavedChangesRef.current) {
-        console.log('NoteEditor: No unsaved changes, resetting images to initialNote');
         setEmoji(initialNote?.emoji || '');
         setText(initialNote?.text || '');
         setFontSize(initialNote?.fontSize || 3);
@@ -184,8 +181,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         setTags(initialNote?.tags || []);
         setImages(initialNote?.images || []);
         setSketch(initialNote?.sketch);
-      } else {
-        console.log('NoteEditor: Has unsaved changes, preserving current state');
       }
       // Don't reset hasUnsavedChangesRef.current here - preserve it for the session
       setIsAddingTag(false);
@@ -291,14 +286,10 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       try {
-        console.log('NoteEditor: Starting image upload, files:', e.target.files.length);
         const files = Array.from(e.target.files);
         const base64Promises = files.map(file => fileToBase64(file));
         const base64Images = await Promise.all(base64Promises);
-        console.log('NoteEditor: Converted images:', base64Images.length, base64Images.slice(0, 1)); // Only log first image preview
-        const newImages = [...images, ...base64Images];
-        console.log('NoteEditor: Setting images to:', newImages.length, 'images');
-        setImages(newImages);
+        setImages([...images, ...base64Images]);
         hasUnsavedChangesRef.current = true;
         // Reset input to allow selecting the same files again
         e.target.value = '';
@@ -348,7 +339,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   };
 
   const getCurrentNoteData = (): Partial<Note> => {
-    console.log('NoteEditor: getCurrentNoteData called, current images state:', images);
     // Don't spread initialNote first - build from scratch to ensure we use current state
     const noteData: Partial<Note> = {
       // Only copy id and other immutable fields from initialNote
@@ -373,7 +363,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       images: images || [],
       sketch: sketch === '' ? undefined : sketch
     };
-    console.log('NoteEditor: getCurrentNoteData returning noteData.images:', noteData.images);
     return noteData;
   };
 
@@ -410,9 +399,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     }
 
     // Otherwise, save the note
-    console.log('NoteEditor: Saving noteData with images:', noteData.images);
     onSave(noteData);
-    console.log('NoteEditor: Resetting hasUnsavedChanges after save');
     hasUnsavedChangesRef.current = false; // Reset after successful save
 
     // Delay closing to ensure state updates are processed
@@ -429,7 +416,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         noteData.images = images || [];
       }
       onSaveWithoutClose(noteData);
-      console.log('NoteEditor: Resetting hasUnsavedChanges after save without close');
       hasUnsavedChangesRef.current = false; // Reset after successful save
     }
   };
