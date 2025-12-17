@@ -341,7 +341,8 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       sketch: sketch === '' ? undefined : sketch
     };
 
-    // Auto-set variant based on content
+    // Auto-set variant based on content - only for new notes or when variant is not already set
+    // Don't change variant for existing notes that already have one
     if (!noteData.variant) {
       if ((images && images.length > 0) || sketch) {
         noteData.variant = 'image';

@@ -2824,10 +2824,15 @@ const createNoteAtCenter = (variant: 'compact') => {
       // 如果正在缩放，不触发点击
       if (isZooming) return;
       
-      // 图片对象在非编辑模式下点击后放大预览
-      if (note.variant === 'image' && note.images && note.images[0] && !isEditMode) {
-        setPreviewImage(note.images[0]);
-        return;
+      // 图片对象在非编辑模式下点击后放大预览 - 优先显示照片而不是涂鸦
+      if (note.variant === 'image' && !isEditMode) {
+        if (note.images && note.images[0]) {
+          setPreviewImage(note.images[0]);
+          return;
+        } else if (note.sketch && note.sketch !== '') {
+          setPreviewImage(note.sketch);
+          return;
+        }
       }
       
       // 图片对象在编辑模式下，单击选中（延迟执行，等待可能的双击）
@@ -2936,14 +2941,20 @@ const createNoteAtCenter = (variant: 'compact') => {
       if (isZooming) return;
       
       // 图片对象双击打开预览
-      if (note.variant === 'image' && note.images && note.images[0]) {
+      if (note.variant === 'image') {
         // 清除单击的延迟执行
         if (clickTimerRef.current) {
           clearTimeout(clickTimerRef.current);
           clickTimerRef.current = null;
         }
-        setPreviewImage(note.images[0]);
-        return;
+        // 优先显示照片
+        if (note.images && note.images[0]) {
+          setPreviewImage(note.images[0]);
+          return;
+        } else if (note.sketch && note.sketch !== '') {
+          setPreviewImage(note.sketch);
+          return;
+        }
       }
       
       // 清除单击的延迟执行
@@ -4117,7 +4128,10 @@ const createNoteAtCenter = (variant: 'compact') => {
                             backgroundColor: 'transparent'
                         }}
                     >
-                        <div className="w-full h-full relative bg-white/60 flex items-center justify-center">
+                        <div
+                          className="w-full h-full relative flex items-center justify-center"
+                          style={{ backgroundColor: note.color || '#FFFDF5' }}
+                        >
                           {note.images && note.images[0] && (
                             <img
                               src={note.images[0]}
@@ -4125,7 +4139,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                               alt="board-image"
                             />
                           )}
-                      </div>
+                        </div>
                     </div>
                   </motion.div>
                 );
