@@ -164,31 +164,10 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const prevIsOpenRef = useRef(false);
   const prevNoteIdRef = useRef<string | undefined>(initialNote?.id);
   const noteId = initialNote?.id;
-  const hasUnsavedChangesRef = useRef(false);
 
   useEffect(() => {
-    // Only reset state when editor is opened (isOpen changes from false to true)
-    // This prevents clearing user input when initialNote updates (e.g., when images are added)
-    if (isOpen && !prevIsOpenRef.current) {
-      // If we have unsaved changes, don't reset the state - preserve user edits
-      if (!hasUnsavedChangesRef.current) {
-        setEmoji(initialNote?.emoji || '');
-        setText(initialNote?.text || '');
-        setFontSize(initialNote?.fontSize || 3);
-        setIsBold(initialNote?.isBold || false);
-        setIsFavorite(initialNote?.isFavorite ?? false);
-        setColor(initialNote?.color || DEFAULT_BG);
-        setTags(initialNote?.tags || []);
-        setImages(initialNote?.images || []);
-        setSketch(initialNote?.sketch);
-      }
-      // Don't reset hasUnsavedChangesRef.current here - preserve it for the session
-      setIsAddingTag(false);
-      setIsSketching(false);
-      prevNoteIdRef.current = noteId;
-    }
     // When note ID changes (switching between notes in cluster), reset all state
-    else if (isOpen && noteId !== prevNoteIdRef.current) {
+    if (isOpen && noteId !== prevNoteIdRef.current) {
       setEmoji(initialNote?.emoji || '');
       setText(initialNote?.text || '');
       setFontSize(initialNote?.fontSize || 3);
@@ -200,7 +179,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       setSketch(initialNote?.sketch);
       setIsAddingTag(false);
       setIsSketching(false);
-      hasUnsavedChangesRef.current = false; // Reset for new note
       prevNoteIdRef.current = noteId;
     }
     prevIsOpenRef.current = isOpen;
@@ -290,7 +268,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         const base64Promises = files.map(file => fileToBase64(file));
         const base64Images = await Promise.all(base64Promises);
         setImages([...images, ...base64Images]);
-        hasUnsavedChangesRef.current = true;
         // Reset input to allow selecting the same files again
         e.target.value = '';
       } catch (err) {
@@ -399,12 +376,13 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     }
 
     // Otherwise, save the note
+    console.log('NoteEditor: Saving noteData:', noteData);
     onSave(noteData);
-    hasUnsavedChangesRef.current = false; // Reset after successful save
 
     // Delay closing to ensure state updates are processed
     setTimeout(() => {
-    onClose();
+      console.log('NoteEditor: Closing editor after save');
+      onClose();
     }, 0);
   };
 
@@ -416,7 +394,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         noteData.images = images || [];
       }
       onSaveWithoutClose(noteData);
-      hasUnsavedChangesRef.current = false; // Reset after successful save
     }
   };
 
