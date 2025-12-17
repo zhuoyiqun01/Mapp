@@ -81,6 +81,12 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const emojiButtonRef = useRef<HTMLButtonElement | null>(null);
   const [emojiPickerPosition, setEmojiPickerPosition] = useState<{ left: number; top: number } | null>(null);
   
+  // Category tabs drag scrolling
+  const categoryTabsRef = useRef<HTMLDivElement | null>(null);
+  const [isDraggingCategoryTabs, setIsDraggingCategoryTabs] = useState(false);
+  const dragStartXRef = useRef(0);
+  const dragStartScrollLeftRef = useRef(0);
+  
   const minSwipeDistance = 50; // Minimum swipe distance
 
   const isCompactMode = initialNote?.variant === 'compact';
@@ -115,6 +121,52 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     touchStartRef.current = null;
     touchEndRef.current = null;
   };
+
+  // Category tabs mouse drag handlers
+  const hasDraggedRef = useRef(false);
+  
+  const handleCategoryTabsMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!categoryTabsRef.current) return;
+    setIsDraggingCategoryTabs(true);
+    hasDraggedRef.current = false;
+    dragStartXRef.current = e.clientX;
+    dragStartScrollLeftRef.current = categoryTabsRef.current.scrollLeft;
+    categoryTabsRef.current.style.userSelect = 'none';
+    e.preventDefault();
+  };
+
+  const handleCategoryTabsMouseMove = (e: MouseEvent) => {
+    if (!isDraggingCategoryTabs || !categoryTabsRef.current) return;
+    const deltaX = e.clientX - dragStartXRef.current;
+    if (Math.abs(deltaX) > 3) {
+      hasDraggedRef.current = true;
+    }
+    categoryTabsRef.current.scrollLeft = dragStartScrollLeftRef.current - deltaX;
+  };
+
+  const handleCategoryTabsMouseUp = () => {
+    if (!categoryTabsRef.current) return;
+    setIsDraggingCategoryTabs(false);
+    categoryTabsRef.current.style.userSelect = '';
+    // Reset after a short delay to allow onClick to check
+    setTimeout(() => {
+      hasDraggedRef.current = false;
+    }, 100);
+  };
+
+  // Add global mouse event listeners for category tabs dragging
+  useEffect(() => {
+    if (showEmojiPicker) {
+      const handleMove = (e: MouseEvent) => handleCategoryTabsMouseMove(e);
+      const handleUp = () => handleCategoryTabsMouseUp();
+      document.addEventListener('mousemove', handleMove);
+      document.addEventListener('mouseup', handleUp);
+      return () => {
+        document.removeEventListener('mousemove', handleMove);
+        document.removeEventListener('mouseup', handleUp);
+      };
+    }
+  }, [showEmojiPicker, isDraggingCategoryTabs]);
 
   // Track if editor was just opened to only reset state on open, not on every initialNote change
   const prevIsOpenRef = useRef(false);
@@ -630,17 +682,28 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                             >
                               {/* Category Tabs */}
                               <div 
+                                ref={categoryTabsRef}
                                 className="flex gap-1 p-1.5 border-b border-gray-100 overflow-x-auto scrollbar-hide"
                                 style={{
                                   scrollbarWidth: 'none',
                                   msOverflowStyle: 'none',
-                                  WebkitOverflowScrolling: 'touch'
+                                  WebkitOverflowScrolling: 'touch',
+                                  touchAction: 'pan-x',
+                                  cursor: isDraggingCategoryTabs ? 'grabbing' : 'grab'
                                 }}
+                                onMouseDown={handleCategoryTabsMouseDown}
                               >
                                 {Object.keys(EMOJI_CATEGORIES).map(category => (
                                   <button
                                     key={category}
-                                    onClick={() => setSelectedEmojiCategory(category as keyof typeof EMOJI_CATEGORIES)}
+                                    onClick={(e) => {
+                                      if (hasDraggedRef.current) {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        return;
+                                      }
+                                      setSelectedEmojiCategory(category as keyof typeof EMOJI_CATEGORIES);
+                                    }}
                                     className={`px-2 py-1 text-xs font-medium rounded-lg whitespace-nowrap transition-colors flex-shrink-0 ${
                                       selectedEmojiCategory === category
                                         ? 'text-gray-900'
