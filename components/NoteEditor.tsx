@@ -167,11 +167,14 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const hasUnsavedChangesRef = useRef(false);
 
   useEffect(() => {
+    console.log('NoteEditor: useEffect triggered, isOpen:', isOpen, 'prevIsOpen:', prevIsOpenRef.current, 'hasUnsavedChanges:', hasUnsavedChangesRef.current, 'current images:', images);
     // Only reset state when editor is opened (isOpen changes from false to true)
     // This prevents clearing user input when initialNote updates (e.g., when images are added)
     if (isOpen && !prevIsOpenRef.current) {
+      console.log('NoteEditor: Editor opening, hasUnsavedChanges:', hasUnsavedChangesRef.current);
       // If we have unsaved changes, don't reset the state - preserve user edits
       if (!hasUnsavedChangesRef.current) {
+        console.log('NoteEditor: No unsaved changes, resetting images to initialNote');
         setEmoji(initialNote?.emoji || '');
         setText(initialNote?.text || '');
         setFontSize(initialNote?.fontSize || 3);
@@ -181,6 +184,8 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         setTags(initialNote?.tags || []);
         setImages(initialNote?.images || []);
         setSketch(initialNote?.sketch);
+      } else {
+        console.log('NoteEditor: Has unsaved changes, preserving current state');
       }
       // Don't reset hasUnsavedChangesRef.current here - preserve it for the session
       setIsAddingTag(false);
@@ -407,11 +412,12 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     // Otherwise, save the note
     console.log('NoteEditor: Saving noteData with images:', noteData.images);
     onSave(noteData);
+    console.log('NoteEditor: Resetting hasUnsavedChanges after save');
     hasUnsavedChangesRef.current = false; // Reset after successful save
 
     // Delay closing to ensure state updates are processed
     setTimeout(() => {
-      onClose();
+    onClose();
     }, 0);
   };
 
@@ -423,6 +429,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         noteData.images = images || [];
       }
       onSaveWithoutClose(noteData);
+      console.log('NoteEditor: Resetting hasUnsavedChanges after save without close');
       hasUnsavedChangesRef.current = false; // Reset after successful save
     }
   };
