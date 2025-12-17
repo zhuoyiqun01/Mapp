@@ -948,7 +948,12 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   }, [navigateToCoords, containerRef, transform, onNavigateComplete]);
 
   const closeEditor = () => {
-    setEditingNote(null);
+    // Only clear editingNote if it hasn't been updated (e.g., user cancelled without saving)
+    // If editingNote exists and matches a note in the notes array, keep it for potential reopening
+    const currentNoteInNotes = editingNote ? notes.find(n => n.id === editingNote.id) : null;
+    if (!currentNoteInNotes || !editingNote) {
+      setEditingNote(null);
+    }
     onToggleEditor(false);
   };
 
