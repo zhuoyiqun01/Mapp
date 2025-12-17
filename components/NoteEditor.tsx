@@ -399,6 +399,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     }
 
     // Otherwise, save the note
+    console.log('NoteEditor: Saving noteData with images:', noteData.images);
     onSave(noteData);
     hasUnsavedChangesRef.current = false; // Reset after successful save
 
