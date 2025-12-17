@@ -307,8 +307,35 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     };
   };
 
+  const isEmptyNote = (noteData: Partial<Note>): boolean => {
+    // Check if note has any content
+    const hasText = noteData.text && noteData.text.trim().length > 0;
+    const hasEmoji = !isCompactMode && noteData.emoji && noteData.emoji.length > 0;
+    const hasImages = noteData.images && noteData.images.length > 0;
+    const hasSketch = noteData.sketch && noteData.sketch.length > 0;
+    const hasTags = !isCompactMode && noteData.tags && noteData.tags.length > 0;
+    
+    return !hasText && !hasEmoji && !hasImages && !hasSketch && !hasTags;
+  };
+
   const handleSave = () => {
-    onSave(getCurrentNoteData());
+    const noteData = getCurrentNoteData();
+    
+    // If note is empty and it's a new note (has id but hasn't been saved yet), delete it
+    if (isEmptyNote(noteData) && initialNote?.id && onDelete) {
+      onDelete(initialNote.id);
+      onClose();
+      return;
+    }
+    
+    // If note is empty and has no id, just close without saving
+    if (isEmptyNote(noteData) && !initialNote?.id) {
+      onClose();
+      return;
+    }
+    
+    // Otherwise, save the note
+    onSave(noteData);
     onClose();
   };
 

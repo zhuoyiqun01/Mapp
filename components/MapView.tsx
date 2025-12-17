@@ -447,7 +447,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                         if (resolved) return;
                         resolved = true;
                         console.log('Location found:', e.latlng, `(highAccuracy: ${highAccuracy})`);
-                        map.flyTo(e.latlng, 16);
+            map.flyTo(e.latlng, 16);
                         // Clean up listeners
                         locationControl.off("locationfound", handleLocationFound);
                         locationControl.off("locationerror", handleLocationError);
@@ -471,8 +471,8 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                 } catch (error: any) {
                     reject(error);
                 }
-            });
-        };
+        });
+    };
         
         // Try high accuracy first (for better precision)
         try {
@@ -528,6 +528,15 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
         <div 
             className="flex flex-row gap-[6px] pointer-events-auto"
             onPointerDown={(e) => e.stopPropagation()}
+            onPointerMove={(e) => e.stopPropagation()}
+            onPointerUp={(e) => e.stopPropagation()}
+            onPointerCancel={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onMouseMove={(e) => e.stopPropagation()}
+            onMouseUp={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onTouchMove={(e) => e.stopPropagation()}
+            onTouchEnd={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
         >
             <div className="relative" ref={locateMenuRef}>
@@ -536,8 +545,28 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                         e.stopPropagation(); 
                         setShowLocateMenu(!showLocateMenu);
                     }}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    className="bg-white p-2 sm:p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
+                    onPointerDown={(e) => {
+                        e.stopPropagation();
+                        e.currentTarget.style.backgroundColor = themeColor;
+                    }}
+                    onPointerUp={(e) => {
+                        e.stopPropagation();
+                        if (!showLocateMenu) {
+                            e.currentTarget.style.backgroundColor = '';
+                        }
+                    }}
+                    onPointerMove={(e) => e.stopPropagation()}
+                    onMouseEnter={(e) => {
+                        if (!showLocateMenu) {
+                            e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
+                        }
+                    }}
+                    onMouseLeave={(e) => {
+                        if (!showLocateMenu) {
+                            e.currentTarget.style.backgroundColor = '';
+                        }
+                    }}
+                    className="bg-white p-2 sm:p-3 rounded-xl shadow-lg text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
                     title="Locate"
             >
                     <Locate size={18} className="sm:w-5 sm:h-5" />
@@ -551,6 +580,8 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                                 setShowLocateMenu(false);
                             }}
                             onPointerDown={(e) => e.stopPropagation()}
+                            onPointerMove={(e) => e.stopPropagation()}
+                            onPointerUp={(e) => e.stopPropagation()}
                             className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 text-gray-700 whitespace-nowrap"
                         >
                             Locate to my Position
@@ -563,6 +594,8 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                                 setShowLocateMenu(false);
                             }}
                             onPointerDown={(e) => e.stopPropagation()}
+                            onPointerMove={(e) => e.stopPropagation()}
+                            onPointerUp={(e) => e.stopPropagation()}
                             disabled={mapNotes.length === 0}
                             className={`w-full text-left px-4 py-2.5 text-sm ${
                                 mapNotes.length === 0 
@@ -580,11 +613,31 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                     e.stopPropagation(); 
                     onMapStyleChange(mapStyle === 'standard' ? 'satellite' : 'standard');
                 }}
-                onPointerDown={(e) => e.stopPropagation()}
+                onPointerDown={(e) => {
+                    e.stopPropagation();
+                    e.currentTarget.style.backgroundColor = themeColor;
+                }}
+                onPointerUp={(e) => {
+                    e.stopPropagation();
+                    if (mapStyle === 'standard') {
+                        e.currentTarget.style.backgroundColor = '';
+                    }
+                }}
+                onPointerMove={(e) => e.stopPropagation()}
+                onMouseEnter={(e) => {
+                    if (mapStyle === 'standard') {
+                        e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
+                    }
+                }}
+                onMouseLeave={(e) => {
+                    if (mapStyle === 'standard') {
+                        e.currentTarget.style.backgroundColor = '';
+                    }
+                }}
                 className={`p-2 sm:p-3 rounded-xl shadow-lg transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${
                     mapStyle === 'satellite' 
-                        ? 'text-gray-900' 
-                        : 'bg-white hover:bg-yellow-50 text-gray-700'
+                        ? 'text-white' 
+                        : 'bg-white text-gray-700'
                 }`}
                 style={mapStyle === 'satellite' ? { backgroundColor: themeColor } : undefined}
                 title={mapStyle === 'standard' ? 'Switch to Satellite' : 'Switch to Standard'}
@@ -597,8 +650,28 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                         e.stopPropagation(); 
                         setShowImportMenu(!showImportMenu);
                     }}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    className="bg-white p-2 sm:p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
+                    onPointerDown={(e) => {
+                        e.stopPropagation();
+                        e.currentTarget.style.backgroundColor = themeColor;
+                    }}
+                    onPointerUp={(e) => {
+                        e.stopPropagation();
+                        if (!showImportMenu) {
+                            e.currentTarget.style.backgroundColor = '';
+                        }
+                    }}
+                    onPointerMove={(e) => e.stopPropagation()}
+                    onMouseEnter={(e) => {
+                        if (!showImportMenu) {
+                            e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
+                        }
+                    }}
+                    onMouseLeave={(e) => {
+                        if (!showImportMenu) {
+                            e.currentTarget.style.backgroundColor = '';
+                        }
+                    }}
+                    className="bg-white p-2 sm:p-3 rounded-xl shadow-lg text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
                     title="Import"
                 >
                     <svg width="18" height="18" className="sm:w-5 sm:h-5" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -615,6 +688,8 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                                 setShowImportMenu(false);
                             }}
                             onPointerDown={(e) => e.stopPropagation()}
+                            onPointerMove={(e) => e.stopPropagation()}
+                            onPointerUp={(e) => e.stopPropagation()}
                             className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
                         >
                             <ImageIcon size={16} /> Import from Photos
@@ -627,6 +702,8 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                                 setShowImportMenu(false);
                             }}
                             onPointerDown={(e) => e.stopPropagation()}
+                            onPointerMove={(e) => e.stopPropagation()}
+                            onPointerUp={(e) => e.stopPropagation()}
                             className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
                         >
                             <FileJson size={16} /> Import from Data
@@ -645,10 +722,14 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                         </div>
                         <div className="flex gap-2 justify-end">
                             <button
-                                onClick={() => {
+                                onClick={(e) => {
+                                    e.stopPropagation();
                                     setShowLocationError(false);
                                     setLocationErrorMessage('');
                                 }}
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onPointerMove={(e) => e.stopPropagation()}
+                                onPointerUp={(e) => e.stopPropagation()}
                                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
                             >
                                 OK
@@ -1364,57 +1445,58 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           // Try multiple ways to extract GPS coordinates from processed file
           // Different manufacturers may store GPS data in different formats
           if (exifData) {
-          // Method 1: Direct latitude/longitude (standard format, most common)
-          if (exifData.latitude !== undefined && exifData.longitude !== undefined) {
-            lat = Number(exifData.latitude);
-            lng = Number(exifData.longitude);
-          }
-          // Method 2: GPSLatitude/GPSLongitude with ref (Xiaomi, some Android)
-          else if (exifData.GPSLatitude !== undefined && exifData.GPSLongitude !== undefined) {
-            lat = Number(exifData.GPSLatitude);
-            lng = Number(exifData.GPSLongitude);
-            // Apply reference (N/S, E/W)
-            if (exifData.GPSLatitudeRef === 'S') lat = -lat;
-            if (exifData.GPSLongitudeRef === 'W') lng = -lng;
-          }
-          // Method 3: GPS object (some formats)
-          else if (exifData.GPS) {
-            if (exifData.GPS.latitude !== undefined && exifData.GPS.longitude !== undefined) {
-              lat = Number(exifData.GPS.latitude);
-              lng = Number(exifData.GPS.longitude);
-            } else if (exifData.GPS.GPSLatitude !== undefined && exifData.GPS.GPSLongitude !== undefined) {
-              lat = Number(exifData.GPS.GPSLatitude);
-              lng = Number(exifData.GPS.GPSLongitude);
-              if (exifData.GPS.GPSLatitudeRef === 'S') lat = -lat;
-              if (exifData.GPS.GPSLongitudeRef === 'W') lng = -lng;
+            // Method 1: Direct latitude/longitude (standard format, most common)
+            if (exifData.latitude !== undefined && exifData.longitude !== undefined) {
+              lat = Number(exifData.latitude);
+              lng = Number(exifData.longitude);
             }
-          }
-          // Method 4: Try to parse from GPS array format [degrees, minutes, seconds]
-          // Some manufacturers store GPS as arrays
-          else if (exifData.GPSLatitude && Array.isArray(exifData.GPSLatitude)) {
-            const latArray = exifData.GPSLatitude;
-            const lngArray = exifData.GPSLongitude;
-            if (latArray.length >= 3 && lngArray.length >= 3) {
-              lat = latArray[0] + latArray[1] / 60 + latArray[2] / 3600;
-              lng = lngArray[0] + lngArray[1] / 60 + lngArray[2] / 3600;
+            // Method 2: GPSLatitude/GPSLongitude with ref (Xiaomi, some Android)
+            else if (exifData.GPSLatitude !== undefined && exifData.GPSLongitude !== undefined) {
+              lat = Number(exifData.GPSLatitude);
+              lng = Number(exifData.GPSLongitude);
+              // Apply reference (N/S, E/W)
               if (exifData.GPSLatitudeRef === 'S') lat = -lat;
               if (exifData.GPSLongitudeRef === 'W') lng = -lng;
             }
-          }
-          // Method 5: Try alternative key names (case variations)
-          else {
-            const keys = Object.keys(exifData);
-            const latKey = keys.find(k => k.toLowerCase().includes('lat') && !k.toLowerCase().includes('ref'));
-            const lngKey = keys.find(k => k.toLowerCase().includes('lng') || (k.toLowerCase().includes('lon') && !k.toLowerCase().includes('ref')));
-            
-            if (latKey && lngKey) {
-              lat = Number(exifData[latKey]);
-              lng = Number(exifData[lngKey]);
-              // Check for ref keys
-              const latRefKey = keys.find(k => k.toLowerCase().includes('lat') && k.toLowerCase().includes('ref'));
-              const lngRefKey = keys.find(k => (k.toLowerCase().includes('lng') || k.toLowerCase().includes('lon')) && k.toLowerCase().includes('ref'));
-              if (latRefKey && exifData[latRefKey] === 'S') lat = -lat;
-              if (lngRefKey && exifData[lngRefKey] === 'W') lng = -lng;
+            // Method 3: GPS object (some formats)
+            else if (exifData.GPS) {
+              if (exifData.GPS.latitude !== undefined && exifData.GPS.longitude !== undefined) {
+                lat = Number(exifData.GPS.latitude);
+                lng = Number(exifData.GPS.longitude);
+              } else if (exifData.GPS.GPSLatitude !== undefined && exifData.GPS.GPSLongitude !== undefined) {
+                lat = Number(exifData.GPS.GPSLatitude);
+                lng = Number(exifData.GPS.GPSLongitude);
+                if (exifData.GPS.GPSLatitudeRef === 'S') lat = -lat;
+                if (exifData.GPS.GPSLongitudeRef === 'W') lng = -lng;
+              }
+            }
+            // Method 4: Try to parse from GPS array format [degrees, minutes, seconds]
+            // Some manufacturers store GPS as arrays
+            else if (exifData.GPSLatitude && Array.isArray(exifData.GPSLatitude)) {
+              const latArray = exifData.GPSLatitude;
+              const lngArray = exifData.GPSLongitude;
+              if (latArray.length >= 3 && lngArray.length >= 3) {
+                lat = latArray[0] + latArray[1] / 60 + latArray[2] / 3600;
+                lng = lngArray[0] + lngArray[1] / 60 + lngArray[2] / 3600;
+                if (exifData.GPSLatitudeRef === 'S') lat = -lat;
+                if (exifData.GPSLongitudeRef === 'W') lng = -lng;
+              }
+            }
+            // Method 5: Try alternative key names (case variations)
+            else {
+              const keys = Object.keys(exifData);
+              const latKey = keys.find(k => k.toLowerCase().includes('lat') && !k.toLowerCase().includes('ref'));
+              const lngKey = keys.find(k => k.toLowerCase().includes('lng') || (k.toLowerCase().includes('lon') && !k.toLowerCase().includes('ref')));
+              
+              if (latKey && lngKey) {
+                lat = Number(exifData[latKey]);
+                lng = Number(exifData[lngKey]);
+                // Check for ref keys
+                const latRefKey = keys.find(k => k.toLowerCase().includes('lat') && k.toLowerCase().includes('ref'));
+                const lngRefKey = keys.find(k => (k.toLowerCase().includes('lng') || k.toLowerCase().includes('lon')) && k.toLowerCase().includes('ref'));
+                if (latRefKey && exifData[latRefKey] === 'S') lat = -lat;
+                if (lngRefKey && exifData[lngRefKey] === 'W') lng = -lng;
+              }
             }
           }
         }
@@ -2447,10 +2529,90 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               />
               <div 
                   className="flex-1 max-w-md relative group pointer-events-auto"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onDoubleClick={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => {
+                      e.stopPropagation();
+                      e.stopImmediatePropagation();
+                  }}
+                  onPointerMove={(e) => {
+                      e.stopPropagation();
+                      e.stopImmediatePropagation();
+                  }}
+                  onPointerUp={(e) => {
+                      e.stopPropagation();
+                      e.stopImmediatePropagation();
+                  }}
+                  onPointerCancel={(e) => {
+                      e.stopPropagation();
+                      e.stopImmediatePropagation();
+                  }}
+                  onMouseDown={(e) => {
+                      e.stopPropagation();
+                      e.stopImmediatePropagation();
+                  }}
+                  onMouseMove={(e) => {
+                      e.stopPropagation();
+                      e.stopImmediatePropagation();
+                  }}
+                  onMouseUp={(e) => {
+                      e.stopPropagation();
+                      e.stopImmediatePropagation();
+                  }}
+                  onTouchStart={(e) => {
+                      e.stopPropagation();
+                      e.stopImmediatePropagation();
+                  }}
+                  onTouchMove={(e) => {
+                      e.stopPropagation();
+                      e.stopImmediatePropagation();
+                  }}
+                  onTouchEnd={(e) => {
+                      e.stopPropagation();
+                      e.stopImmediatePropagation();
+                  }}
+                  onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      e.stopImmediatePropagation();
+                  }}
               >
-                  <div className="bg-white rounded-xl shadow-lg flex items-center px-4 transition-shadow focus-within:shadow-xl relative z-10">
+                  <div 
+                      className="bg-white rounded-xl shadow-lg flex items-center px-4 transition-shadow focus-within:shadow-xl relative z-10"
+                      onPointerDown={(e) => {
+                          e.stopPropagation();
+                          e.stopImmediatePropagation();
+                      }}
+                      onPointerMove={(e) => {
+                          e.stopPropagation();
+                          e.stopImmediatePropagation();
+                      }}
+                      onPointerUp={(e) => {
+                          e.stopPropagation();
+                          e.stopImmediatePropagation();
+                      }}
+                      onMouseDown={(e) => {
+                          e.stopPropagation();
+                          e.stopImmediatePropagation();
+                      }}
+                      onMouseMove={(e) => {
+                          e.stopPropagation();
+                          e.stopImmediatePropagation();
+                      }}
+                      onMouseUp={(e) => {
+                          e.stopPropagation();
+                          e.stopImmediatePropagation();
+                      }}
+                      onTouchStart={(e) => {
+                          e.stopPropagation();
+                          e.stopImmediatePropagation();
+                      }}
+                      onTouchMove={(e) => {
+                          e.stopPropagation();
+                          e.stopImmediatePropagation();
+                      }}
+                      onTouchEnd={(e) => {
+                          e.stopPropagation();
+                          e.stopImmediatePropagation();
+                      }}
+                  >
                       <Search size={18} className="text-gray-400 flex-shrink-0" />
                       <input 
                           type="text" 
@@ -2458,15 +2620,129 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                           className="w-full p-3 bg-transparent border-none outline-none text-gray-700 placeholder-gray-400"
                           value={searchQuery}
                           onChange={(e) => setSearchQuery(e.target.value)}
+                          onPointerDown={(e) => {
+                              e.stopPropagation();
+                              e.stopImmediatePropagation();
+                          }}
+                          onPointerMove={(e) => {
+                              e.stopPropagation();
+                              e.stopImmediatePropagation();
+                          }}
+                          onPointerUp={(e) => {
+                              e.stopPropagation();
+                              e.stopImmediatePropagation();
+                          }}
+                          onMouseDown={(e) => {
+                              e.stopPropagation();
+                              e.stopImmediatePropagation();
+                          }}
+                          onMouseMove={(e) => {
+                              e.stopPropagation();
+                              e.stopImmediatePropagation();
+                          }}
+                          onMouseUp={(e) => {
+                              e.stopPropagation();
+                              e.stopImmediatePropagation();
+                          }}
+                          onTouchStart={(e) => {
+                              e.stopPropagation();
+                              e.stopImmediatePropagation();
+                          }}
+                          onTouchMove={(e) => {
+                              e.stopPropagation();
+                              e.stopImmediatePropagation();
+                          }}
+                          onTouchEnd={(e) => {
+                              e.stopPropagation();
+                              e.stopImmediatePropagation();
+                          }}
                       />
                       {isSearching && <Loader2 size={18} className="text-yellow-500 animate-spin" />}
                   </div>
                   {searchResults.length > 0 && (
-                      <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-2 border border-gray-100">
+                      <div 
+                          className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-2 border border-gray-100"
+                          onPointerDown={(e) => {
+                              e.stopPropagation();
+                              e.stopImmediatePropagation();
+                          }}
+                          onPointerMove={(e) => {
+                              e.stopPropagation();
+                              e.stopImmediatePropagation();
+                          }}
+                          onPointerUp={(e) => {
+                              e.stopPropagation();
+                              e.stopImmediatePropagation();
+                          }}
+                          onMouseDown={(e) => {
+                              e.stopPropagation();
+                              e.stopImmediatePropagation();
+                          }}
+                          onMouseMove={(e) => {
+                              e.stopPropagation();
+                              e.stopImmediatePropagation();
+                          }}
+                          onMouseUp={(e) => {
+                              e.stopPropagation();
+                              e.stopImmediatePropagation();
+                          }}
+                          onTouchStart={(e) => {
+                              e.stopPropagation();
+                              e.stopImmediatePropagation();
+                          }}
+                          onTouchMove={(e) => {
+                              e.stopPropagation();
+                              e.stopImmediatePropagation();
+                          }}
+                          onTouchEnd={(e) => {
+                              e.stopPropagation();
+                              e.stopImmediatePropagation();
+                          }}
+                      >
                           {searchResults.map((result: any, i) => (
                               <button
                                   key={i}
-                                  onClick={() => selectSearchResult(result)}
+                                  onClick={(e) => {
+                                      e.stopPropagation();
+                                      e.stopImmediatePropagation();
+                                      selectSearchResult(result);
+                                  }}
+                                  onPointerDown={(e) => {
+                                      e.stopPropagation();
+                                      e.stopImmediatePropagation();
+                                  }}
+                                  onPointerMove={(e) => {
+                                      e.stopPropagation();
+                                      e.stopImmediatePropagation();
+                                  }}
+                                  onPointerUp={(e) => {
+                                      e.stopPropagation();
+                                      e.stopImmediatePropagation();
+                                  }}
+                                  onMouseDown={(e) => {
+                                      e.stopPropagation();
+                                      e.stopImmediatePropagation();
+                                  }}
+                                  onMouseMove={(e) => {
+                                      e.stopPropagation();
+                                      e.stopImmediatePropagation();
+                                  }}
+                                  onMouseUp={(e) => {
+                                      e.stopPropagation();
+                                      e.stopImmediatePropagation();
+                                  }}
+                                  onTouchStart={(e) => {
+                                      e.stopPropagation();
+                                      e.stopImmediatePropagation();
+                                  }}
+                                  onTouchMove={(e) => {
+                                      e.stopPropagation();
+                                      e.stopImmediatePropagation();
+                                  }}
+                                  onTouchEnd={(e) => {
+                                      e.stopPropagation();
+                                      e.stopImmediatePropagation();
+                                  }}
                                   className="w-full text-left px-4 py-3 hover:bg-yellow-50 border-b border-gray-50 last:border-none transition-colors flex flex-col gap-0.5"
                               >
                                   <span className="font-medium text-gray-800 text-sm truncate w-full block">{result.display_name.split(',')[0]}</span>

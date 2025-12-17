@@ -53,12 +53,27 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   // Edit Mode State
   const [isEditMode, setIsEditMode] = useState(false);
   
+  // Note position selection state
+  const [isSelectingNotePosition, setIsSelectingNotePosition] = useState(false);
+  const [notePositionPreview, setNotePositionPreview] = useState<{ x: number; y: number } | null>(null);
+  
   // 当编辑模式切换时，清除过滤状态
   useEffect(() => {
     if (isEditMode) {
       setFilterFrameIds(new Set());
+    } else {
+      // 退出编辑模式时，也退出位置选择模式
+      setIsSelectingNotePosition(false);
+      setNotePositionPreview(null);
     }
   }, [isEditMode]);
+  
+  // 当退出位置选择模式时，清除预览
+  useEffect(() => {
+    if (!isSelectingNotePosition) {
+      setNotePositionPreview(null);
+    }
+  }, [isSelectingNotePosition]);
   
   // Layer Visibility State
   const [layerVisibility, setLayerVisibility] = useState({
@@ -1709,6 +1724,34 @@ const compressImageToBase64 = (file: File, targetShortSide = 512): Promise<{ bas
     }
   };
 
+  // Create note at specified position (in board coordinates)
+  const createNoteAtPosition = (boardX: number, boardY: number, variant: 'compact') => {
+    const noteWidth = variant === 'compact' ? 180 : 256;
+    const noteHeight = variant === 'compact' ? 180 : 256;
+    
+    // Adjust position to center the note at the click point
+    const spawnX = boardX - noteWidth / 2;
+    const spawnY = boardY - noteHeight / 2;
+
+    const newNote: Note = {
+      id: generateId(),
+      createdAt: Date.now(),
+      coords: { lat: 0, lng: 0 },
+      emoji: '', // No emoji for board notes
+      text: '',
+      fontSize: 3,
+      images: [],
+      tags: [],
+      boardX: spawnX, 
+      boardY: spawnY,
+      variant: variant,
+      color: '#FFFDF5'
+    };
+    setEditingNote(newNote);
+    onToggleEditor(true);
+    setIsSelectingNotePosition(false); // Exit position selection mode
+  };
+
 const createNoteAtCenter = (variant: 'compact') => {
      if (!containerRef.current) return;
      const { width, height } = containerRef.current.getBoundingClientRect();
@@ -2065,6 +2108,14 @@ const createNoteAtCenter = (variant: 'compact') => {
   };
 
   const handleBoardPointerMove = (e: React.PointerEvent) => {
+      // 如果处于位置选择模式，更新预览位置
+      if (isSelectingNotePosition && containerRef.current) {
+          const rect = containerRef.current.getBoundingClientRect();
+          const boardX = (e.clientX - rect.left - transform.x) / transform.scale;
+          const boardY = (e.clientY - rect.top - transform.y) / transform.scale;
+          setNotePositionPreview({ x: boardX, y: boardY });
+      }
+      
       // 如果正在拖动Frame
       if (draggingFrameId && draggingFrameOffset) {
           const rect = containerRef.current?.getBoundingClientRect();
@@ -2249,6 +2300,33 @@ const createNoteAtCenter = (variant: 'compact') => {
   };
 
   const handleBoardPointerUp = (e: React.PointerEvent) => {
+      // 检查是否点击了UI元素（按钮、面板等）
+      const target = e.target as HTMLElement;
+      if (target) {
+          // 检查是否是交互元素
+          const interactiveTags = ['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'A'];
+          if (interactiveTags.includes(target.tagName)) {
+              resetBlankClickCount();
+              return;
+          }
+          
+          // 检查是否在UI容器内（通过检查z-index或特定类名）
+          let current: HTMLElement | null = target;
+          while (current) {
+              const zIndex = window.getComputedStyle(current).zIndex;
+              if (zIndex && (zIndex === '500' || parseInt(zIndex) >= 500)) {
+                  resetBlankClickCount();
+                  return;
+              }
+              if (current.classList.contains('pointer-events-auto') && 
+                  (current.classList.contains('fixed') || current.classList.contains('absolute'))) {
+                  resetBlankClickCount();
+                  return;
+              }
+              current = current.parentElement;
+          }
+      }
+      
       // 如果正在框选，结束当前框选操作（但保持框选模式）
       if (isBoxSelecting && boxSelectStart) {
           // Clear box select start/end but keep box select mode active
@@ -2342,6 +2420,16 @@ const createNoteAtCenter = (variant: 'compact') => {
       
       // 只有在没有拖动（点击）且没有缩放时才执行退出逻辑
       if (!hasMoved && !isZooming) {
+          // 0. 如果处于位置选择模式，在点击位置创建便签（最优先处理）
+          if (isSelectingNotePosition && containerRef.current) {
+              const rect = containerRef.current.getBoundingClientRect();
+              const boardX = (e.clientX - rect.left - transform.x) / transform.scale;
+              const boardY = (e.clientY - rect.top - transform.y) / transform.scale;
+              createNoteAtPosition(boardX, boardY, 'compact');
+              (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+              return;
+          }
+          
           // 0. 如果处于框选模式或frame创建模式，点击空白处退出这些模式（优先处理）
           if (isBoxSelecting || isDrawingFrame) {
               setIsBoxSelecting(false);
@@ -2429,6 +2517,13 @@ const createNoteAtCenter = (variant: 'compact') => {
   const handleNotePointerDown = (e: React.PointerEvent, noteId: string, note: Note) => {
       // 如果正在缩放，不响应拖动
       if (isZooming) return;
+      
+      // 如果在位置选择模式，点击便签时退出位置选择模式
+      if (isSelectingNotePosition) {
+          setIsSelectingNotePosition(false);
+      e.stopPropagation();
+          return;
+      }
       
       // 如果不在编辑模式，只记录位置信息用于单击检测，不启动长按计时器
       if (!isEditMode) {
@@ -3006,10 +3101,20 @@ const createNoteAtCenter = (variant: 'compact') => {
     >
       <div 
         ref={containerRef}
-        className={`w-full h-full overflow-hidden bg-gray-50 relative touch-none select-none ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`}
+        className={`w-full h-full overflow-hidden bg-gray-50 relative touch-none select-none ${
+          isPanning 
+            ? 'cursor-grabbing' 
+            : 'cursor-grab'
+        }`}
         style={isDragging ? { boxShadow: `0 0 0 4px ${themeColor}` } : undefined}
         onPointerDown={handleBoardPointerDown}
         onPointerMove={handleBoardPointerMove}
+        onPointerLeave={(e) => {
+            // 当鼠标离开画布时，清除位置预览
+            if (isSelectingNotePosition) {
+                setNotePositionPreview(null);
+            }
+        }}
         onDragEnter={handleDragEnter}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -3079,6 +3184,22 @@ const createNoteAtCenter = (variant: 'compact') => {
           className="absolute top-0 left-0 w-full h-full origin-top-left pointer-events-none"
           style={{ transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})` }}
         >
+          {/* Note Position Preview - Theme color box indicator */}
+          {isSelectingNotePosition && notePositionPreview && (
+            <div
+              className="absolute pointer-events-none z-[3000]"
+              style={{
+                left: `${notePositionPreview.x - 90}px`, // Center the 180px box
+                top: `${notePositionPreview.y - 90}px`,
+                width: '180px',
+                height: '180px',
+                border: `4px solid ${themeColor}`,
+                borderRadius: '4px',
+                boxShadow: `0 0 0 1px ${themeColor}4D`,
+              }}
+            />
+          )}
+          
           {/* Render connections */}
           {/* Frames Layer - Below everything */}
           {/* Box Selection Preview */}
@@ -4455,13 +4576,32 @@ const createNoteAtCenter = (variant: 'compact') => {
             <div 
             className={`fixed top-2 sm:top-4 z-[500] pointer-events-auto animate-in fade-in flex items-center gap-1 sm:gap-2 ${isEditMode ? 'left-1/2 -translate-x-1/2' : 'left-2 sm:left-4 slide-in-from-left-4'}`}
             style={{ height: '40px', alignItems: 'center' }}
-                onPointerDown={(e) => e.stopPropagation()} 
+                onPointerDown={(e) => {
+                    e.stopPropagation();
+                    // 退出位置选择模式
+                    if (isSelectingNotePosition) {
+                        setIsSelectingNotePosition(false);
+                    }
+                }}
+                onClick={(e) => {
+                    e.stopPropagation();
+                    // 退出位置选择模式
+                    if (isSelectingNotePosition) {
+                        setIsSelectingNotePosition(false);
+                    }
+                }}
             >
             {/* Layout Buttons: L+ and L- */}
-            {isEditMode && (
-                <div className="bg-white rounded-xl border border-gray-100 flex gap-1 sm:gap-2 items-center p-0.5 sm:p-1" style={{ height: '40px' }}>
+        {isEditMode && (
+            <div 
+                    className="bg-white rounded-xl border border-gray-100 flex gap-1 sm:gap-2 items-center p-0.5 sm:p-1" 
+                    style={{ height: '40px' }}
+                onPointerDown={(e) => e.stopPropagation()} 
+                    onClick={(e) => e.stopPropagation()}
+            >
                     <button
-                        onClick={() => {
+                        onClick={(e) => {
+                            e.stopPropagation();
                             if (!onUpdateProject || !project) return;
                             
                             // Get current global standard size scale, default to 1
@@ -4507,7 +4647,8 @@ const createNoteAtCenter = (variant: 'compact') => {
                         <span className="text-base sm:text-lg">L+</span>
                     </button>
                     <button
-                        onClick={() => {
+                        onClick={(e) => {
+                            e.stopPropagation();
                             if (!onUpdateProject || !project) return;
                             
                             // Get current global standard size scale, default to 1
@@ -4548,18 +4689,41 @@ const createNoteAtCenter = (variant: 'compact') => {
                         style={{ backgroundColor: 'transparent' }}
                         onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${themeColor}1A`}
                         onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                        onPointerDown={(e) => e.stopPropagation()}
                         title="缩小布局"
                     >
                         <span className="text-base sm:text-lg">L-</span>
                     </button>
                 </div>
             )}
-            <div className={`bg-white rounded-xl border border-gray-100 flex gap-1 sm:gap-2 items-center ${isEditMode ? 'p-0.5 sm:p-1' : ''}`} style={{ height: '40px' }}>
+            <div 
+                className={`bg-white rounded-xl border border-gray-100 flex gap-1.5 sm:gap-2 items-center ${isEditMode ? 'p-0.5 sm:p-1' : ''}`} 
+                style={{ height: '40px' }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+            >
                 {!isEditMode ? (
                     // 非编辑模式：显示进入编辑模式的按钮
                     <button
-                        onClick={() => setIsEditMode(true)}
-                        className="bg-white p-2 sm:p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setIsEditMode(true);
+                        }}
+                        onPointerDown={(e) => {
+                            e.stopPropagation();
+                            e.currentTarget.style.backgroundColor = themeColor;
+                        }}
+                        onPointerUp={(e) => {
+                            e.stopPropagation();
+                            e.currentTarget.style.backgroundColor = '';
+                        }}
+                        onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = '';
+                        }}
+                        className="bg-white p-2 sm:p-3 rounded-xl shadow-lg text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
                         title="进入编辑模式"
                     >
                         <Pencil size={18} className="sm:w-5 sm:h-5" />
@@ -4568,39 +4732,113 @@ const createNoteAtCenter = (variant: 'compact') => {
                     // 编辑模式：显示编辑工具
                     <>
                     <button
-                        onClick={() => createNoteAtCenter('compact')}
-                            className="w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
-                            style={{ backgroundColor: 'transparent' }}
-                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${themeColor}1A`}
-                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                        title="Add Sticky Note"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            if (isSelectingNotePosition) {
+                                // Cancel position selection mode
+                                setIsSelectingNotePosition(false);
+                            } else {
+                                // Enter position selection mode
+                                // 退出多选模式
+                                setIsBoxSelecting(false);
+                                setBoxSelectStart(null);
+                                setBoxSelectEnd(null);
+                                // 退出 frame 创建模式
+                                setIsDrawingFrame(false);
+                                setDrawingFrameStart(null);
+                                setDrawingFrameEnd(null);
+                                setIsSelectingNotePosition(true);
+                            }
+                        }}
+                        onPointerDown={(e) => {
+                            e.stopPropagation();
+                            e.currentTarget.style.backgroundColor = themeColor;
+                        }}
+                        onPointerUp={(e) => {
+                            e.stopPropagation();
+                            if (!isSelectingNotePosition) {
+                                e.currentTarget.style.backgroundColor = '';
+                            }
+                        }}
+                        className={`w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 flex items-center justify-center transition-colors active:scale-95 ${
+                            isSelectingNotePosition 
+                                ? 'text-white' 
+                                : 'text-gray-700'
+                        }`}
+                        style={{ backgroundColor: isSelectingNotePosition ? themeColor : 'transparent' }}
+                        onMouseEnter={(e) => {
+                            if (!isSelectingNotePosition) {
+                                e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
+                            }
+                        }}
+                        onMouseLeave={(e) => {
+                            if (!isSelectingNotePosition) {
+                                e.currentTarget.style.backgroundColor = 'transparent';
+                            }
+                        }}
+                        title={isSelectingNotePosition ? "Click on board to place note (click again to cancel)" : "Add Sticky Note"}
                     >
                             <StickyNote size={18} className="sm:w-5 sm:h-5" />
                     </button>
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
+                            // 退出位置选择模式
+                            if (isSelectingNotePosition) {
+                                setIsSelectingNotePosition(false);
+                            }
                             handleAddImageClick();
                         }}
-                            className="w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
-                            style={{ backgroundColor: 'transparent' }}
-                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${themeColor}1A`}
-                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                        onPointerDown={(e) => {
+                            e.stopPropagation();
+                            // 退出位置选择模式
+                            if (isSelectingNotePosition) {
+                                setIsSelectingNotePosition(false);
+                            }
+                            e.currentTarget.style.backgroundColor = themeColor;
+                        }}
+                        onPointerUp={(e) => {
+                            e.stopPropagation();
+                            e.currentTarget.style.backgroundColor = '';
+                        }}
+                        className="w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 text-gray-700 flex items-center justify-center transition-colors active:scale-95"
+                        style={{ backgroundColor: 'transparent' }}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#F3F4F6'} // gray-100
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                         title="Add Image"
                     >
                             <ImageIcon size={18} className="sm:w-5 sm:h-5" />
                     </button>
                         <button
-                            onClick={() => {
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                // 退出位置选择模式
+                                if (isSelectingNotePosition) {
+                                    setIsSelectingNotePosition(false);
+                                }
                                 setIsDrawingFrame(true);
                                 setIsBoxSelecting(false); // 确保框选模式退出
                                 setBoxSelectStart(null);
                                 setBoxSelectEnd(null);
                                 setSelectedFrameId(null);
                             }}
-                            className={`w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 flex items-center justify-center transition-colors active:scale-95 ${isDrawingFrame ? 'text-white' : 'text-gray-700 hover:text-yellow-700'}`}
+                            onPointerDown={(e) => {
+                                e.stopPropagation();
+                                // 退出位置选择模式
+                                if (isSelectingNotePosition) {
+                                    setIsSelectingNotePosition(false);
+                                }
+                                e.currentTarget.style.backgroundColor = themeColor;
+                            }}
+                            onPointerUp={(e) => {
+                                e.stopPropagation();
+                                if (!isDrawingFrame) {
+                                    e.currentTarget.style.backgroundColor = '';
+                                }
+                            }}
+                            className={`w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 flex items-center justify-center transition-colors active:scale-95 ${isDrawingFrame ? 'text-white' : 'text-gray-700'}`}
                             style={isDrawingFrame ? { backgroundColor: themeColor } : undefined}
-                            onMouseEnter={(e) => !isDrawingFrame && (e.currentTarget.style.backgroundColor = `${themeColor}1A`)}
+                            onMouseEnter={(e) => !isDrawingFrame && (e.currentTarget.style.backgroundColor = '#F3F4F6')} // gray-100
                             onMouseLeave={(e) => !isDrawingFrame && (e.currentTarget.style.backgroundColor = '')}
                             title="Add Frame"
                         >
@@ -4616,7 +4854,8 @@ const createNoteAtCenter = (variant: 'compact') => {
                             </svg>
                         </button>
                     <button
-                        onClick={() => {
+                        onClick={(e) => {
+                            e.stopPropagation();
                             // Toggle box selection mode
                             setIsBoxSelecting(!isBoxSelecting);
                             if (!isBoxSelecting) {
@@ -4627,15 +4866,29 @@ const createNoteAtCenter = (variant: 'compact') => {
                                 setIsDrawingFrame(false);
                                 setDrawingFrameStart(null);
                                 setDrawingFrameEnd(null);
+                                // 退出位置选择模式
+                                setIsSelectingNotePosition(false);
                             } else {
                                 // 退出框选模式时也清除相关状态
                                 setBoxSelectStart(null);
                                 setBoxSelectEnd(null);
                             }
                         }}
-                        className={`w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95 ${isBoxSelecting ? 'bg-yellow-200' : ''}`}
-                        style={{ backgroundColor: isBoxSelecting ? `${themeColor}80` : 'transparent' }}
-                        onMouseEnter={(e) => !isBoxSelecting && (e.currentTarget.style.backgroundColor = `${themeColor}1A`)}
+                        onPointerDown={(e) => {
+                            e.stopPropagation();
+                            e.currentTarget.style.backgroundColor = themeColor;
+                        }}
+                        onPointerUp={(e) => {
+                            e.stopPropagation();
+                            if (!isBoxSelecting) {
+                                e.currentTarget.style.backgroundColor = '';
+                            }
+                        }}
+                        className={`w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 flex items-center justify-center transition-colors active:scale-95 ${
+                            isBoxSelecting ? 'text-white' : 'text-gray-700'
+                        }`}
+                        style={{ backgroundColor: isBoxSelecting ? themeColor : 'transparent' }}
+                        onMouseEnter={(e) => !isBoxSelecting && (e.currentTarget.style.backgroundColor = '#F3F4F6')} // gray-100
                         onMouseLeave={(e) => !isBoxSelecting && (e.currentTarget.style.backgroundColor = 'transparent')}
                         title="Box Select (Click to toggle, then drag to select)"
                     >
@@ -4651,7 +4904,7 @@ const createNoteAtCenter = (variant: 'compact') => {
         {/* Layer button - horizontal layout with edit button (non-edit mode only) */}
         {!isEditMode && (
             <div 
-                className="fixed top-2 sm:top-4 left-[58px] sm:left-[70px] z-[500] pointer-events-auto flex items-center"
+                className="fixed top-2 sm:top-4 left-[56px] sm:left-[68px] z-[500] pointer-events-auto flex items-center"
                 style={{ height: '40px' }}
                 onPointerDown={(e) => e.stopPropagation()}
             >
@@ -4661,13 +4914,40 @@ const createNoteAtCenter = (variant: 'compact') => {
                             e.stopPropagation(); 
                             setShowLayerPanel(!showLayerPanel);
                         }}
-                        className={`bg-white p-2 sm:p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${showLayerPanel ? 'bg-yellow-50' : ''}`}
+                        onPointerDown={(e) => {
+                            e.stopPropagation();
+                            e.currentTarget.style.backgroundColor = themeColor;
+                        }}
+                        onPointerUp={(e) => {
+                            e.stopPropagation();
+                            if (!showLayerPanel) {
+                                e.currentTarget.style.backgroundColor = '';
+                            }
+                        }}
+                        onMouseEnter={(e) => {
+                            if (!showLayerPanel) {
+                                e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
+                            }
+                        }}
+                        onMouseLeave={(e) => {
+                            if (!showLayerPanel) {
+                                e.currentTarget.style.backgroundColor = '';
+                            }
+                        }}
+                        className={`bg-white p-2 sm:p-3 rounded-xl shadow-lg transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${
+                            showLayerPanel ? 'text-white' : 'text-gray-700'
+                        }`}
+                        style={{ backgroundColor: showLayerPanel ? themeColor : undefined }}
                         title="图层"
                     >
                         <Layers size={18} className="sm:w-5 sm:h-5" />
                     </button>
                     {showLayerPanel && (
-                        <div className="absolute left-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-[2000]">
+                        <div 
+                            className="absolute left-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-[2000]"
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => e.stopPropagation()}
+                        >
                             <div className="px-3 py-2 text-xs font-bold text-gray-500 uppercase tracking-wide">Layer</div>
                             <div className="h-px bg-gray-100 mb-1" />
                             {/* Connects (连线) - Top */}
@@ -4679,7 +4959,12 @@ const createNoteAtCenter = (variant: 'compact') => {
                                 <input
                                     type="checkbox"
                                     checked={layerVisibility.connects}
-                                    onChange={() => setLayerVisibility(prev => ({ ...prev, connects: !prev.connects }))}
+                                    onChange={(e) => {
+                                        e.stopPropagation();
+                                        setLayerVisibility(prev => ({ ...prev, connects: !prev.connects }));
+                                    }}
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onClick={(e) => e.stopPropagation()}
                                     className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
                                         layerVisibility.connects 
                                             ? '' 
@@ -4700,7 +4985,12 @@ const createNoteAtCenter = (variant: 'compact') => {
                                 <input
                                     type="checkbox"
                                     checked={layerVisibility.secondary}
-                                    onChange={() => setLayerVisibility(prev => ({ ...prev, secondary: !prev.secondary }))}
+                                    onChange={(e) => {
+                                        e.stopPropagation();
+                                        setLayerVisibility(prev => ({ ...prev, secondary: !prev.secondary }));
+                                    }}
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onClick={(e) => e.stopPropagation()}
                                     className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
                                         layerVisibility.secondary 
                                             ? '' 
@@ -4721,7 +5011,12 @@ const createNoteAtCenter = (variant: 'compact') => {
                                 <input
                                     type="checkbox"
                                     checked={layerVisibility.image}
-                                    onChange={() => setLayerVisibility(prev => ({ ...prev, image: !prev.image }))}
+                                    onChange={(e) => {
+                                        e.stopPropagation();
+                                        setLayerVisibility(prev => ({ ...prev, image: !prev.image }));
+                                    }}
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onClick={(e) => e.stopPropagation()}
                                     className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
                                         layerVisibility.image 
                                             ? '' 
@@ -4742,7 +5037,12 @@ const createNoteAtCenter = (variant: 'compact') => {
                                 <input
                                     type="checkbox"
                                     checked={layerVisibility.primary}
-                                    onChange={() => setLayerVisibility(prev => ({ ...prev, primary: !prev.primary }))}
+                                    onChange={(e) => {
+                                        e.stopPropagation();
+                                        setLayerVisibility(prev => ({ ...prev, primary: !prev.primary }));
+                                    }}
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onClick={(e) => e.stopPropagation()}
                                     className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
                                         layerVisibility.primary 
                                             ? '' 
@@ -4768,7 +5068,12 @@ const createNoteAtCenter = (variant: 'compact') => {
                                 <input
                                     type="checkbox"
                                     checked={layerVisibility.frame}
-                                    onChange={() => setLayerVisibility(prev => ({ ...prev, frame: !prev.frame }))}
+                                    onChange={(e) => {
+                                        e.stopPropagation();
+                                        setLayerVisibility(prev => ({ ...prev, frame: !prev.frame }));
+                                    }}
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onClick={(e) => e.stopPropagation()}
                                     className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
                                         layerVisibility.frame 
                                             ? '' 
