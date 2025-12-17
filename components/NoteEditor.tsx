@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Note, Tag } from '../types';
 import { EMOJI_LIST, EMOJI_CATEGORIES, TAG_COLORS, THEME_COLOR } from '../constants';
@@ -81,13 +81,36 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const emojiButtonRef = useRef<HTMLButtonElement | null>(null);
   const [emojiPickerPosition, setEmojiPickerPosition] = useState<{ left: number; top: number } | null>(null);
   
-  // Category tabs drag scrolling
+  // Category tabs scroll navigation
   const categoryTabsRef = useRef<HTMLDivElement | null>(null);
-  const [isDraggingCategoryTabs, setIsDraggingCategoryTabs] = useState(false);
-  const dragStartXRef = useRef(0);
-  const dragStartScrollLeftRef = useRef(0);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
   
   const minSwipeDistance = 50; // Minimum swipe distance
+  
+  // Check scroll position and update arrow visibility
+  const checkScrollPosition = () => {
+    if (!categoryTabsRef.current) return;
+    const { scrollLeft, scrollWidth, clientWidth } = categoryTabsRef.current;
+    setCanScrollLeft(scrollLeft > 0);
+    setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 1);
+  };
+  
+  // Scroll category tabs
+  const scrollCategoryTabs = (direction: 'left' | 'right') => {
+    if (!categoryTabsRef.current) return;
+    const scrollAmount = 200; // Scroll by 200px
+    const currentScroll = categoryTabsRef.current.scrollLeft;
+    const newScroll = direction === 'left' 
+      ? Math.max(0, currentScroll - scrollAmount)
+      : Math.min(categoryTabsRef.current.scrollWidth - categoryTabsRef.current.clientWidth, currentScroll + scrollAmount);
+    categoryTabsRef.current.scrollTo({
+      left: newScroll,
+      behavior: 'smooth'
+    });
+    // Check position after scroll animation
+    setTimeout(checkScrollPosition, 300);
+  };
 
   const isCompactMode = initialNote?.variant === 'compact';
   
@@ -122,76 +145,50 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     touchEndRef.current = null;
   };
 
-  // Category tabs mouse drag handlers
-  const hasDraggedRef = useRef(false);
-  
-  const handleCategoryTabsMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!categoryTabsRef.current) return;
-    setIsDraggingCategoryTabs(true);
-    hasDraggedRef.current = false;
-    dragStartXRef.current = e.clientX;
-    dragStartScrollLeftRef.current = categoryTabsRef.current.scrollLeft;
-    categoryTabsRef.current.style.userSelect = 'none';
-    e.preventDefault();
-  };
-
-  const handleCategoryTabsMouseMove = (e: MouseEvent) => {
-    if (!isDraggingCategoryTabs || !categoryTabsRef.current) return;
-    const deltaX = e.clientX - dragStartXRef.current;
-    if (Math.abs(deltaX) > 3) {
-      hasDraggedRef.current = true;
-    }
-    categoryTabsRef.current.scrollLeft = dragStartScrollLeftRef.current - deltaX;
-  };
-
-  const handleCategoryTabsMouseUp = () => {
-    if (!categoryTabsRef.current) return;
-    setIsDraggingCategoryTabs(false);
-    categoryTabsRef.current.style.userSelect = '';
-    // Reset after a short delay to allow onClick to check
-    setTimeout(() => {
-      hasDraggedRef.current = false;
-    }, 100);
-  };
-
-  // Add global mouse event listeners for category tabs dragging
+  // Check scroll position when emoji picker opens or category changes
   useEffect(() => {
-    if (showEmojiPicker) {
-      const handleMove = (e: MouseEvent) => handleCategoryTabsMouseMove(e);
-      const handleUp = () => handleCategoryTabsMouseUp();
-      document.addEventListener('mousemove', handleMove);
-      document.addEventListener('mouseup', handleUp);
+    if (showEmojiPicker && categoryTabsRef.current) {
+      checkScrollPosition();
+      const container = categoryTabsRef.current;
+      container.addEventListener('scroll', checkScrollPosition);
+      // Also check on resize
+      window.addEventListener('resize', checkScrollPosition);
       return () => {
-        document.removeEventListener('mousemove', handleMove);
-        document.removeEventListener('mouseup', handleUp);
+        container.removeEventListener('scroll', checkScrollPosition);
+        window.removeEventListener('resize', checkScrollPosition);
       };
     }
-  }, [showEmojiPicker, isDraggingCategoryTabs]);
+  }, [showEmojiPicker, selectedEmojiCategory]);
 
   // Track if editor was just opened to only reset state on open, not on every initialNote change
   const prevIsOpenRef = useRef(false);
-  
   const prevNoteIdRef = useRef<string | undefined>(initialNote?.id);
+  const noteId = initialNote?.id;
+  const hasUnsavedChangesRef = useRef(false);
 
   useEffect(() => {
     // Only reset state when editor is opened (isOpen changes from false to true)
     // This prevents clearing user input when initialNote updates (e.g., when images are added)
     if (isOpen && !prevIsOpenRef.current) {
-      setEmoji(initialNote?.emoji || '');
-      setText(initialNote?.text || '');
-      setFontSize(initialNote?.fontSize || 3);
-      setIsBold(initialNote?.isBold || false);
-      setIsFavorite(initialNote?.isFavorite ?? false);
-      setColor(initialNote?.color || DEFAULT_BG);
-      setTags(initialNote?.tags || []);
-      setImages(initialNote?.images || []);
-      setSketch(initialNote?.sketch);
+      // If we have unsaved changes, don't reset the state - preserve user edits
+      if (!hasUnsavedChangesRef.current) {
+        setEmoji(initialNote?.emoji || '');
+        setText(initialNote?.text || '');
+        setFontSize(initialNote?.fontSize || 3);
+        setIsBold(initialNote?.isBold || false);
+        setIsFavorite(initialNote?.isFavorite ?? false);
+        setColor(initialNote?.color || DEFAULT_BG);
+        setTags(initialNote?.tags || []);
+        setImages(initialNote?.images || []);
+        setSketch(initialNote?.sketch);
+      }
+      // Don't reset hasUnsavedChangesRef.current here - preserve it for the session
       setIsAddingTag(false);
       setIsSketching(false);
-      prevNoteIdRef.current = initialNote?.id;
+      prevNoteIdRef.current = noteId;
     }
     // When note ID changes (switching between notes in cluster), reset all state
-    else if (isOpen && initialNote?.id !== prevNoteIdRef.current) {
+    else if (isOpen && noteId !== prevNoteIdRef.current) {
       setEmoji(initialNote?.emoji || '');
       setText(initialNote?.text || '');
       setFontSize(initialNote?.fontSize || 3);
@@ -203,15 +200,11 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       setSketch(initialNote?.sketch);
       setIsAddingTag(false);
       setIsSketching(false);
-      prevNoteIdRef.current = initialNote?.id;
-    }
-    // Update images when initialNote changes (for drag-in images), but preserve other state
-    // Only if note ID hasn't changed (to avoid overwriting during note switch)
-    else if (isOpen && initialNote?.images && initialNote?.id === prevNoteIdRef.current) {
-      setImages(initialNote.images);
+      hasUnsavedChangesRef.current = false; // Reset for new note
+      prevNoteIdRef.current = noteId;
     }
     prevIsOpenRef.current = isOpen;
-  }, [initialNote, isOpen]);
+  }, [noteId, isOpen]);
   
   // Detect keyboard height by monitoring viewport height changes (removed for text mode)
   useEffect(() => {
@@ -297,6 +290,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         const base64Promises = files.map(file => fileToBase64(file));
         const base64Images = await Promise.all(base64Promises);
         setImages([...images, ...base64Images]);
+        hasUnsavedChangesRef.current = true;
         // Reset input to allow selecting the same files again
         e.target.value = '';
       } catch (err) {
@@ -333,7 +327,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       }
     } else {
       // Remove all images (backward compatibility)
-      setImages([]);
+    setImages([]); 
       setPreviewImage(null);
     }
   };
@@ -345,8 +339,19 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   };
 
   const getCurrentNoteData = (): Partial<Note> => {
-    return {
-      ...initialNote,
+    // Don't spread initialNote first - build from scratch to ensure we use current state
+    const noteData: Partial<Note> = {
+      // Only copy id and other immutable fields from initialNote
+      id: initialNote?.id,
+      createdAt: initialNote?.createdAt,
+      coords: initialNote?.coords,
+      boardX: initialNote?.boardX,
+      boardY: initialNote?.boardY,
+      groupId: initialNote?.groupId,
+      groupName: initialNote?.groupName,
+      groupIds: initialNote?.groupIds,
+      groupNames: initialNote?.groupNames,
+      // Use current state for all editable fields
       emoji: isCompactMode ? '' : emoji,
       text,
       fontSize,
@@ -354,9 +359,11 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       isFavorite,
       color,
       tags: isCompactMode ? [] : tags,
-      images,
+      // Always use current state for images and sketch
+      images: images || [],
       sketch: sketch === '' ? undefined : sketch
     };
+    return noteData;
   };
 
   const isEmptyNote = (noteData: Partial<Note>): boolean => {
@@ -372,28 +379,40 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
 
   const handleSave = () => {
     const noteData = getCurrentNoteData();
-    
+
+    // Ensure images are always included in the saved data
+    if (!noteData.images) {
+      noteData.images = images || [];
+    }
+
     // If note is empty and it's a new note (has id but hasn't been saved yet), delete it
     if (isEmptyNote(noteData) && initialNote?.id && onDelete) {
       onDelete(initialNote.id);
       onClose();
       return;
     }
-    
+
     // If note is empty and has no id, just close without saving
     if (isEmptyNote(noteData) && !initialNote?.id) {
       onClose();
       return;
     }
-    
+
     // Otherwise, save the note
     onSave(noteData);
+    hasUnsavedChangesRef.current = false; // Reset after successful save
     onClose();
   };
 
   const handleSaveWithoutClose = () => {
     if (onSaveWithoutClose) {
-      onSaveWithoutClose(getCurrentNoteData());
+      const noteData = getCurrentNoteData();
+      // Ensure images are always included
+      if (!noteData.images) {
+        noteData.images = images || [];
+      }
+      onSaveWithoutClose(noteData);
+      hasUnsavedChangesRef.current = false; // Reset after successful save
     }
   };
 
@@ -681,46 +700,69 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                               onClick={(e) => e.stopPropagation()}
                             >
                               {/* Category Tabs */}
-                              <div 
-                                ref={categoryTabsRef}
-                                className="flex gap-1 p-1.5 border-b border-gray-100 overflow-x-auto scrollbar-hide"
-                                style={{
-                                  scrollbarWidth: 'none',
-                                  msOverflowStyle: 'none',
-                                  WebkitOverflowScrolling: 'touch',
-                                  touchAction: 'pan-x',
-                                  cursor: isDraggingCategoryTabs ? 'grabbing' : 'grab'
-                                }}
-                                onMouseDown={handleCategoryTabsMouseDown}
-                              >
-                                {Object.keys(EMOJI_CATEGORIES).map(category => (
+                              <div className="relative border-b border-gray-100">
+                                {/* Left Arrow */}
+                                {canScrollLeft && (
                                   <button
-                                    key={category}
                                     onClick={(e) => {
-                                      if (hasDraggedRef.current) {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        return;
-                                      }
-                                      setSelectedEmojiCategory(category as keyof typeof EMOJI_CATEGORIES);
+                                      e.stopPropagation();
+                                      scrollCategoryTabs('left');
                                     }}
-                                    className={`px-2 py-1 text-xs font-medium rounded-lg whitespace-nowrap transition-colors flex-shrink-0 ${
-                                      selectedEmojiCategory === category
-                                        ? 'text-gray-900'
-                                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                    }`}
+                                    className="absolute left-0 top-0 bottom-0 z-10 px-2 bg-white/80 hover:bg-white flex items-center transition-colors"
+                                    style={{ backdropFilter: 'blur(4px)' }}
                                   >
-                                    {category}
+                                    <ArrowLeft size={16} className="text-gray-600" />
                                   </button>
-                                ))}
+                                )}
+                                {/* Right Arrow */}
+                                {canScrollRight && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      scrollCategoryTabs('right');
+                                    }}
+                                    className="absolute right-0 top-0 bottom-0 z-10 px-2 bg-white/80 hover:bg-white flex items-center transition-colors"
+                                    style={{ backdropFilter: 'blur(4px)' }}
+                                  >
+                                    <ArrowRight size={16} className="text-gray-600" />
+                                  </button>
+                                )}
+                                {/* Category Tabs Container */}
+                                <div 
+                                  ref={categoryTabsRef}
+                                  className="flex gap-1 p-1.5 overflow-x-auto scrollbar-hide"
+                                  style={{
+                                    scrollbarWidth: 'none',
+                                    msOverflowStyle: 'none',
+                                    WebkitOverflowScrolling: 'touch',
+                                    touchAction: 'pan-x'
+                                  }}
+                                >
+                                  {Object.keys(EMOJI_CATEGORIES).map(category => (
+                                    <button
+                                      key={category}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedEmojiCategory(category as keyof typeof EMOJI_CATEGORIES);
+                                      }}
+                                      className={`px-2 py-1 text-xs font-medium rounded-lg whitespace-nowrap transition-colors flex-shrink-0 ${
+                                        selectedEmojiCategory === category
+                                          ? 'text-gray-900'
+                                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                      }`}
+                                    >
+                                      {category}
+                                    </button>
+                                  ))}
+                                </div>
                               </div>
                               
                               {/* Emoji Grid */}
                               <div className="p-3 overflow-y-auto" style={{ maxHeight: '320px' }}>
-                                <div className="grid grid-cols-8 gap-1">
-                                  {(EMOJI_CATEGORIES[selectedEmojiCategory] || EMOJI_CATEGORIES['Recent']).map(e => (
+                                <div className="grid grid-cols-8 gap-1" key={selectedEmojiCategory}>
+                                  {(EMOJI_CATEGORIES[selectedEmojiCategory] || EMOJI_CATEGORIES['Recent']).map((e, index) => (
                                     <button 
-                                      key={e} 
+                                      key={`${selectedEmojiCategory}-${index}-${e}`} 
                                       onClick={() => { 
                                         setEmoji(e); 
                                         setShowEmojiPicker(false);

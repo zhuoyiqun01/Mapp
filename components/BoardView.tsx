@@ -5158,7 +5158,7 @@ const createNoteAtCenter = (variant: 'compact') => {
           <NoteEditor 
               isOpen={!!editingNote}
               onClose={closeEditor}
-              initialNote={editingNote}
+              initialNote={notes.find(n => n.id === editingNote.id) || editingNote}
               onDelete={onDeleteNote}
               onSwitchToMapView={onSwitchToMapView}
               onSwitchToBoardView={onSwitchToBoardView}
@@ -5170,16 +5170,29 @@ const createNoteAtCenter = (variant: 'compact') => {
                       const fullNote: Note = {
                           ...existingNote!,
                           ...updated,
-                          variant: updated.variant || existingNote!.variant
+                          variant: updated.variant || existingNote!.variant,
+                          // Always use updated.images if it exists (even if empty array)
+                          // This ensures new uploads are saved, not reverted to old images
+                          images: updated.images !== undefined ? updated.images : (existingNote!.images || []),
+                          // Always use updated.sketch if it exists (even if undefined to clear)
+                          // This ensures new sketches are saved, not reverted to old sketch
+                          sketch: 'sketch' in updated ? updated.sketch : existingNote!.sketch
                       };
                       onUpdateNote(fullNote);
+                      // Update editingNote state to reflect the saved changes
+                      // This ensures that if the editor is reopened, it will use the updated data
+                      setEditingNote(fullNote);
                   } else if (onAddNote && updated.id) {
                       // 新Note必须指定variant，如果没有则默认为standard
                       const fullNote: Note = {
                           ...updated,
-                          variant: updated.variant || 'standard'
+                          variant: updated.variant || 'standard',
+                          // Ensure images is always an array for new notes
+                          images: updated.images || []
                       } as Note;
                       onAddNote(fullNote);
+                      // For new notes, clear editingNote since the note is now saved
+                      setEditingNote(null);
                   }
               }}
           />
