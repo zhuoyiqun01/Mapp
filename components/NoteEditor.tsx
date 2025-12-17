@@ -286,10 +286,14 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       try {
+        console.log('NoteEditor: Starting image upload, files:', e.target.files.length);
         const files = Array.from(e.target.files);
         const base64Promises = files.map(file => fileToBase64(file));
         const base64Images = await Promise.all(base64Promises);
-        setImages([...images, ...base64Images]);
+        console.log('NoteEditor: Converted images:', base64Images.length, base64Images.slice(0, 1)); // Only log first image preview
+        const newImages = [...images, ...base64Images];
+        console.log('NoteEditor: Setting images to:', newImages.length, 'images');
+        setImages(newImages);
         hasUnsavedChangesRef.current = true;
         // Reset input to allow selecting the same files again
         e.target.value = '';
@@ -339,6 +343,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   };
 
   const getCurrentNoteData = (): Partial<Note> => {
+    console.log('NoteEditor: getCurrentNoteData called, current images state:', images);
     // Don't spread initialNote first - build from scratch to ensure we use current state
     const noteData: Partial<Note> = {
       // Only copy id and other immutable fields from initialNote
@@ -363,6 +368,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       images: images || [],
       sketch: sketch === '' ? undefined : sketch
     };
+    console.log('NoteEditor: getCurrentNoteData returning noteData.images:', noteData.images);
     return noteData;
   };
 
