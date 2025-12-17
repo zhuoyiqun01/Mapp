@@ -88,6 +88,33 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
   useEffect(() => {
     const container = map.getContainer();
 
+    // Global handler to clear state when pointer is released anywhere
+    // This ensures state is cleared even if events are stopped on UI elements
+    const handleGlobalEnd = (e: Event) => {
+      if (timerRef.current || startPosRef.current) {
+        // Check if pointer is over a UI element
+        let clientX = 0;
+        let clientY = 0;
+        if (e instanceof MouseEvent) {
+          clientX = e.clientX;
+          clientY = e.clientY;
+        } else if (e instanceof TouchEvent && e.changedTouches.length > 0) {
+          clientX = e.changedTouches[0].clientX;
+          clientY = e.changedTouches[0].clientY;
+        }
+        
+        const elementAtPoint = document.elementFromPoint(clientX, clientY);
+        if (elementAtPoint && isUIElement(elementAtPoint)) {
+          // Pointer is over UI element, clear state
+          if (timerRef.current) {
+            clearTimeout(timerRef.current);
+            timerRef.current = null;
+          }
+          startPosRef.current = null;
+        }
+      }
+    };
+
     const handleStart = (e: TouchEvent | MouseEvent) => {
       if (e instanceof MouseEvent && e.button !== 0) return;
       
@@ -162,12 +189,29 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
        const clientX = 'touches' in e ? e.touches[0].clientX : (e as MouseEvent).clientX;
        const clientY = 'touches' in e ? e.touches[0].clientY : (e as MouseEvent).clientY;
        
-       // Check if moved to UI element
-       if (isUIElement(e.target) || (document.elementFromPoint(clientX, clientY) && isUIElement(document.elementFromPoint(clientX, clientY)))) {
+       // Check if moved to UI element - check both target and current pointer position
+       const elementAtPoint = document.elementFromPoint(clientX, clientY);
+       if (isUIElement(e.target) || (elementAtPoint && isUIElement(elementAtPoint))) {
          clearTimeout(timerRef.current);
          timerRef.current = null;
          startPosRef.current = null;
          return;
+       }
+       
+       // Also check if pointer is over any element with pointer-events-auto or high z-index
+       if (elementAtPoint) {
+         let current: HTMLElement | null = elementAtPoint as HTMLElement;
+         while (current && current !== container) {
+           const zIndex = window.getComputedStyle(current).zIndex;
+           if (current.classList.contains('pointer-events-auto') || 
+               (zIndex && parseInt(zIndex) >= 400)) {
+             clearTimeout(timerRef.current);
+             timerRef.current = null;
+             startPosRef.current = null;
+             return;
+           }
+           current = current.parentElement;
+         }
        }
        
        const dx = clientX - startPosRef.current.x;
@@ -188,16 +232,28 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
          touchCountRef.current = 0;
        }
        
-       // If clicked on marker, don't clear timer (let marker click event handle it)
+       // Always clear timer and position on end, regardless of target
+       // This ensures that if user started on map but ended on UI, we clear state
+       if (timerRef.current) {
+         clearTimeout(timerRef.current);
+         timerRef.current = null;
+       }
+       
+       // If clicked on UI element, clear immediately and return
        if (e && isUIElement(e.target)) {
-         // Marker click, don't handle long press logic
-         // Clear timer immediately to prevent long press from firing
-         if (timerRef.current) {
-           clearTimeout(timerRef.current);
-           timerRef.current = null;
-         }
          startPosRef.current = null;
          return;
+       }
+       
+       // Also check current pointer position in case it moved to UI element
+       if (e) {
+         const clientX = 'touches' in e ? (e.touches.length > 0 ? e.touches[0].clientX : 0) : (e as MouseEvent).clientX;
+         const clientY = 'touches' in e ? (e.touches.length > 0 ? e.touches[0].clientY : 0) : (e as MouseEvent).clientY;
+         const elementAtPoint = document.elementFromPoint(clientX, clientY);
+         if (elementAtPoint && isUIElement(elementAtPoint)) {
+           startPosRef.current = null;
+           return;
+         }
        }
        
        // For non-marker clicks, also check if we moved significantly
@@ -233,6 +289,12 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
     container.addEventListener('mousemove', handleMove);
     container.addEventListener('touchend', (e) => handleEnd(e));
     container.addEventListener('mouseup', handleEnd);
+    
+    // Add global listeners to catch events even if stopped on UI elements
+    // Use capture phase to catch events before they're stopped
+    document.addEventListener('mouseup', handleGlobalEnd, true);
+    document.addEventListener('touchend', handleGlobalEnd, true);
+    document.addEventListener('pointerup', handleGlobalEnd, true);
 
     return () => {
       container.removeEventListener('touchstart', handleStart);
@@ -241,6 +303,9 @@ const MapLongPressHandler = ({ onLongPress }: { onLongPress: (coords: Coordinate
       container.removeEventListener('mousemove', handleMove);
       container.removeEventListener('touchend', handleEnd);
       container.removeEventListener('mouseup', handleEnd);
+      document.removeEventListener('mouseup', handleGlobalEnd, true);
+      document.removeEventListener('touchend', handleGlobalEnd, true);
+      document.removeEventListener('pointerup', handleGlobalEnd, true);
     };
   }, [map, onLongPress]);
 
@@ -330,6 +395,34 @@ const MapNavigationHandler = ({ coords, onComplete }: { coords: { lat: number; l
   }, [coords, map, onComplete]);
   
   return null;
+};
+
+// Component to block map container from receiving pointer events in capture phase
+const SearchBarContainer = ({ children }: { children: React.ReactNode }) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+    
+    useEffect(() => {
+        const container = containerRef.current;
+        if (!container) return;
+        
+        const handleCaptureStart = (e: Event) => {
+            // Stop event from reaching map container in capture phase
+            e.stopPropagation();
+        };
+        
+        // Use capture phase to intercept events before they reach map container
+        container.addEventListener('mousedown', handleCaptureStart, true);
+        container.addEventListener('touchstart', handleCaptureStart, true);
+        container.addEventListener('pointerdown', handleCaptureStart, true);
+        
+        return () => {
+            container.removeEventListener('mousedown', handleCaptureStart, true);
+            container.removeEventListener('touchstart', handleCaptureStart, true);
+            container.removeEventListener('pointerdown', handleCaptureStart, true);
+        };
+    }, []);
+    
+    return <div ref={containerRef}>{children}</div>;
 };
 
 const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange, mapNotes, themeColor = THEME_COLOR }: { 
@@ -524,9 +617,34 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
         }
     }, [showImportMenu, showLocateMenu]);
     
+    const controlsRef = useRef<HTMLDivElement>(null);
+    
+    // Block map container from receiving pointer down events when pointer is in UI area
+    useEffect(() => {
+        const container = controlsRef.current;
+        if (!container) return;
+        
+        const handleCaptureStart = (e: Event) => {
+            // Stop event from reaching map container in capture phase
+            e.stopPropagation();
+        };
+        
+        // Use capture phase to intercept events before they reach map container
+        container.addEventListener('mousedown', handleCaptureStart, true);
+        container.addEventListener('touchstart', handleCaptureStart, true);
+        container.addEventListener('pointerdown', handleCaptureStart, true);
+        
+        return () => {
+            container.removeEventListener('mousedown', handleCaptureStart, true);
+            container.removeEventListener('touchstart', handleCaptureStart, true);
+            container.removeEventListener('pointerdown', handleCaptureStart, true);
+        };
+    }, []);
+    
     return (
         <div 
-            className="flex flex-row gap-[6px] pointer-events-auto"
+            ref={controlsRef}
+            className="flex flex-row gap-1.5 sm:gap-2 pointer-events-auto"
             onPointerDown={(e) => e.stopPropagation()}
             onPointerMove={(e) => e.stopPropagation()}
             onPointerUp={(e) => e.stopPropagation()}
@@ -572,16 +690,87 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                     <Locate size={18} className="sm:w-5 sm:h-5" />
                 </button>
                 {showLocateMenu && (
-                    <div className="absolute left-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-[2000]">
+                    <div 
+                        className="absolute left-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-[2000]"
+                        onPointerDown={(e) => {
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                        }}
+                        onPointerMove={(e) => {
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                        }}
+                        onPointerUp={(e) => {
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                        }}
+                        onMouseDown={(e) => {
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                        }}
+                        onMouseMove={(e) => {
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                        }}
+                        onMouseUp={(e) => {
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                        }}
+                        onTouchStart={(e) => {
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                        }}
+                        onTouchMove={(e) => {
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                        }}
+                        onTouchEnd={(e) => {
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                        }}
+                    >
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
                                 locateToCurrentPosition();
                                 setShowLocateMenu(false);
                             }}
-                            onPointerDown={(e) => e.stopPropagation()}
-                            onPointerMove={(e) => e.stopPropagation()}
-                            onPointerUp={(e) => e.stopPropagation()}
+                            onPointerDown={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onPointerMove={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onPointerUp={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onMouseDown={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onMouseMove={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onMouseUp={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onTouchStart={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onTouchMove={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onTouchEnd={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
                             className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 text-gray-700 whitespace-nowrap"
                         >
                             Locate to my Position
@@ -593,9 +782,42 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                                 locateToLatestPin();
                                 setShowLocateMenu(false);
                             }}
-                            onPointerDown={(e) => e.stopPropagation()}
-                            onPointerMove={(e) => e.stopPropagation()}
-                            onPointerUp={(e) => e.stopPropagation()}
+                            onPointerDown={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onPointerMove={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onPointerUp={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onMouseDown={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onMouseMove={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onMouseUp={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onTouchStart={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onTouchMove={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onTouchEnd={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
                             disabled={mapNotes.length === 0}
                             className={`w-full text-left px-4 py-2.5 text-sm ${
                                 mapNotes.length === 0 
@@ -680,7 +902,45 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                     </svg>
                 </button>
                 {showImportMenu && (
-                    <div className="absolute left-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-[2000]">
+                    <div 
+                        className="absolute left-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-[2000]"
+                        onPointerDown={(e) => {
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                        }}
+                        onPointerMove={(e) => {
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                        }}
+                        onPointerUp={(e) => {
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                        }}
+                        onMouseDown={(e) => {
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                        }}
+                        onMouseMove={(e) => {
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                        }}
+                        onMouseUp={(e) => {
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                        }}
+                        onTouchStart={(e) => {
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                        }}
+                        onTouchMove={(e) => {
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                        }}
+                        onTouchEnd={(e) => {
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                        }}
+                    >
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
@@ -701,9 +961,42 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                                 onImportData();
                                 setShowImportMenu(false);
                             }}
-                            onPointerDown={(e) => e.stopPropagation()}
-                            onPointerMove={(e) => e.stopPropagation()}
-                            onPointerUp={(e) => e.stopPropagation()}
+                            onPointerDown={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onPointerMove={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onPointerUp={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onMouseDown={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onMouseMove={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onMouseUp={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onTouchStart={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onTouchMove={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
+                            onTouchEnd={(e) => {
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                            }}
                             className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
                         >
                             <FileJson size={16} /> Import from Data
@@ -2527,6 +2820,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 mapNotes={mapNotes}
                 themeColor={themeColor}
               />
+              <SearchBarContainer>
               <div 
                   className="flex-1 max-w-md relative group pointer-events-auto"
                   onPointerDown={(e) => {
@@ -2752,6 +3046,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                       </div>
                   )}
               </div>
+              </SearchBarContainer>
           </div>
         )}
 

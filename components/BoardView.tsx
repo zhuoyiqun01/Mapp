@@ -4495,6 +4495,191 @@ const createNoteAtCenter = (variant: 'compact') => {
           })()}
         </div>
 
+        {/* 图层按钮：非编辑模式右侧单独容器 */}
+        {!isEditMode && (
+            <div 
+                className="fixed top-2 sm:top-4 right-2 sm:right-4 z-[500] pointer-events-auto flex items-center"
+                style={{ height: '40px' }}
+                onPointerDown={(e) => e.stopPropagation()}
+            >
+                <div className="relative">
+                    <button 
+                        onClick={(e) => { 
+                            e.stopPropagation(); 
+                            setShowLayerPanel(!showLayerPanel);
+                        }}
+                        onPointerDown={(e) => {
+                            e.stopPropagation();
+                            e.currentTarget.style.backgroundColor = themeColor;
+                        }}
+                        onPointerUp={(e) => {
+                            e.stopPropagation();
+                            if (!showLayerPanel) {
+                                e.currentTarget.style.backgroundColor = '';
+                            }
+                        }}
+                        onMouseEnter={(e) => {
+                            if (!showLayerPanel) {
+                                e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
+                            }
+                        }}
+                        onMouseLeave={(e) => {
+                            if (!showLayerPanel) {
+                                e.currentTarget.style.backgroundColor = '';
+                            }
+                        }}
+                        className={`bg-white p-2 sm:p-3 rounded-xl shadow-lg transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${
+                            showLayerPanel ? 'text-white' : 'text-gray-700'
+                        }`}
+                        style={{ backgroundColor: showLayerPanel ? themeColor : undefined }}
+                        title="图层"
+                    >
+                        <Layers size={18} className="sm:w-5 sm:h-5" />
+                    </button>
+                    {showLayerPanel && (
+                        <div 
+                            className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-[2000]"
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <div className="px-3 py-2 text-xs font-bold text-gray-500 uppercase tracking-wide">Layer</div>
+                            <div className="h-px bg-gray-100 mb-1" />
+                            {/* Connects (连线) - Top */}
+                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
+                                <div className="flex items-center gap-2">
+                                    <GitBranch size={16} className="text-gray-600" strokeWidth={2} />
+                                    <span className="text-sm text-gray-700">Connects</span>
+                                </div>
+                                <input
+                                    type="checkbox"
+                                    checked={layerVisibility.connects}
+                                    onChange={(e) => {
+                                        e.stopPropagation();
+                                        setLayerVisibility(prev => ({ ...prev, connects: !prev.connects }));
+                                    }}
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
+                                        layerVisibility.connects 
+                                            ? '' 
+                                            : 'bg-transparent'
+                                    }`}
+                                    style={{ 
+                                        backgroundColor: layerVisibility.connects ? themeColor : 'transparent',
+                                        borderColor: themeColor
+                                    }}
+                                />
+                            </div>
+                            {/* Secondary (小便签) */}
+                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
+                                <div className="flex items-center gap-2">
+                                    <StickyNote size={16} className="text-gray-600" strokeWidth={2} />
+                                    <span className="text-sm text-gray-700">Sticky Notes</span>
+                                </div>
+                                <input
+                                    type="checkbox"
+                                    checked={layerVisibility.secondary}
+                                    onChange={(e) => {
+                                        e.stopPropagation();
+                                        setLayerVisibility(prev => ({ ...prev, secondary: !prev.secondary }));
+                                    }}
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
+                                        layerVisibility.secondary 
+                                            ? '' 
+                                            : 'bg-transparent'
+                                    }`}
+                                    style={{ 
+                                        backgroundColor: layerVisibility.secondary ? themeColor : 'transparent',
+                                        borderColor: themeColor
+                                    }}
+                                />
+                            </div>
+                            {/* Primary Notes */}
+                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
+                                <div className="flex items-center gap-2">
+                                    <Square size={16} className="text-gray-600" strokeWidth={2} />
+                                    <span className="text-sm text-gray-700">Primary Notes</span>
+                                </div>
+                                <input
+                                    type="checkbox"
+                                    checked={layerVisibility.primary}
+                                    onChange={(e) => {
+                                        e.stopPropagation();
+                                        setLayerVisibility(prev => ({ ...prev, primary: !prev.primary }));
+                                    }}
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
+                                        layerVisibility.primary 
+                                            ? '' 
+                                            : 'bg-transparent'
+                                    }`}
+                                    style={{ 
+                                        backgroundColor: layerVisibility.primary ? themeColor : 'transparent',
+                                        borderColor: themeColor
+                                    }}
+                                />
+                            </div>
+                            {/* Images */}
+                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
+                                <div className="flex items-center gap-2">
+                                    <ImageIcon size={16} className="text-gray-600" strokeWidth={2} />
+                                    <span className="text-sm text-gray-700">Images</span>
+                                </div>
+                                <input
+                                    type="checkbox"
+                                    checked={layerVisibility.image}
+                                    onChange={(e) => {
+                                        e.stopPropagation();
+                                        setLayerVisibility(prev => ({ ...prev, image: !prev.image }));
+                                    }}
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
+                                        layerVisibility.image 
+                                            ? '' 
+                                            : 'bg-transparent'
+                                    }`}
+                                    style={{ 
+                                        backgroundColor: layerVisibility.image ? themeColor : 'transparent',
+                                        borderColor: themeColor
+                                    }}
+                                />
+                            </div>
+                            {/* Frames */}
+                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
+                                <div className="flex items-center gap-2">
+                                    <Square size={16} className="text-gray-600" strokeWidth={2} />
+                                    <span className="text-sm text-gray-700">Frames</span>
+                                </div>
+                                <input
+                                    type="checkbox"
+                                    checked={layerVisibility.frame}
+                                    onChange={(e) => {
+                                        e.stopPropagation();
+                                        setLayerVisibility(prev => ({ ...prev, frame: !prev.frame }));
+                                    }}
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
+                                        layerVisibility.frame 
+                                            ? '' 
+                                            : 'bg-transparent'
+                                    }`}
+                                    style={{ 
+                                        backgroundColor: layerVisibility.frame ? themeColor : 'transparent',
+                                        borderColor: themeColor
+                                    }}
+                                />
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        )}
+
         {/* Shift button for multi-select (编辑模式) and multi-frame filter (非编辑模式) - above ZoomSlider */}
         {(
           <motion.div 
@@ -4574,8 +4759,10 @@ const createNoteAtCenter = (variant: 'compact') => {
 
         {/* Edit Toolbar: Unified White Buttons at Top Left */}
             <div 
-            className={`fixed top-2 sm:top-4 z-[500] pointer-events-auto animate-in fade-in flex items-center gap-1 sm:gap-2 ${isEditMode ? 'left-1/2 -translate-x-1/2' : 'left-2 sm:left-4 slide-in-from-left-4'}`}
-            style={{ height: '40px', alignItems: 'center' }}
+                className={`fixed top-2 sm:top-4 z-[500] pointer-events-auto animate-in fade-in flex items-center gap-1.5 sm:gap-2 ${
+                    isEditMode ? 'left-1/2 -translate-x-1/2' : 'left-2 sm:left-4 slide-in-from-left-4'
+                }`}
+                style={{ height: '40px', alignItems: 'center' }}
                 onPointerDown={(e) => {
                     e.stopPropagation();
                     // 退出位置选择模式
@@ -4591,13 +4778,13 @@ const createNoteAtCenter = (variant: 'compact') => {
                     }
                 }}
             >
-            {/* Layout Buttons: L+ and L- */}
+                {/* Layout Buttons: L+ and L- */}
         {isEditMode && (
             <div 
-                    className="bg-white rounded-xl border border-gray-100 flex gap-1 sm:gap-2 items-center p-0.5 sm:p-1" 
-                    style={{ height: '40px' }}
+                        className="bg-white rounded-xl border border-gray-100 flex gap-1.5 sm:gap-2 items-center p-0.5 sm:p-1" 
+                        style={{ height: '40px' }}
                 onPointerDown={(e) => e.stopPropagation()} 
-                    onClick={(e) => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
             >
                     <button
                         onClick={(e) => {
@@ -4695,42 +4882,86 @@ const createNoteAtCenter = (variant: 'compact') => {
                         <span className="text-base sm:text-lg">L-</span>
                     </button>
                 </div>
-            )}
-            <div 
-                className={`bg-white rounded-xl border border-gray-100 flex gap-1.5 sm:gap-2 items-center ${isEditMode ? 'p-0.5 sm:p-1' : ''}`} 
-                style={{ height: '40px' }}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => e.stopPropagation()}
-            >
-                {!isEditMode ? (
-                    // 非编辑模式：显示进入编辑模式的按钮
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            setIsEditMode(true);
-                        }}
-                        onPointerDown={(e) => {
-                            e.stopPropagation();
-                            e.currentTarget.style.backgroundColor = themeColor;
-                        }}
-                        onPointerUp={(e) => {
-                            e.stopPropagation();
-                            e.currentTarget.style.backgroundColor = '';
-                        }}
-                        onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
-                        }}
-                        onMouseLeave={(e) => {
-                            e.currentTarget.style.backgroundColor = '';
-                        }}
-                        className="bg-white p-2 sm:p-3 rounded-xl shadow-lg text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
-                        title="进入编辑模式"
-                    >
-                        <Pencil size={18} className="sm:w-5 sm:h-5" />
-                    </button>
-                ) : (
-                    // 编辑模式：显示编辑工具
-                    <>
+                )}
+                <div 
+                    className={`flex gap-1.5 sm:gap-2 items-center ${
+                        isEditMode ? 'p-0.5 sm:p-1' : ''
+                    }`} 
+                    style={{ height: '40px' }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    {!isEditMode ? (
+                        // 非编辑模式：进入编辑 + 导入按钮并排
+                        <>
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setIsEditMode(true);
+                                }}
+                                onPointerDown={(e) => {
+                                    e.stopPropagation();
+                                    e.currentTarget.style.backgroundColor = themeColor;
+                                }}
+                                onPointerUp={(e) => {
+                                    e.stopPropagation();
+                                    e.currentTarget.style.backgroundColor = '';
+                                }}
+                                onMouseEnter={(e) => {
+                                    e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
+                                }}
+                                onMouseLeave={(e) => {
+                                    e.currentTarget.style.backgroundColor = '';
+                                }}
+                                className="bg-white p-2 sm:p-3 rounded-xl shadow-lg text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
+                                title="进入编辑模式"
+                            >
+                                <Pencil size={18} className="sm:w-5 sm:h-5" />
+                            </button>
+                            <div className="relative" ref={menuRef}>
+                                <button 
+                                    onClick={(e) => { 
+                                        e.stopPropagation(); 
+                                        setShowImportMenu(!showImportMenu);
+                                    }}
+                                    className="bg-white p-2 sm:p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
+                                    title="Import"
+                                >
+                                    <svg width="18" height="18" className="sm:w-5 sm:h-5" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                                        <path d="M8 11V5M5 8l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                                    </svg>
+                                </button>
+                                {showImportMenu && (
+                                    <div className="absolute left-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-[2000]">
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                fileInputRef.current?.click();
+                                                setShowImportMenu(false);
+                                            }}
+                                            className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                                        >
+                                            <ImageIcon size={16} /> Import from Photos
+                                        </button>
+                                        <div className="h-px bg-gray-100 my-1" />
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                dataImportInputRef.current?.click();
+                                                setShowImportMenu(false);
+                                            }}
+                                            className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                                        >
+                                            <FileJson size={16} /> Import from Data
+                                        </button>
+            </div>
+        )}
+                            </div>
+                        </>
+                    ) : (
+                        // 编辑模式：显示编辑工具
+                        <>
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
@@ -4901,246 +5132,6 @@ const createNoteAtCenter = (variant: 'compact') => {
             </div>
         </div>
 
-        {/* Layer button - horizontal layout with edit button (non-edit mode only) */}
-        {!isEditMode && (
-            <div 
-                className="fixed top-2 sm:top-4 left-[56px] sm:left-[68px] z-[500] pointer-events-auto flex items-center"
-                style={{ height: '40px' }}
-                onPointerDown={(e) => e.stopPropagation()}
-            >
-                <div className="relative">
-                    <button 
-                        onClick={(e) => { 
-                            e.stopPropagation(); 
-                            setShowLayerPanel(!showLayerPanel);
-                        }}
-                        onPointerDown={(e) => {
-                            e.stopPropagation();
-                            e.currentTarget.style.backgroundColor = themeColor;
-                        }}
-                        onPointerUp={(e) => {
-                            e.stopPropagation();
-                            if (!showLayerPanel) {
-                                e.currentTarget.style.backgroundColor = '';
-                            }
-                        }}
-                        onMouseEnter={(e) => {
-                            if (!showLayerPanel) {
-                                e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
-                            }
-                        }}
-                        onMouseLeave={(e) => {
-                            if (!showLayerPanel) {
-                                e.currentTarget.style.backgroundColor = '';
-                            }
-                        }}
-                        className={`bg-white p-2 sm:p-3 rounded-xl shadow-lg transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${
-                            showLayerPanel ? 'text-white' : 'text-gray-700'
-                        }`}
-                        style={{ backgroundColor: showLayerPanel ? themeColor : undefined }}
-                        title="图层"
-                    >
-                        <Layers size={18} className="sm:w-5 sm:h-5" />
-                    </button>
-                    {showLayerPanel && (
-                        <div 
-                            className="absolute left-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-[2000]"
-                            onPointerDown={(e) => e.stopPropagation()}
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            <div className="px-3 py-2 text-xs font-bold text-gray-500 uppercase tracking-wide">Layer</div>
-                            <div className="h-px bg-gray-100 mb-1" />
-                            {/* Connects (连线) - Top */}
-                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
-                                <div className="flex items-center gap-2">
-                                    <GitBranch size={16} className="text-gray-600" strokeWidth={2} />
-                                    <span className="text-sm text-gray-700">Connects</span>
-                                </div>
-                                <input
-                                    type="checkbox"
-                                    checked={layerVisibility.connects}
-                                    onChange={(e) => {
-                                        e.stopPropagation();
-                                        setLayerVisibility(prev => ({ ...prev, connects: !prev.connects }));
-                                    }}
-                                    onPointerDown={(e) => e.stopPropagation()}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
-                                        layerVisibility.connects 
-                                            ? '' 
-                                            : 'bg-transparent'
-                                    }`}
-                                    style={{ 
-                                        backgroundColor: layerVisibility.connects ? themeColor : 'transparent',
-                                        borderColor: themeColor
-                                    }}
-                                />
-                            </div>
-                            {/* Secondary (小便签) */}
-                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
-                                <div className="flex items-center gap-2">
-                                    <StickyNote size={14} className="text-gray-600" strokeWidth={2.3} />
-                                    <span className="text-sm text-gray-700">Secondary</span>
-                                </div>
-                                <input
-                                    type="checkbox"
-                                    checked={layerVisibility.secondary}
-                                    onChange={(e) => {
-                                        e.stopPropagation();
-                                        setLayerVisibility(prev => ({ ...prev, secondary: !prev.secondary }));
-                                    }}
-                                    onPointerDown={(e) => e.stopPropagation()}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
-                                        layerVisibility.secondary 
-                                            ? '' 
-                                            : 'bg-transparent'
-                                    }`}
-                                    style={{ 
-                                        backgroundColor: layerVisibility.secondary ? themeColor : 'transparent',
-                                        borderColor: themeColor
-                                    }}
-                                />
-                            </div>
-                            {/* Image */}
-                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
-                                <div className="flex items-center gap-2">
-                                    <ImageIcon size={16} className="text-gray-600" strokeWidth={2} />
-                                    <span className="text-sm text-gray-700">Image</span>
-                                </div>
-                                <input
-                                    type="checkbox"
-                                    checked={layerVisibility.image}
-                                    onChange={(e) => {
-                                        e.stopPropagation();
-                                        setLayerVisibility(prev => ({ ...prev, image: !prev.image }));
-                                    }}
-                                    onPointerDown={(e) => e.stopPropagation()}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
-                                        layerVisibility.image 
-                                            ? '' 
-                                            : 'bg-transparent'
-                                    }`}
-                                    style={{ 
-                                        backgroundColor: layerVisibility.image ? themeColor : 'transparent',
-                                        borderColor: themeColor
-                                    }}
-                                />
-                            </div>
-                            {/* Primary (标准便签) */}
-                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
-                                <div className="flex items-center gap-2">
-                                    <StickyNote size={16} className="text-gray-600" strokeWidth={2} />
-                                    <span className="text-sm text-gray-700">Primary</span>
-                                </div>
-                                <input
-                                    type="checkbox"
-                                    checked={layerVisibility.primary}
-                                    onChange={(e) => {
-                                        e.stopPropagation();
-                                        setLayerVisibility(prev => ({ ...prev, primary: !prev.primary }));
-                                    }}
-                                    onPointerDown={(e) => e.stopPropagation()}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
-                                        layerVisibility.primary 
-                                            ? '' 
-                                            : 'bg-transparent'
-                                    }`}
-                                    style={{ 
-                                        backgroundColor: layerVisibility.primary ? themeColor : 'transparent',
-                                        borderColor: themeColor
-                                    }}
-                                />
-                            </div>
-                            {/* Frame - Bottom */}
-                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
-                                <div className="flex items-center gap-2">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-600">
-                                        <line x1="5" y1="2" x2="5" y2="22" />
-                                        <line x1="19" y1="2" x2="19" y2="22" />
-                                        <line x1="3" y1="5" x2="21" y2="5" />
-                                        <line x1="3" y1="19" x2="21" y2="19" />
-                                    </svg>
-                                    <span className="text-sm text-gray-700">Frame</span>
-                                </div>
-                                <input
-                                    type="checkbox"
-                                    checked={layerVisibility.frame}
-                                    onChange={(e) => {
-                                        e.stopPropagation();
-                                        setLayerVisibility(prev => ({ ...prev, frame: !prev.frame }));
-                                    }}
-                                    onPointerDown={(e) => e.stopPropagation()}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
-                                        layerVisibility.frame 
-                                            ? '' 
-                                            : 'bg-transparent'
-                                    }`}
-                                    style={{ 
-                                        backgroundColor: layerVisibility.frame ? themeColor : 'transparent',
-                                        borderColor: themeColor
-                                    }}
-                                />
-                            </div>
-                        </div>
-                    )}
-                </div>
-            </div>
-        )}
-
-        {/* Import button - horizontal layout with edit and layer buttons (non-edit mode only) */}
-        {!isEditMode && (
-            <div 
-                className="fixed top-2 sm:top-4 left-[106px] sm:left-[124px] z-[500] pointer-events-auto flex items-center"
-                style={{ height: '40px' }}
-                ref={menuRef}
-                onPointerDown={(e) => e.stopPropagation()}
-            >
-                <div className="relative">
-                    <button 
-                        onClick={(e) => { 
-                            e.stopPropagation(); 
-                            setShowImportMenu(!showImportMenu);
-                        }}
-                        className="bg-white p-2 sm:p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
-                        title="Import"
-                    >
-                        <svg width="18" height="18" className="sm:w-5 sm:h-5" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" fill="none"/>
-                            <path d="M8 11V5M5 8l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                        </svg>
-                    </button>
-                        {showImportMenu && (
-                            <div className="absolute left-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-[2000]">
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        fileInputRef.current?.click();
-                                        setShowImportMenu(false);
-                                    }}
-                                    className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
-                                >
-                                    <ImageIcon size={16} /> Import from Photos
-                                </button>
-                                <div className="h-px bg-gray-100 my-1" />
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        dataImportInputRef.current?.click();
-                                        setShowImportMenu(false);
-                                    }}
-                                    className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
-                                >
-                                    <FileJson size={16} /> Import from Data
-                                </button>
-                            </div>
-                        )}
-                </div>
-            </div>
-        )}
         
         {/* Hidden file inputs */}
         <input
