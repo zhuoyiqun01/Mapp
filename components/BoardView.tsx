@@ -948,12 +948,10 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   }, [navigateToCoords, containerRef, transform, onNavigateComplete]);
 
   const closeEditor = () => {
-    // Only clear editingNote if it hasn't been updated (e.g., user cancelled without saving)
-    // If editingNote exists and matches a note in the notes array, keep it for potential reopening
-    const currentNoteInNotes = editingNote ? notes.find(n => n.id === editingNote.id) : null;
-    if (!currentNoteInNotes || !editingNote) {
+    // Delay clearing editingNote to ensure state updates are processed
+    setTimeout(() => {
       setEditingNote(null);
-    }
+    }, 100);
     onToggleEditor(false);
   };
 
@@ -5163,7 +5161,7 @@ const createNoteAtCenter = (variant: 'compact') => {
           <NoteEditor 
               isOpen={!!editingNote}
               onClose={closeEditor}
-              initialNote={notes.find(n => n.id === editingNote.id) || editingNote}
+              initialNote={notes.find(n => n.id === editingNote.id)}
               onDelete={onDeleteNote}
               onSwitchToMapView={onSwitchToMapView}
               onSwitchToBoardView={onSwitchToBoardView}

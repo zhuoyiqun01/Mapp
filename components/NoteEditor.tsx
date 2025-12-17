@@ -401,7 +401,11 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     // Otherwise, save the note
     onSave(noteData);
     hasUnsavedChangesRef.current = false; // Reset after successful save
-    onClose();
+
+    // Delay closing to ensure state updates are processed
+    setTimeout(() => {
+      onClose();
+    }, 0);
   };
 
   const handleSaveWithoutClose = () => {
