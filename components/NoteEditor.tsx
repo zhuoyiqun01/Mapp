@@ -340,6 +340,18 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       images: images || [],
       sketch: sketch === '' ? undefined : sketch
     };
+
+    // Auto-set variant based on content
+    if (!noteData.variant) {
+      if ((images && images.length > 0) || sketch) {
+        noteData.variant = 'image';
+      } else if (!emoji || emoji === '') {
+        noteData.variant = 'compact';
+      } else {
+        noteData.variant = 'standard';
+      }
+    }
+
     return noteData;
   };
 
