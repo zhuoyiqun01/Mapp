@@ -72,15 +72,7 @@ export async function deleteSketch(sketchId: string): Promise<void> {
 // 确保Note有variant字段
 function ensureNoteVariant(note: Note): Note {
   if (!note.variant) {
-    // 根据特征判断：如果有imageWidth和imageHeight，且images有内容，可能是image类型
-    if (note.imageWidth && note.imageHeight && note.images && note.images.length > 0) {
-      return { ...note, variant: 'image' };
-    }
-    // 如果没有emoji，可能是compact类型
-    if (!note.emoji || note.emoji === '') {
-      return { ...note, variant: 'compact' };
-    }
-    // 默认是standard
+    // 不要根据内容自动判断 variant，默认为 standard
     return { ...note, variant: 'standard' };
   }
   return note;

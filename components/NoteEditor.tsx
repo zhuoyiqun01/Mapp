@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Note, Tag } from '../types';
 import { EMOJI_LIST, EMOJI_CATEGORIES, TAG_COLORS, THEME_COLOR } from '../constants';
@@ -165,9 +165,25 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const prevNoteIdRef = useRef<string | undefined>(initialNote?.id);
   const noteId = initialNote?.id;
 
+  // Create a checksum of the note data to detect changes
+  const noteDataChecksum = useMemo(() => {
+    return JSON.stringify({
+      emoji: initialNote?.emoji,
+      text: initialNote?.text,
+      fontSize: initialNote?.fontSize,
+      isBold: initialNote?.isBold,
+      isFavorite: initialNote?.isFavorite,
+      color: initialNote?.color,
+      tags: initialNote?.tags,
+      images: initialNote?.images,
+      sketch: initialNote?.sketch,
+    });
+  }, [initialNote]);
+
   useEffect(() => {
-    // When note ID changes (switching between notes in cluster), reset all state
-    if (isOpen && noteId !== prevNoteIdRef.current) {
+    // When note ID changes (switching between notes in cluster) OR note data changes (same note updated), reset all state
+    if (isOpen && (noteId !== prevNoteIdRef.current || prevIsOpenRef.current !== isOpen)) {
+      console.log('NoteEditor resetting state for note:', noteId, 'data changed');
       setEmoji(initialNote?.emoji || '');
       setText(initialNote?.text || '');
       setFontSize(initialNote?.fontSize || 3);
@@ -182,7 +198,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       prevNoteIdRef.current = noteId;
     }
     prevIsOpenRef.current = isOpen;
-  }, [noteId, isOpen]);
+  }, [noteId, isOpen, noteDataChecksum]);
   
   // Detect keyboard height by monitoring viewport height changes (removed for text mode)
   useEffect(() => {
@@ -341,17 +357,9 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       sketch: sketch === '' ? undefined : sketch
     };
 
-    // Auto-set variant based on content - only for new notes or when variant is not already set
-    // Don't change variant for existing notes that already have one
-    if (!noteData.variant) {
-      if ((images && images.length > 0) || sketch) {
-        noteData.variant = 'image';
-      } else if (!emoji || emoji === '') {
-        noteData.variant = 'compact';
-      } else {
-        noteData.variant = 'standard';
-      }
-    }
+    // Never auto-set variant based on content
+    // Variant should always remain as the initial type
+    // The only way to change variant is through explicit user interaction (compact -> standard upgrade)
 
     return noteData;
   };

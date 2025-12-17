@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Marker, ImageOverlay, useMap, useMapEvents } f
 import L from 'leaflet';
 import { Note, Coordinates, Project } from '../types';
 import { MAP_TILE_URL, MAP_TILE_URL_FALLBACK, MAP_SATELLITE_URL, MAP_ATTRIBUTION, THEME_COLOR, THEME_COLOR_DARK, MAP_STYLE_OPTIONS } from '../constants';
-import { Search, Locate, Loader2, X, Check, Satellite, Plus, Image as ImageIcon, FileJson } from 'lucide-react';
+import { Search, Locate, Loader2, X, Check, Satellite, Plus, Image as ImageIcon, FileJson, Type } from 'lucide-react';
 import exifr from 'exifr';
 import { NoteEditor } from './NoteEditor';
 import { generateId, fileToBase64 } from '../utils';
@@ -425,13 +425,15 @@ const SearchBarContainer = ({ children }: { children: React.ReactNode }) => {
     return <div ref={containerRef}>{children}</div>;
 };
 
-const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange, mapNotes, themeColor = THEME_COLOR }: { 
+const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange, mapNotes, themeColor = THEME_COLOR, showTextLabels, setShowTextLabels }: {
     onImportPhotos: () => void;
     onImportData: () => void;
     mapStyle: 'standard' | 'satellite';
     onMapStyleChange: (style: 'standard' | 'satellite') => void;
     mapNotes: Note[];
     themeColor?: string;
+    showTextLabels: boolean;
+    setShowTextLabels: (show: boolean) => void;
 }) => {
     const map = useMap();
     const [showImportMenu, setShowImportMenu] = useState(false);
@@ -694,39 +696,30 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                         className="absolute left-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-[2000]"
                         onPointerDown={(e) => {
                             e.stopPropagation();
-                            e.stopImmediatePropagation();
                         }}
                         onPointerMove={(e) => {
                             e.stopPropagation();
-                            e.stopImmediatePropagation();
                         }}
                         onPointerUp={(e) => {
                             e.stopPropagation();
-                            e.stopImmediatePropagation();
                         }}
                         onMouseDown={(e) => {
                             e.stopPropagation();
-                            e.stopImmediatePropagation();
                         }}
                         onMouseMove={(e) => {
                             e.stopPropagation();
-                            e.stopImmediatePropagation();
                         }}
                         onMouseUp={(e) => {
                             e.stopPropagation();
-                            e.stopImmediatePropagation();
                         }}
                         onTouchStart={(e) => {
                             e.stopPropagation();
-                            e.stopImmediatePropagation();
                         }}
                         onTouchMove={(e) => {
                             e.stopPropagation();
-                            e.stopImmediatePropagation();
                         }}
                         onTouchEnd={(e) => {
                             e.stopPropagation();
-                            e.stopImmediatePropagation();
                         }}
                     >
                         <button
@@ -737,39 +730,30 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                             }}
                             onPointerDown={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onPointerMove={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onPointerUp={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onMouseDown={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onMouseMove={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onMouseUp={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onTouchStart={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onTouchMove={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onTouchEnd={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 text-gray-700 whitespace-nowrap"
                         >
@@ -784,39 +768,30 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                             }}
                             onPointerDown={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onPointerMove={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onPointerUp={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onMouseDown={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onMouseMove={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onMouseUp={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onTouchStart={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onTouchMove={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onTouchEnd={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             disabled={mapNotes.length === 0}
                             className={`w-full text-left px-4 py-2.5 text-sm ${
@@ -866,6 +841,43 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
             >
                 <Satellite size={18} className="sm:w-5 sm:h-5" />
             </button>
+            <button
+                onClick={(e) => {
+                    e.stopPropagation();
+                    setShowTextLabels(!showTextLabels);
+                }}
+                onPointerDown={(e) => {
+                    e.stopPropagation();
+                    e.currentTarget.style.backgroundColor = themeColor;
+                }}
+                onPointerUp={(e) => {
+                    e.stopPropagation();
+                    // Note: showTextLabels will be updated after this event, so we check the current value
+                    if (!showTextLabels) {
+                        e.currentTarget.style.backgroundColor = '';
+                    }
+                }}
+                onPointerMove={(e) => e.stopPropagation()}
+                onMouseEnter={(e) => {
+                    if (!showTextLabels) {
+                        e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
+                    }
+                }}
+                onMouseLeave={(e) => {
+                    if (!showTextLabels) {
+                        e.currentTarget.style.backgroundColor = '';
+                    }
+                }}
+                className={`p-2 sm:p-3 rounded-xl shadow-lg transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${
+                    showTextLabels
+                        ? 'text-white'
+                        : 'bg-white text-gray-700'
+                }`}
+                style={showTextLabels ? { backgroundColor: themeColor } : undefined}
+                title={showTextLabels ? 'Hide Text Labels' : 'Show Text Labels'}
+            >
+                <Type size={18} className="sm:w-5 sm:h-5" />
+            </button>
             <div className="relative" ref={menuRef}>
                 <button 
                     onClick={(e) => { 
@@ -906,39 +918,30 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                         className="absolute left-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-[2000]"
                         onPointerDown={(e) => {
                             e.stopPropagation();
-                            e.stopImmediatePropagation();
                         }}
                         onPointerMove={(e) => {
                             e.stopPropagation();
-                            e.stopImmediatePropagation();
                         }}
                         onPointerUp={(e) => {
                             e.stopPropagation();
-                            e.stopImmediatePropagation();
                         }}
                         onMouseDown={(e) => {
                             e.stopPropagation();
-                            e.stopImmediatePropagation();
                         }}
                         onMouseMove={(e) => {
                             e.stopPropagation();
-                            e.stopImmediatePropagation();
                         }}
                         onMouseUp={(e) => {
                             e.stopPropagation();
-                            e.stopImmediatePropagation();
                         }}
                         onTouchStart={(e) => {
                             e.stopPropagation();
-                            e.stopImmediatePropagation();
                         }}
                         onTouchMove={(e) => {
                             e.stopPropagation();
-                            e.stopImmediatePropagation();
                         }}
                         onTouchEnd={(e) => {
                             e.stopPropagation();
-                            e.stopImmediatePropagation();
                         }}
                     >
                         <button
@@ -963,39 +966,30 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                             }}
                             onPointerDown={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onPointerMove={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onPointerUp={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onMouseDown={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onMouseMove={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onMouseUp={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onTouchStart={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onTouchMove={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             onTouchEnd={(e) => {
                                 e.stopPropagation();
-                                e.stopImmediatePropagation();
                             }}
                             className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
                         >
@@ -1256,6 +1250,9 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   // If satellite is active, use satellite; otherwise use mapStyleId or default
   const effectiveMapStyle = localMapStyle === 'satellite' ? 'satellite' : (mapStyleId || 'carto-light-nolabels');
   const mapStyle = localMapStyle; // For the toggle button
+
+  // Text labels display mode
+  const [showTextLabels, setShowTextLabels] = useState(false);
   
   // Current marker index being viewed
 
@@ -1383,12 +1380,13 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       e.originalEvent?.stopPropagation();
       e.originalEvent?.stopImmediatePropagation();
     }
-    
-    // When clicking marker, always edit the passed note (for clustered markers, pass the bottommost one)
-    console.log('Marker clicked:', note.id);
+
+    // Always get the latest note data from the notes array to ensure we have the most recent changes
+    const latestNote = notes.find(n => n.id === note.id);
+    console.log('Marker clicked:', note.id, 'using latest data:', !!latestNote);
     setCurrentClusterNotes([]);
     setCurrentNoteIndex(0);
-    setEditingNote(note);
+    setEditingNote(latestNote || note);
     setIsEditorOpen(true);
     onToggleEditor(true);
   };
@@ -1424,8 +1422,10 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         variant: noteData.variant || existingNote!.variant
       } as Note;
       onUpdateNote(fullNote);
+      // Update editingNote to reflect the saved changes
+      setEditingNote(fullNote);
       // Update the note in currentClusterNotes to reflect changes
-      const updatedClusterNotes = currentClusterNotes.map(note => 
+      const updatedClusterNotes = currentClusterNotes.map(note =>
         note.id === noteData.id ? { ...note, ...noteData, variant: noteData.variant || note.variant } as Note : note
       );
       setCurrentClusterNotes(updatedClusterNotes);
@@ -1436,6 +1436,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         variant: noteData.variant || 'standard'
       } as Note;
       onAddNote(fullNote);
+      // Update editingNote for new notes
+      setEditingNote(fullNote);
     }
   };
 
@@ -1468,6 +1470,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         isFavorite: noteData.isFavorite ?? existingNote?.isFavorite ?? false
       } as Note;
       onUpdateNote(fullNote);
+      // Update editingNote to reflect the saved changes
+      setEditingNote(fullNote);
     } else {
       // 新Note必须指定variant
       const fullNote: Note = {
@@ -1476,6 +1480,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         isFavorite: noteData.isFavorite ?? false
       } as Note;
       onAddNote(fullNote);
+      // For new notes, update editingNote as well
+      setEditingNote(fullNote);
     }
   };
 
@@ -2138,7 +2144,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       }
   };
 
-  const createCustomIcon = (note: Note, count?: number) => {
+  const createCustomIcon = (note: Note, count?: number, showTextLabels?: boolean) => {
       const isFavorite = note.isFavorite === true;
       const scale = isFavorite ? 2 : 1;
       const baseSize = 40;
@@ -2220,15 +2226,46 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         // Show emoji, background is yellow
         content = `<span style="transform: rotate(45deg); font-size: 20px; line-height: 1; z-index: 1; position: relative;">${note.emoji}</span>`;
       }
-      
+
+      // Add text label if enabled and text is within length limit
+      let textLabel = '';
+      if (showTextLabels && note.text && note.text.trim()) {
+        // Count Chinese characters (considering each Chinese character as 1 unit)
+        const chineseChars = note.text.match(/[\u4e00-\u9fa5]/g) || [];
+        const textLength = chineseChars.length;
+        if (textLength > 0 && textLength <= 10) {
+          textLabel = `
+            <div style="
+              position: absolute;
+              bottom: -${size * 0.6}px;
+              left: 50%;
+              transform: translateX(-50%);
+              background-color: white;
+              padding: 2px 6px;
+              border-radius: 4px;
+              border: 2px solid ${themeColor};
+              white-space: nowrap;
+              font-size: 12px;
+              font-weight: bold;
+              color: black;
+              box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+              z-index: 2000;
+              pointer-events: none;
+            ">
+              ${note.text}
+            </div>
+          `;
+        }
+      }
+
       return L.divIcon({
           className: 'custom-icon',
           html: `<div style="
             position: relative;
-            background-color: ${backgroundColor}; 
-            width: ${size}px; 
-            height: ${size}px; 
-            border-radius: 50% 50% 50% 0; 
+            background-color: ${backgroundColor};
+            width: ${size}px;
+            height: ${size}px;
+            border-radius: 50% 50% 50% 0;
             transform: rotate(-45deg) ${isFavorite ? 'scale(1)' : ''};
             display: flex;
             align-items: center;
@@ -2239,7 +2276,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           ">
             ${content}
           </div>
-          ${countBadge}`,
+          ${countBadge}
+          ${textLabel}`,
           iconSize: [size, size],
           iconAnchor: [size / 2, size],
           popupAnchor: [0, -size]
@@ -2710,18 +2748,34 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           />
         )}
         
-        {isMapMode && clusteredMarkers.length > 0 ? (
+        {isMapMode && (showTextLabels ? (
+          // Text labels mode: show all markers individually without clustering
+          mapNotes.map(note => (
+            <Marker
+              key={note.id}
+              position={[note.coords.lat, note.coords.lng]}
+              icon={createCustomIcon(note, undefined, showTextLabels)}
+              eventHandlers={{
+                click: (e) => {
+                  e.originalEvent?.stopPropagation();
+                  e.originalEvent?.stopImmediatePropagation();
+                  handleMarkerClick(note, e);
+                }
+              }}
+            />
+          ))
+        ) : clusteredMarkers.length > 0 ? (
           // Show clustered markers (only show clusters with multiple markers, single markers shown separately)
           clusteredMarkers.map((cluster, index) => {
             if (cluster.notes.length === 1) {
               // Single marker, display directly
               const note = cluster.notes[0];
               return (
-          <Marker 
-            key={note.id} 
+          <Marker
+            key={note.id}
             position={[note.coords.lat, note.coords.lng]}
-                  icon={createCustomIcon(note)}
-                  eventHandlers={{ 
+                  icon={createCustomIcon(note, undefined, showTextLabels)}
+                  eventHandlers={{
                     click: (e) => {
                       e.originalEvent?.stopPropagation();
                       e.originalEvent?.stopImmediatePropagation();
@@ -2733,11 +2787,11 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             } else {
               // Multiple markers, show cluster
               return (
-                <Marker 
+                <Marker
                   key={`cluster-${index}`}
                   position={cluster.position}
-                  icon={createCustomIcon(cluster.notes[0], cluster.notes.length)}
-                  eventHandlers={{ 
+                  icon={createCustomIcon(cluster.notes[0], cluster.notes.length, showTextLabels)}
+                  eventHandlers={{
                     click: (e) => {
                       e.originalEvent?.stopPropagation();
                       e.originalEvent?.stopImmediatePropagation();
@@ -2750,12 +2804,12 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           })
         ) : (
           // Show single markers (non-map mode or when no clustering)
-          isMapMode && mapNotes.map(note => (
-            <Marker 
-              key={note.id} 
+          mapNotes.map(note => (
+            <Marker
+              key={note.id}
               position={[note.coords.lat, note.coords.lng]}
-              icon={createCustomIcon(note)}
-              eventHandlers={{ 
+              icon={createCustomIcon(note, undefined, showTextLabels)}
+              eventHandlers={{
                 click: (e) => {
                   e.originalEvent?.stopPropagation();
                   e.originalEvent?.stopImmediatePropagation();
@@ -2764,7 +2818,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               }}
             />
           ))
-        )}
+        ))}
 
         {/* Import preview markers */}
         {isMapMode && showImportDialog && importPreview.filter(p => !p.error).map((preview, index) => (
@@ -2812,99 +2866,81 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
         {isMapMode && (
           <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex gap-1.5 sm:gap-2 pointer-events-none items-start">
-              <MapControls 
-                onImportPhotos={() => fileInputRef.current?.click()} 
+              <MapControls
+                onImportPhotos={() => fileInputRef.current?.click()}
                 onImportData={() => dataImportInputRef.current?.click()}
                 mapStyle={mapStyle}
                 onMapStyleChange={(style) => setLocalMapStyle(style)}
                 mapNotes={mapNotes}
                 themeColor={themeColor}
+                showTextLabels={showTextLabels}
+                setShowTextLabels={setShowTextLabels}
               />
               <SearchBarContainer>
               <div 
                   className="flex-1 max-w-md relative group pointer-events-auto"
                   onPointerDown={(e) => {
                       e.stopPropagation();
-                      e.stopImmediatePropagation();
                   }}
                   onPointerMove={(e) => {
                       e.stopPropagation();
-                      e.stopImmediatePropagation();
                   }}
                   onPointerUp={(e) => {
                       e.stopPropagation();
-                      e.stopImmediatePropagation();
                   }}
                   onPointerCancel={(e) => {
                       e.stopPropagation();
-                      e.stopImmediatePropagation();
                   }}
                   onMouseDown={(e) => {
                       e.stopPropagation();
-                      e.stopImmediatePropagation();
                   }}
                   onMouseMove={(e) => {
                       e.stopPropagation();
-                      e.stopImmediatePropagation();
                   }}
                   onMouseUp={(e) => {
                       e.stopPropagation();
-                      e.stopImmediatePropagation();
                   }}
                   onTouchStart={(e) => {
                       e.stopPropagation();
-                      e.stopImmediatePropagation();
                   }}
                   onTouchMove={(e) => {
                       e.stopPropagation();
-                      e.stopImmediatePropagation();
                   }}
                   onTouchEnd={(e) => {
                       e.stopPropagation();
-                      e.stopImmediatePropagation();
                   }}
                   onDoubleClick={(e) => {
                       e.stopPropagation();
-                      e.stopImmediatePropagation();
                   }}
               >
                   <div 
                       className="bg-white rounded-xl shadow-lg flex items-center px-4 transition-shadow focus-within:shadow-xl relative z-10"
                       onPointerDown={(e) => {
                           e.stopPropagation();
-                          e.stopImmediatePropagation();
                       }}
                       onPointerMove={(e) => {
                           e.stopPropagation();
-                          e.stopImmediatePropagation();
                       }}
                       onPointerUp={(e) => {
                           e.stopPropagation();
-                          e.stopImmediatePropagation();
                       }}
                       onMouseDown={(e) => {
                           e.stopPropagation();
-                          e.stopImmediatePropagation();
                       }}
                       onMouseMove={(e) => {
                           e.stopPropagation();
-                          e.stopImmediatePropagation();
                       }}
                       onMouseUp={(e) => {
                           e.stopPropagation();
-                          e.stopImmediatePropagation();
                       }}
                       onTouchStart={(e) => {
                           e.stopPropagation();
-                          e.stopImmediatePropagation();
                       }}
                       onTouchMove={(e) => {
                           e.stopPropagation();
-                          e.stopImmediatePropagation();
                       }}
                       onTouchEnd={(e) => {
                           e.stopPropagation();
-                          e.stopImmediatePropagation();
                       }}
                   >
                       <Search size={18} className="text-gray-400 flex-shrink-0" />
@@ -2916,39 +2952,30 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                           onChange={(e) => setSearchQuery(e.target.value)}
                           onPointerDown={(e) => {
                               e.stopPropagation();
-                              e.stopImmediatePropagation();
                           }}
                           onPointerMove={(e) => {
                               e.stopPropagation();
-                              e.stopImmediatePropagation();
                           }}
                           onPointerUp={(e) => {
                               e.stopPropagation();
-                              e.stopImmediatePropagation();
                           }}
                           onMouseDown={(e) => {
                               e.stopPropagation();
-                              e.stopImmediatePropagation();
                           }}
                           onMouseMove={(e) => {
                               e.stopPropagation();
-                              e.stopImmediatePropagation();
                           }}
                           onMouseUp={(e) => {
                               e.stopPropagation();
-                              e.stopImmediatePropagation();
                           }}
                           onTouchStart={(e) => {
                               e.stopPropagation();
-                              e.stopImmediatePropagation();
                           }}
                           onTouchMove={(e) => {
                               e.stopPropagation();
-                              e.stopImmediatePropagation();
                           }}
                           onTouchEnd={(e) => {
                               e.stopPropagation();
-                              e.stopImmediatePropagation();
                           }}
                       />
                       {isSearching && <Loader2 size={18} className="text-yellow-500 animate-spin" />}
@@ -2958,39 +2985,30 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                           className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-2 border border-gray-100"
                           onPointerDown={(e) => {
                               e.stopPropagation();
-                              e.stopImmediatePropagation();
                           }}
                           onPointerMove={(e) => {
                               e.stopPropagation();
-                              e.stopImmediatePropagation();
                           }}
                           onPointerUp={(e) => {
                               e.stopPropagation();
-                              e.stopImmediatePropagation();
                           }}
                           onMouseDown={(e) => {
                               e.stopPropagation();
-                              e.stopImmediatePropagation();
                           }}
                           onMouseMove={(e) => {
                               e.stopPropagation();
-                              e.stopImmediatePropagation();
                           }}
                           onMouseUp={(e) => {
                               e.stopPropagation();
-                              e.stopImmediatePropagation();
                           }}
                           onTouchStart={(e) => {
                               e.stopPropagation();
-                              e.stopImmediatePropagation();
                           }}
                           onTouchMove={(e) => {
                               e.stopPropagation();
-                              e.stopImmediatePropagation();
                           }}
                           onTouchEnd={(e) => {
                               e.stopPropagation();
-                              e.stopImmediatePropagation();
                           }}
                       >
                           {searchResults.map((result: any, i) => (
@@ -2998,44 +3016,34 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                                   key={i}
                                   onClick={(e) => {
                                       e.stopPropagation();
-                                      e.stopImmediatePropagation();
                                       selectSearchResult(result);
                                   }}
                                   onPointerDown={(e) => {
                                       e.stopPropagation();
-                                      e.stopImmediatePropagation();
                                   }}
                                   onPointerMove={(e) => {
                                       e.stopPropagation();
-                                      e.stopImmediatePropagation();
                                   }}
                                   onPointerUp={(e) => {
                                       e.stopPropagation();
-                                      e.stopImmediatePropagation();
                                   }}
                                   onMouseDown={(e) => {
                                       e.stopPropagation();
-                                      e.stopImmediatePropagation();
                                   }}
                                   onMouseMove={(e) => {
                                       e.stopPropagation();
-                                      e.stopImmediatePropagation();
                                   }}
                                   onMouseUp={(e) => {
                                       e.stopPropagation();
-                                      e.stopImmediatePropagation();
                                   }}
                                   onTouchStart={(e) => {
                                       e.stopPropagation();
-                                      e.stopImmediatePropagation();
                                   }}
                                   onTouchMove={(e) => {
                                       e.stopPropagation();
-                                      e.stopImmediatePropagation();
                                   }}
                                   onTouchEnd={(e) => {
                                       e.stopPropagation();
-                                      e.stopImmediatePropagation();
                                   }}
                                   className="w-full text-left px-4 py-3 hover:bg-yellow-50 border-b border-gray-50 last:border-none transition-colors flex flex-col gap-0.5"
                               >

@@ -7,7 +7,7 @@ import { Square, StickyNote, X, Pencil, Check, Minus, Move, ArrowUp, Hash, Plus,
 import exifr from 'exifr';
 import { generateId, fileToBase64 } from '../utils';
 import { THEME_COLOR, THEME_COLOR_DARK } from '../constants';
-import { saveImage, saveSketch } from '../utils/storage';
+import { saveImage, saveSketch, loadNoteImages } from '../utils/storage';
 
 // 常量定义
 const CONNECTION_OFFSET = 40; // 连接线从连接点延伸的距离
@@ -409,6 +409,27 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
     
     if (hasChanges) {
       updatedNotes.forEach(note => onUpdateNote(note));
+    }
+  };
+
+  // 确保便签图片数据已加载
+  const ensureNoteImagesLoaded = async (note: Note): Promise<Note> => {
+    // 检查便签是否已经有加载的图片数据
+    const hasImages = note.images && note.images.length > 0;
+    const hasLoadedImages = hasImages && note.images!.some(img => img.startsWith('data:'));
+
+    // 如果已经有加载的图片数据，直接返回
+    if (hasLoadedImages) {
+      return note;
+    }
+
+    // 否则从 IndexedDB 加载图片数据
+    try {
+      const loadedNote = await loadNoteImages(note);
+      return loadedNote;
+    } catch (error) {
+      console.error('Failed to load note images:', error);
+      return note; // 返回原始便签，如果加载失败
     }
   };
 
@@ -1338,17 +1359,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
       // Generate new IDs and offset positions for imported notes
       // Also handle image separation for imported notes
       const newNotes = await Promise.all(uniqueImportedNotes.map(async (note: Note) => {
-        // 确保variant存在，如果没有则根据特征判断
-        let variant: 'standard' | 'compact' | 'image' = note.variant || 'standard';
-        if (!note.variant) {
-          if (note.imageWidth && note.imageHeight && note.images && note.images.length > 0) {
-            variant = 'image';
-          } else if (!note.emoji || note.emoji === '') {
-            variant = 'compact';
-          } else {
-            variant = 'standard';
-          }
-        }
+        // 不要根据内容自动判断 variant，保持原始 variant 或默认为 standard
+        const variant: 'standard' | 'compact' | 'image' = note.variant || 'standard';
         
         const processedNote: Note = {
           ...note,
@@ -2797,8 +2809,12 @@ const createNoteAtCenter = (variant: 'compact') => {
           if (isShortClick) {
               e.stopPropagation();
               e.preventDefault();
-              setEditingNote(note);
-              onToggleEditor(true);
+              // 使用最新的便签数据
+              const latestNote = notes.find(n => n.id === note.id) || note;
+              ensureNoteImagesLoaded(latestNote).then(loadedNote => {
+                setEditingNote(loadedNote);
+                onToggleEditor(true);
+              });
               
               // 清理状态
               currentNotePressIdRef.current = null;
@@ -2880,8 +2896,12 @@ const createNoteAtCenter = (variant: 'compact') => {
       }
       
       if (!isEditMode) {
-        setEditingNote(note);
-        onToggleEditor(true);
+        // 使用最新的便签数据
+        const latestNote = notes.find(n => n.id === note.id) || note;
+        ensureNoteImagesLoaded(latestNote).then(loadedNote => {
+          setEditingNote(loadedNote);
+          onToggleEditor(true);
+        });
       } else {
         // 在编辑模式下，单击选中便利贴
         const now = Date.now();
@@ -2965,8 +2985,12 @@ const createNoteAtCenter = (variant: 'compact') => {
       
       // 在编辑模式下，双击打开编辑器
       if (isEditMode) {
-        setEditingNote(note);
-        onToggleEditor(true);
+        // 使用最新的便签数据
+        const latestNote = notes.find(n => n.id === note.id) || note;
+        ensureNoteImagesLoaded(latestNote).then(loadedNote => {
+          setEditingNote(loadedNote);
+          onToggleEditor(true);
+        });
       }
   };
   

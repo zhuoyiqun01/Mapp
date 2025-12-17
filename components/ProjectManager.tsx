@@ -493,17 +493,8 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         const importedNotes = (newProject.notes || []).map(note => {
           const newId = generateId();
           noteIdMap.set(note.id, newId);
-          // 确保variant存在
-          let variant: 'standard' | 'compact' | 'image' = note.variant || 'standard';
-          if (!note.variant) {
-            if (note.imageWidth && note.imageHeight && note.images && note.images.length > 0) {
-              variant = 'image';
-            } else if (!note.emoji || note.emoji === '') {
-              variant = 'compact';
-            } else {
-              variant = 'standard';
-            }
-          }
+          // 不要根据内容自动判断 variant，保持原始 variant 或默认为 standard
+          const variant: 'standard' | 'compact' | 'image' = note.variant || 'standard';
           return { ...note, id: newId, variant };
         });
         
@@ -733,17 +724,8 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       } else {
         // Create as new project - regenerate all IDs
         const regeneratedNotes = (newProject.notes || []).map(note => {
-          // 确保variant存在
-          let variant: 'standard' | 'compact' | 'image' = note.variant || 'standard';
-          if (!note.variant) {
-            if (note.imageWidth && note.imageHeight && note.images && note.images.length > 0) {
-              variant = 'image';
-            } else if (!note.emoji || note.emoji === '') {
-              variant = 'compact';
-            } else {
-              variant = 'standard';
-            }
-          }
+          // 不要根据内容自动判断 variant，保持原始 variant 或默认为 standard
+          const variant: 'standard' | 'compact' | 'image' = note.variant || 'standard';
           return {
             ...note,
             id: generateId(),
