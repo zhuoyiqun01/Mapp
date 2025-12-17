@@ -948,10 +948,8 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   }, [navigateToCoords, containerRef, transform, onNavigateComplete]);
 
   const closeEditor = () => {
-    // Delay clearing editingNote to ensure state updates are processed
-    setTimeout(() => {
-      setEditingNote(null);
-    }, 100);
+    // Keep editingNote for reopening, it will be updated when reopened
+    // Only clear it when explicitly needed
     onToggleEditor(false);
   };
 
