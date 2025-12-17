@@ -45,6 +45,7 @@ interface BoardViewProps {
 export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onToggleEditor, onAddNote, onDeleteNote, onEditModeChange, connections = [], onUpdateConnections, frames = [], onUpdateFrames, project, onUpdateProject, onSwitchToMapView, onSwitchToBoardView, navigateToCoords, onNavigateComplete, mapViewFileInputRef, themeColor = THEME_COLOR }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
   
   // Canvas Viewport State
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
@@ -948,8 +949,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
   }, [navigateToCoords, containerRef, transform, onNavigateComplete]);
 
   const closeEditor = () => {
-    // Keep editingNote for reopening, it will be updated when reopened
-    // Only clear it when explicitly needed
+    setIsEditorOpen(false);
     onToggleEditor(false);
   };
 
@@ -1520,6 +1520,7 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
             };
             onUpdateNote(updatedNote);
             setEditingNote(updatedNote);
+            setIsEditorOpen(true);
           } catch (error) {
             console.error('Failed to add images to note:', error);
           }
@@ -1749,6 +1750,7 @@ const compressImageToBase64 = (file: File, targetShortSide = 512): Promise<{ bas
       color: '#FFFDF5'
     };
     setEditingNote(newNote);
+    setIsEditorOpen(true);
     onToggleEditor(true);
     setIsSelectingNotePosition(false); // Exit position selection mode
   };
@@ -1851,6 +1853,7 @@ const createNoteAtCenter = (variant: 'compact') => {
          color: '#FFFDF5'
      };
      setEditingNote(newNote);
+     setIsEditorOpen(true);
      onToggleEditor(true);
   };
 
@@ -2796,6 +2799,7 @@ const createNoteAtCenter = (variant: 'compact') => {
               e.stopPropagation();
               e.preventDefault();
               setEditingNote(note);
+              setIsEditorOpen(true);
               onToggleEditor(true);
               
               // 清理状态
@@ -2874,6 +2878,7 @@ const createNoteAtCenter = (variant: 'compact') => {
       
       if (!isEditMode) {
         setEditingNote(note);
+        setIsEditorOpen(true);
         onToggleEditor(true);
       } else {
         // 在编辑模式下，单击选中便利贴
@@ -2953,6 +2958,7 @@ const createNoteAtCenter = (variant: 'compact') => {
       // 在编辑模式下，双击打开编辑器
       if (isEditMode) {
         setEditingNote(note);
+        setIsEditorOpen(true);
         onToggleEditor(true);
       }
   };
@@ -4274,6 +4280,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                                                 } else {
                                                     // 如果没有在编辑，打开编辑模式并设置editingNote
                                                     setEditingNote(upgradedNote);
+                                                    setIsEditorOpen(true);
                                                     onToggleEditor(true);
                                                 }
                                             }}
@@ -4364,6 +4371,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                                                 } else {
                                                     // 如果没有在编辑，打开编辑模式并设置editingNote
                                                     setEditingNote(upgradedNote);
+                                                    setIsEditorOpen(true);
                                                     onToggleEditor(true);
                                                 }
                                             }}
@@ -5155,9 +5163,9 @@ const createNoteAtCenter = (variant: 'compact') => {
             }}
         />
 
-        {editingNote && (
+        {isEditorOpen && editingNote && (
           <NoteEditor 
-              isOpen={!!editingNote}
+              isOpen={isEditorOpen}
               onClose={closeEditor}
               initialNote={notes.find(n => n.id === editingNote.id)}
               onDelete={onDeleteNote}
@@ -5183,6 +5191,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                       // Update editingNote state to reflect the saved changes
                       // This ensures that if the editor is reopened, it will use the updated data
                       setEditingNote(fullNote);
+                      setIsEditorOpen(true);
                   } else if (onAddNote && updated.id) {
                       // 新Note必须指定variant，如果没有则默认为standard
                       const fullNote: Note = {
@@ -5192,8 +5201,9 @@ const createNoteAtCenter = (variant: 'compact') => {
                           images: updated.images || []
                       } as Note;
                       onAddNote(fullNote);
-                      // For new notes, clear editingNote since the note is now saved
+                      // For new notes, close editor since the note is now saved
                       setEditingNote(null);
+                      setIsEditorOpen(false);
                   }
               }}
           />
