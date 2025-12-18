@@ -160,6 +160,46 @@ export default function App() {
     }));
   }, []);
 
+  // Check and repair project data
+  const handleCheckData = useCallback(async () => {
+    try {
+      console.log('Starting data check and repair...');
+
+      // Show loading state
+      setIsLoadingProject(true);
+      setLoadingProgress(0);
+
+      // Step 1: Attempt to recover missing images (25%)
+      setLoadingProgress(25);
+      const recoveryResult = await attemptImageRecovery();
+      if (recoveryResult.imagesRecovered > 0 || recoveryResult.sketchesRecovered > 0) {
+        console.log(`Recovered ${recoveryResult.imagesRecovered} images and ${recoveryResult.sketchesRecovered} sketches`);
+      }
+
+      // Step 2: Clean up corrupted data (50%)
+      setLoadingProgress(50);
+      const cleanupResult = await cleanupCorruptedImages();
+      if (cleanupResult.imagesCleaned > 0 || cleanupResult.sketchesCleaned > 0) {
+        console.log(`Cleaned ${cleanupResult.imagesCleaned} corrupted images and ${cleanupResult.sketchesCleaned} corrupted sketches`);
+      }
+
+      // Step 3: Refresh project summaries (75%)
+      setLoadingProgress(75);
+      const summaries = await loadProjectSummaries();
+      setProjectSummaries(summaries);
+
+      // Step 4: Complete (100%)
+      setLoadingProgress(100);
+
+      console.log('Data check and repair completed');
+    } catch (error) {
+      console.error('Data check failed:', error);
+    } finally {
+      setIsLoadingProject(false);
+      setLoadingProgress(0);
+    }
+  }, []);
+
   // Project selection handler with loading
   const handleSelectProject = useCallback(async (id: string) => {
     if (currentProjectId && currentProjectId !== id) {
@@ -264,11 +304,6 @@ export default function App() {
         // 1. 数据迁移（从旧格式到新格式）
         await migrateFromOldFormat();
 
-        // 1.5. 尝试恢复丢失的图片数据
-        const recoveryResult = await attemptImageRecovery();
-        if (recoveryResult.imagesRecovered > 0 || recoveryResult.sketchesRecovered > 0) {
-          console.log(`Recovered ${recoveryResult.imagesRecovered} images and ${recoveryResult.sketchesRecovered} sketches`);
-        }
 
         // 1.6. 保守清理明显损坏的数据（只删除无法访问的数据）
         const cleanupResult = await cleanupCorruptedImages();
@@ -720,6 +755,7 @@ export default function App() {
          onSelectProject={handleSelectProject}
          onDeleteProject={handleDeleteProject}
          onUpdateProject={handleUpdateProject}
+         onCheckData={handleCheckData}
          themeColor={themeColor}
          onThemeColorChange={handleThemeColorChange}
       />
@@ -734,7 +770,9 @@ export default function App() {
         <div className="fixed inset-0 z-[10000] bg-black/50 flex items-center justify-center">
           <div className="bg-white rounded-2xl p-8 shadow-2xl max-w-sm w-full mx-4">
             <div className="text-center">
-              <div className="text-2xl font-bold text-gray-800 mb-4">加载项目中...</div>
+              <div className="text-2xl font-bold text-gray-800 mb-4">
+                {currentProjectId ? '加载项目中...' : '检查数据中...'}
+              </div>
               <div className="w-full bg-gray-200 rounded-full h-4 mb-4">
                 <div
                   className="bg-blue-500 h-4 rounded-full transition-all duration-300"
@@ -742,6 +780,11 @@ export default function App() {
                 ></div>
               </div>
               <div className="text-lg font-semibold text-gray-600">{loadingProgress}%</div>
+              {!currentProjectId && (
+                <div className="text-sm text-gray-500 mt-2">
+                  正在修复图片数据和清理损坏文件...
+                </div>
+              )}
             </div>
           </div>
         </div>

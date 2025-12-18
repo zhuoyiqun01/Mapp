@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Project } from '../types';
+import { Project, Note } from '../types';
 import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check, Upload, Palette, Settings } from 'lucide-react';
 import { generateId, fileToBase64, formatDate, exportToJpeg, exportToJpegCentered, compressImageFromBase64 } from '../utils';
 import { loadProject, loadNoteImages, loadBackgroundImage, saveProject, loadAllProjects } from '../utils/storage';
@@ -16,9 +16,10 @@ const MenuDropdown: React.FC<{
   onExportData: (project: Project) => void;
   onExportFullProject: (project: Project) => void;
   onCompressImages: (project: Project) => void;
+  onCheckData?: () => Promise<void>;
   onDelete: (id: string) => void;
   onClose: () => void;
-}> = ({ project, onRename, onExportData, onExportFullProject, onCompressImages, onDelete, onClose }) => {
+}> = ({ project, onRename, onExportData, onExportFullProject, onCompressImages, onCheckData, onDelete, onClose }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<'bottom' | 'top'>('bottom');
 
@@ -71,13 +72,27 @@ const MenuDropdown: React.FC<{
         <Download size={16} /> Export Full Project (JSON)
       </button>
       <div className="h-px bg-gray-100 my-1" />
-      <button 
+      <button
         onClick={() => { onCompressImages(project); onClose(); }}
         className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
       >
-        <ImageIcon size={16} /> Data Check
+        <ImageIcon size={16} /> Compress Images
       </button>
       <div className="h-px bg-gray-100 my-1" />
+      {onCheckData && (
+        <>
+          <button
+            onClick={async () => {
+              await onCheckData();
+              onClose();
+            }}
+            className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+          >
+            <Settings size={16} /> Check Data
+          </button>
+          <div className="h-px bg-gray-100 my-1" />
+        </>
+      )}
       <button 
         onClick={(e) => { e.stopPropagation(); onDelete(project.id); onClose(); }}
         className="w-full text-left px-4 py-2.5 text-sm hover:bg-red-50 text-red-500 flex items-center gap-2"
@@ -101,6 +116,7 @@ interface ProjectManagerProps {
   viewMode?: 'map' | 'board' | 'table';
   activeProject?: Project | null;
   onExportCSV?: (project: Project) => void;
+  onCheckData?: () => Promise<void>;
   syncStatus?: SyncStatus;
   themeColor?: string;
   onThemeColorChange?: (color: string) => void;
@@ -108,11 +124,11 @@ interface ProjectManagerProps {
   onMapStyleChange?: (styleId: string) => void;
 }
 
-export const ProjectManager: React.FC<ProjectManagerProps> = ({ 
-  projects, 
-  currentProjectId, 
-  onCreateProject, 
-  onSelectProject, 
+export const ProjectManager: React.FC<ProjectManagerProps> = ({
+  projects,
+  currentProjectId,
+  onCreateProject,
+  onSelectProject,
   onDeleteProject,
   onUpdateProject,
   syncStatus,
@@ -122,6 +138,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   viewMode = 'map',
   activeProject,
   onExportCSV,
+  onCheckData,
   themeColor = THEME_COLOR,
   onThemeColorChange,
   currentMapStyle = 'carto-light-nolabels',
@@ -1146,12 +1163,13 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                   <>
                     <div className="fixed inset-0 z-[2020] bg-black/20 pointer-events-auto" onClick={() => setOpenMenuId(null)} />
                     {isSidebar ? (
-                      <MenuDropdown 
+                      <MenuDropdown
                         project={p}
                         onRename={handleRename}
                         onExportData={handleExportData}
                         onExportFullProject={handleExportFullProject}
                         onCompressImages={handleCompressImages}
+                        onCheckData={onCheckData}
                         onDelete={onDeleteProject}
                         onClose={() => setOpenMenuId(null)}
                       />
