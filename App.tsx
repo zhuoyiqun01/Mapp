@@ -292,103 +292,105 @@ export default function App() {
   useEffect(() => {
     const loadProjects = async () => {
       try {
-        // 检查存储使用情况
-        const storageUsage = await checkStorageUsage();
-        if (storageUsage) {
-          console.log(`Storage usage: ${storageUsage.used.toFixed(2)}MB used, ${storageUsage.available.toFixed(2)}MB available (${storageUsage.percentage.toFixed(1)}%)`);
-          if (storageUsage.percentage > 80) {
-            console.warn('Storage usage is high, images may be automatically cleaned up by browser');
-          }
-        }
-
-        // 1. 数据迁移（从旧格式到新格式）
-        await migrateFromOldFormat();
-
-
-        // 1.6. 保守清理明显损坏的数据（只删除无法访问的数据）
-        const cleanupResult = await cleanupCorruptedImages();
-        if (cleanupResult.imagesCleaned > 0 || cleanupResult.sketchesCleaned > 0) {
-          console.log(`Cleaned ${cleanupResult.imagesCleaned} corrupted images and ${cleanupResult.sketchesCleaned} corrupted sketches`);
-        }
-
-        // 2. 只加载项目摘要（快速显示项目列表）
+        // 1. 快速加载项目摘要（只显示项目列表）
         const summaries = await loadProjectSummaries();
         setProjectSummaries(summaries);
-        
         setIsLoading(false);
-        
-        // 3. 然后从云端同步（后台进程，仅在 Supabase 配置时执行）
-        // 检查 Supabase 是否配置，避免不必要的尝试
-        const hasSupabaseConfig = import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY;
-        
-        if (hasSupabaseConfig) {
+
+        // 2. 后台执行所有维护和同步任务（不阻塞UI）
+        setTimeout(async () => {
           try {
-            setSyncStatus('syncing');
-            const cloudResult = await loadProjectsFromCloud();
-
-            if (cloudResult.success && cloudResult.projects) {
-              // 获取完整的本地项目数据用于合并
-              const fullLocalProjects = await loadAllProjects(true);
-              // 合并本地和云端数据
-              const merged = mergeProjects(fullLocalProjects, cloudResult.projects);
-
-              // 如果合并后的数据与本地不同，更新本地
-              const localIds = new Set(fullLocalProjects.map(p => p.id));
-              const mergedIds = new Set(merged.map(p => p.id));
-              const hasChanges = fullLocalProjects.length !== merged.length ||
-                [...localIds].some(id => !mergedIds.has(id)) ||
-                merged.some(p => {
-                  const local = fullLocalProjects.find(lp => lp.id === p.id);
-                  return !local || (local.version || 0) < (p.version || 0);
-                });
-
-              if (hasChanges) {
-                // 保存合并后的项目
-                for (const project of merged) {
-                  await saveProject(project);
-                }
-                // 更新项目摘要
-                const summaries = await loadProjectSummaries();
-                setProjectSummaries(summaries);
+            // 检查存储使用情况
+            const storageUsage = await checkStorageUsage();
+            if (storageUsage) {
+              console.log(`Storage usage: ${storageUsage.used.toFixed(2)}MB used, ${storageUsage.available.toFixed(2)}MB available (${storageUsage.percentage.toFixed(1)}%)`);
+              if (storageUsage.percentage > 80) {
+                console.warn('Storage usage is high, images may be automatically cleaned up by browser');
               }
-
-              // 如果云端有更新，同步到云端
-              if (!cloudResult.isNewDevice) {
-                await syncProjectsToCloud(merged);
-              }
-
-              setSyncStatus('success');
-              setTimeout(() => setSyncStatus('idle'), 2000);
-            } else if (cloudResult.error) {
-              console.warn('Cloud load failed, using local data:', cloudResult.error);
-              setSyncStatus('error');
-              setSyncError(cloudResult.error);
-              setTimeout(() => {
-                setSyncStatus('idle');
-                setSyncError(null);
-              }, 3000);
-        } else {
-              // 新设备，上传本地数据到云端
-              const fullLocalProjects = await loadAllProjects(true);
-              if (fullLocalProjects.length > 0) {
-                await syncProjectsToCloud(fullLocalProjects);
-              }
-              setSyncStatus('success');
-              setTimeout(() => setSyncStatus('idle'), 2000);
             }
-          } catch (err) {
-            console.error("云端同步失败:", err);
-            setSyncStatus('error');
-            setSyncError(err instanceof Error ? err.message : '同步失败');
-            setTimeout(() => {
-              setSyncStatus('idle');
-              setSyncError(null);
-            }, 3000);
-             }
-        } else {
-          // Supabase 未配置，直接跳过云端同步
-          setSyncStatus('idle');
-        }
+
+            // 数据迁移（后台执行）
+            await migrateFromOldFormat();
+
+            // 保守清理明显损坏的数据（后台执行）
+            const cleanupResult = await cleanupCorruptedImages();
+            if (cleanupResult.imagesCleaned > 0 || cleanupResult.sketchesCleaned > 0) {
+              console.log(`Cleaned ${cleanupResult.imagesCleaned} corrupted images and ${cleanupResult.sketchesCleaned} corrupted sketches`);
+            }
+
+            // 云端同步（后台执行）
+            // 检查 Supabase 是否配置，避免不必要的尝试
+            const hasSupabaseConfig = import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+            if (hasSupabaseConfig) {
+              try {
+                setSyncStatus('syncing');
+                const cloudResult = await loadProjectsFromCloud();
+
+                if (cloudResult.success && cloudResult.projects) {
+                  // 获取完整的本地项目数据用于合并
+                  const fullLocalProjects = await loadAllProjects(true);
+                  // 合并本地和云端数据
+                  const merged = mergeProjects(fullLocalProjects, cloudResult.projects);
+
+                  // 如果合并后的数据与本地不同，更新本地
+                  const localIds = new Set(fullLocalProjects.map(p => p.id));
+                  const mergedIds = new Set(merged.map(p => p.id));
+                  const hasChanges = fullLocalProjects.length !== merged.length ||
+                    [...localIds].some(id => !mergedIds.has(id)) ||
+                    merged.some(p => {
+                      const local = fullLocalProjects.find(lp => lp.id === p.id);
+                      return !local || (local.version || 0) < (p.version || 0);
+                    });
+
+                  if (hasChanges) {
+                    // 保存合并后的项目
+                    for (const project of merged) {
+                      await saveProject(project);
+                    }
+                    // 更新项目摘要
+                    const summaries = await loadProjectSummaries();
+                    setProjectSummaries(summaries);
+                  }
+
+                  // 如果云端有更新，同步到云端
+                  if (!cloudResult.isNewDevice) {
+                    await syncProjectsToCloud(merged);
+                  }
+
+                  setSyncStatus('success');
+                  setTimeout(() => setSyncStatus('idle'), 2000);
+                } else if (cloudResult.error) {
+                  console.warn('Cloud load failed, using local data:', cloudResult.error);
+                  setSyncStatus('error');
+                  setSyncError(cloudResult.error);
+                  setTimeout(() => {
+                    setSyncStatus('idle');
+                    setSyncError(null);
+                  }, 3000);
+            } else {
+                  // 新设备，上传本地数据到云端
+                  const fullLocalProjects = await loadAllProjects(true);
+                  if (fullLocalProjects.length > 0) {
+                    await syncProjectsToCloud(fullLocalProjects);
+                  }
+                  setSyncStatus('success');
+                  setTimeout(() => setSyncStatus('idle'), 2000);
+                }
+              } catch (err) {
+                console.error("云端同步失败:", err);
+                setSyncStatus('error');
+                setSyncError(err instanceof Error ? err.message : '同步失败');
+                setTimeout(() => {
+                  setSyncStatus('idle');
+                  setSyncError(null);
+                }, 3000);
+              }
+            }
+          } catch (error) {
+            console.warn('Background tasks failed:', error);
+          }
+        }, 200);
       } catch (err) {
         console.error("Failed to load projects", err);
         setIsLoading(false);
