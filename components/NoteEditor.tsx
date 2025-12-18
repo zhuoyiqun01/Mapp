@@ -58,6 +58,9 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const [tags, setTags] = useState<Tag[]>(initialNote?.tags || []);
   const [images, setImages] = useState<string[]>(initialNote?.images || []);
   const [sketch, setSketch] = useState<string | undefined>(initialNote?.sketch);
+
+  // Image processing state
+  const [isProcessingImages, setIsProcessingImages] = useState(false);
   
   // Tag creation state
   const [isAddingTag, setIsAddingTag] = useState(false);
@@ -183,7 +186,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   useEffect(() => {
     // When note ID changes (switching between notes in cluster) OR note data changes (same note updated), reset all state
     if (isOpen && (noteId !== prevNoteIdRef.current || prevIsOpenRef.current !== isOpen)) {
-      console.log('NoteEditor resetting state for note:', noteId, 'data changed');
       setEmoji(initialNote?.emoji || '');
       setText(initialNote?.text || '');
       setFontSize(initialNote?.fontSize || 3);
@@ -280,8 +282,8 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       try {
-        const files = Array.from(e.target.files);
-        const base64Promises = files.map(file => fileToBase64(file));
+        const files = Array.from(e.target.files) as File[];
+        const base64Promises = files.map((file: File) => fileToBase64(file));
         const base64Images = await Promise.all(base64Promises);
         setImages([...images, ...base64Images]);
         // Reset input to allow selecting the same files again
@@ -397,12 +399,10 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     }
 
     // Otherwise, save the note
-    console.log('NoteEditor: Saving noteData:', noteData);
     onSave(noteData);
 
     // Delay closing to ensure state updates are processed
     setTimeout(() => {
-      console.log('NoteEditor: Closing editor after save');
       onClose();
     }, 0);
   };
@@ -454,6 +454,10 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
+      onDragOver={(e) => e.stopPropagation()}
+      onDragEnter={(e) => e.stopPropagation()}
+      onDragLeave={(e) => e.stopPropagation()}
+      onDrop={(e) => e.stopPropagation()}
       style={{}}
     >
       <div className="absolute inset-0" onClick={handleSave} style={{ zIndex: 1 }}></div>
@@ -481,6 +485,10 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
               boxShadow: '0 25px 50px 12px rgba(0, 0, 0, 0.15)',
               overflow: 'hidden'
         }}
+        onDragOver={(e) => e.stopPropagation()}
+        onDragEnter={(e) => e.stopPropagation()}
+        onDragLeave={(e) => e.stopPropagation()}
+        onDrop={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       >
         {isSketching && (
@@ -600,8 +608,106 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                 </div>
             </div>
 
+            {/* Image Processing Indicator */}
+            {isProcessingImages && (
+              <div className="px-3 py-2 text-sm text-blue-600 bg-blue-50 border border-blue-200 rounded-md mb-2 flex items-center gap-2">
+                <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
+                Processing images...
+              </div>
+            )}
+
             {/* Auto-Growing Text Area Container */}
-            <div className={`flex-1 px-3 relative group flex flex-col overflow-y-auto custom-scrollbar min-h-[120px]`}>
+            <div
+              className={`flex-1 px-3 relative group flex flex-col overflow-y-auto custom-scrollbar min-h-[120px] ${
+                isProcessingImages ? 'ring-2 ring-blue-400 ring-opacity-50 bg-blue-50 bg-opacity-30' : ''
+              }`}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onDragEnter={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onDrop={async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+
+                const files = Array.from(e.dataTransfer.files) as File[];
+                const imageFiles = files.filter((file: File) => file.type.startsWith('image/'));
+
+                if (imageFiles.length > 0 && !isProcessingImages) {
+                  setIsProcessingImages(true);
+
+                  try {
+                    // Process images in batches to avoid blocking UI
+                    const batchSize = 3;
+                    const processedImages: string[] = [];
+
+                    for (let i = 0; i < imageFiles.length; i += batchSize) {
+                      const batch = imageFiles.slice(i, i + batchSize);
+                      // Process images with optimized compression for drag & drop
+                      const base64Promises = batch.map(async (file) => {
+                        // For drag & drop, use faster compression settings
+                        if (file.size > 1024 * 1024) { // Files larger than 1MB
+                          // Use smaller max dimensions and lower quality for large files
+                          return new Promise<string>((resolve, reject) => {
+                            const reader = new FileReader();
+                            reader.readAsDataURL(file);
+                            reader.onload = (e) => {
+                              const img = new Image();
+                              img.src = e.target?.result as string;
+                              img.onload = () => {
+                                const canvas = document.createElement('canvas');
+                                let width = img.width;
+                                let height = img.height;
+
+                                // More aggressive size reduction for large files
+                                const maxSize = file.size > 5 * 1024 * 1024 ? 800 : 1200; // 5MB+ files get smaller
+                                if (width > maxSize || height > maxSize) {
+                                  const ratio = Math.min(maxSize / width, maxSize / height);
+                                  width = Math.floor(width * ratio);
+                                  height = Math.floor(height * ratio);
+                                }
+
+                                canvas.width = width;
+                                canvas.height = height;
+
+                                const ctx = canvas.getContext('2d');
+                                if (!ctx) {
+                                  reject(new Error('Could not get canvas context'));
+                                  return;
+                                }
+
+                                ctx.drawImage(img, 0, 0, width, height);
+                                const quality = file.size > 5 * 1024 * 1024 ? 0.6 : 0.7;
+                                const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+                                resolve(compressedDataUrl);
+                              };
+                              img.onerror = (error) => reject(error);
+                            };
+                            reader.onerror = (error) => reject(error);
+                          });
+                        } else {
+                          // Small files use standard compression
+                          return fileToBase64(file);
+                        }
+                      });
+                      const batchResults = await Promise.all(base64Promises);
+                      processedImages.push(...batchResults);
+
+                      // Update UI with processed images incrementally
+                      setImages(prev => [...prev, ...batchResults]);
+                    }
+                  } catch (err) {
+                    console.error("Failed to convert dragged image", err);
+                    // Could add user notification here
+                  } finally {
+                    setIsProcessingImages(false);
+                  }
+                }
+              }}
+            >
               <div className="grid w-full min-w-0">
                 {/* Invisible Pre-wrap div to force height */}
                 <div 
@@ -804,10 +910,21 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                               setPreviewImage(image);
                             }}
                           >
-                            <img 
-                              src={image} 
-                              className="w-full h-full object-cover" 
+                            <img
+                              src={image}
+                              alt="便签图片"
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                                e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                              }}
                             />
+                            <div className="hidden absolute inset-0 bg-gray-200 flex items-center justify-center text-xs text-gray-500">
+                              <div className="text-center">
+                                <div className="text-lg mb-1">📷</div>
+                                <div>图片已损毁</div>
+                              </div>
+                            </div>
                           </div>
                           <button 
                             onClick={(e) => { 
@@ -832,7 +949,23 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                         style={{ border: 'none' }}
                       >
                           {sketch && sketch !== '' ? (
-                              <img src={sketch} className="w-full h-full object-cover" />
+                            <div className="relative w-full h-full">
+                              <img
+                                src={sketch}
+                                alt="便签涂鸦"
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  e.currentTarget.style.display = 'none';
+                                  e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                                }}
+                              />
+                              <div className="hidden absolute inset-0 bg-gray-200 flex items-center justify-center text-xs text-gray-500">
+                                <div className="text-center">
+                                  <div className="text-lg mb-1">🎨</div>
+                                  <div>涂鸦已损毁</div>
+                                </div>
+                              </div>
+                            </div>
                           ) : <PenTool size={24} className="text-gray-500"/>}
                           {sketch && sketch !== '' && <div onClick={(e) => {e.stopPropagation(); setShowEmojiPicker(false); removeSketch(e); }} className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><X size={12}/></div>}
                       </button>

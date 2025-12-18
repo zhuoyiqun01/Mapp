@@ -10,9 +10,67 @@ const BACKGROUND_IMAGE_PREFIX = 'mapp-bg-';
 const STORAGE_VERSION_KEY = 'mapp-storage-version';
 const CURRENT_STORAGE_VERSION = 2; // 版本号，用于数据迁移
 
+// View position cache (sessionStorage, cleared on page close or project switch)
+const getViewPositionCacheKey = (projectId: string, viewType: 'map' | 'board'): string => {
+  return `mapp-view-pos-${projectId}-${viewType}`;
+};
+
+export function getViewPositionCache(projectId: string, viewType: 'map' | 'board'): { center?: [number, number], zoom?: number, x?: number, y?: number, scale?: number } | null {
+  try {
+    const key = getViewPositionCacheKey(projectId, viewType);
+    const cached = sessionStorage.getItem(key);
+    if (cached) {
+      return JSON.parse(cached);
+    }
+  } catch (err) {
+    console.warn('Failed to load view position cache', err);
+  }
+  return null;
+}
+
+export function setViewPositionCache(projectId: string, viewType: 'map' | 'board', position: { center?: [number, number], zoom?: number, x?: number, y?: number, scale?: number }): void {
+  try {
+    const key = getViewPositionCacheKey(projectId, viewType);
+    sessionStorage.setItem(key, JSON.stringify(position));
+  } catch (err) {
+    console.warn('Failed to save view position cache', err);
+  }
+}
+
+export function clearViewPositionCache(projectId: string): void {
+  try {
+    sessionStorage.removeItem(getViewPositionCacheKey(projectId, 'map'));
+    sessionStorage.removeItem(getViewPositionCacheKey(projectId, 'board'));
+  } catch (err) {
+    console.warn('Failed to clear view position cache', err);
+  }
+}
+
 // 生成图片 ID
 function generateImageId(): string {
   return `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// 检查 IndexedDB 存储使用情况
+export async function checkStorageUsage(): Promise<{ used: number, available: number, percentage: number } | null> {
+  try {
+    if ('storage' in navigator && 'estimate' in navigator.storage) {
+      const estimate = await navigator.storage.estimate();
+      const used = estimate.usage || 0;
+      const quota = estimate.quota || 0;
+      const available = quota - used;
+      const percentage = quota > 0 ? (used / quota) * 100 : 0;
+
+      return {
+        used: used / (1024 * 1024), // MB
+        available: available / (1024 * 1024), // MB
+        percentage
+      };
+    }
+  } catch (error) {
+    console.warn('Cannot check storage usage:', error);
+  }
+  return null;
 }
 
 // 从 Base64 中提取图片 ID（如果是旧格式的 Base64，返回 null）
@@ -26,13 +84,52 @@ function extractImageId(imageData: string): string | null {
 // 保存图片到 IndexedDB，返回图片 ID
 export async function saveImage(base64Data: string): Promise<string> {
   const imageId = generateImageId();
-  await set(`${IMAGE_PREFIX}${imageId}`, base64Data);
-  return imageId;
+
+  // 检查 Base64 数据是否有效
+  if (!base64Data || !base64Data.startsWith('data:image/')) {
+    throw new Error('Invalid image data: not a valid Base64 image');
+  }
+
+  // 检查数据大小（IndexedDB 通常有 ~50MB 限制）
+  const dataSizeMB = (base64Data.length * 3) / 4 / (1024 * 1024); // 估算解码后大小
+  if (dataSizeMB > 10) {
+    console.warn(`Large image detected: ${dataSizeMB.toFixed(2)}MB, may cause storage issues`);
+  }
+
+  try {
+    await set(`${IMAGE_PREFIX}${imageId}`, base64Data);
+    // 验证保存是否成功
+    const verifyData = await get<string>(`${IMAGE_PREFIX}${imageId}`);
+    if (!verifyData) {
+      throw new Error('Image save verification failed');
+    }
+    return imageId;
+  } catch (error) {
+    console.error('Failed to save image:', error);
+    throw error;
+  }
 }
 
 // 从 IndexedDB 加载图片
 export async function loadImage(imageId: string): Promise<string | null> {
-  return await get<string>(`${IMAGE_PREFIX}${imageId}`);
+  try {
+    const data = await get<string>(`${IMAGE_PREFIX}${imageId}`);
+    if (!data) {
+      console.warn(`Image not found in IndexedDB: ${imageId}`);
+      return null;
+    }
+
+    // 验证加载的数据是否有效
+    if (!data.startsWith('data:image/')) {
+      console.error(`Invalid image data loaded for ${imageId}:`, data.substring(0, 100) + '...');
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    console.error(`Failed to load image ${imageId}:`, error);
+    return null;
+  }
 }
 
 // 保存 sketch 到 IndexedDB，返回 sketch ID
@@ -44,7 +141,24 @@ export async function saveSketch(base64Data: string): Promise<string> {
 
 // 从 IndexedDB 加载 sketch
 export async function loadSketch(sketchId: string): Promise<string | null> {
-  return await get<string>(`${SKETCH_PREFIX}${sketchId}`);
+  try {
+    const data = await get<string>(`${SKETCH_PREFIX}${sketchId}`);
+    if (!data) {
+      console.warn(`Sketch not found in IndexedDB: ${sketchId}`);
+      return null;
+    }
+
+    // 验证加载的数据是否有效
+    if (!data.startsWith('data:image/')) {
+      console.error(`Invalid sketch data loaded for ${sketchId}:`, data.substring(0, 100) + '...');
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    console.error(`Failed to load sketch ${sketchId}:`, error);
+    return null;
+  }
 }
 
 // 保存背景图片
@@ -64,62 +178,236 @@ export async function deleteImage(imageId: string): Promise<void> {
   await del(`${IMAGE_PREFIX}${imageId}`);
 }
 
+// 尝试恢复丢失的图片（从note数据中重新保存）
+export async function attemptImageRecovery(): Promise<{ imagesRecovered: number, sketchesRecovered: number }> {
+  let imagesRecovered = 0;
+  let sketchesRecovered = 0;
+
+  try {
+    // 获取所有项目
+    const projectIds = await loadProjectList();
+    const projects = await Promise.all(
+      projectIds.map(id => loadProject(id, true)) // 加载图片
+    );
+
+    const validProjects = projects.filter(p => p !== null);
+
+    for (const project of validProjects) {
+      if (!project) continue;
+
+      for (const note of project.notes) {
+        // 检查图片
+        if (note.images && note.images.length > 0) {
+          for (let i = 0; i < note.images.length; i++) {
+            const imageData = note.images[i];
+            const existingId = extractImageId(imageData);
+
+            if (!existingId && imageData.startsWith('data:image/')) {
+              // 这是一个Base64图片但没有对应的ID，尝试重新保存
+              try {
+                const imageId = await saveImage(imageData);
+                // 更新note中的图片引用
+                note.images[i] = imageId;
+                imagesRecovered++;
+                console.log(`Recovered image for note ${note.id}: ${imageId}`);
+              } catch (error) {
+                console.error(`Failed to recover image for note ${note.id}:`, error);
+              }
+            }
+          }
+        }
+
+        // 检查sketch
+        if (note.sketch && !extractImageId(note.sketch) && note.sketch.startsWith('data:image/')) {
+          try {
+            const sketchId = await saveSketch(note.sketch);
+            note.sketch = sketchId;
+            sketchesRecovered++;
+            console.log(`Recovered sketch for note ${note.id}: ${sketchId}`);
+          } catch (error) {
+            console.error(`Failed to recover sketch for note ${note.id}:`, error);
+          }
+        }
+      }
+
+      // 保存恢复后的项目
+      await saveProject(project);
+    }
+
+    console.log(`Recovery attempt complete: ${imagesRecovered} images, ${sketchesRecovered} sketches recovered`);
+  } catch (error) {
+    console.error('Failed to attempt image recovery:', error);
+  }
+
+  return { imagesRecovered, sketchesRecovered };
+}
+
+// 清理明显损坏的图片和sketch（只删除无法访问或明显无效的数据）
+export async function cleanupCorruptedImages(): Promise<{ imagesCleaned: number, sketchesCleaned: number }> {
+  let imagesCleaned = 0;
+  let sketchesCleaned = 0;
+
+  try {
+    const allKeys = await keys();
+    const imageKeys = allKeys.filter(key => typeof key === 'string' && (key as string).startsWith(IMAGE_PREFIX));
+    const sketchKeys = allKeys.filter(key => typeof key === 'string' && (key as string).startsWith(SKETCH_PREFIX));
+
+    // 检查图片 - 只删除无法访问的数据，不删除格式不匹配的数据
+    for (const key of imageKeys) {
+      try {
+        const data = await get<string>(key as string);
+        // 只删除明显无效的数据：null、undefined、空字符串或异常短的数据
+        if (data === null || data === undefined || data === '' || (typeof data === 'string' && data.length < 20)) {
+          await del(key as string);
+          imagesCleaned++;
+          console.log(`Cleaned invalid image data: ${key}`);
+        }
+      } catch (error) {
+        // 只有在无法访问数据时才删除
+        await del(key as string);
+        imagesCleaned++;
+        console.log(`Cleaned inaccessible image: ${key}`);
+      }
+    }
+
+    // 检查sketch - 同样的保守策略
+    for (const key of sketchKeys) {
+      try {
+        const data = await get<string>(key as string);
+        // 只删除明显无效的数据
+        if (data === null || data === undefined || data === '' || (typeof data === 'string' && data.length < 20)) {
+          await del(key as string);
+          sketchesCleaned++;
+          console.log(`Cleaned invalid sketch data: ${key}`);
+        }
+      } catch (error) {
+        // 只有在无法访问数据时才删除
+        await del(key as string);
+        sketchesCleaned++;
+        console.log(`Cleaned inaccessible sketch: ${key}`);
+      }
+    }
+
+    console.log(`Conservative cleanup complete: ${imagesCleaned} images, ${sketchesCleaned} sketches cleaned`);
+  } catch (error) {
+    console.error('Failed to cleanup corrupted images:', error);
+  }
+
+  return { imagesCleaned, sketchesCleaned };
+}
+
 // 删除 sketch
 export async function deleteSketch(sketchId: string): Promise<void> {
   await del(`${SKETCH_PREFIX}${sketchId}`);
 }
 
-// 确保Note有variant字段
+// 确保Note有variant字段，并修复旧数据的兼容性问题
 function ensureNoteVariant(note: Note): Note {
+  // 如果 variant 缺失，默认为 standard
   if (!note.variant) {
-    // 不要根据内容自动判断 variant，默认为 standard
     return { ...note, variant: 'standard' };
   }
-  return note;
+  
+  // 对于旧数据，如果 variant 不在有效值列表中，修复为 standard
+  const validVariants: ('standard' | 'compact' | 'image')[] = ['standard', 'compact', 'image'];
+  if (!validVariants.includes(note.variant)) {
+    return { ...note, variant: 'standard' };
+  }
+  
+  // 确保必要的字段存在
+  const fixedNote = { ...note };
+  
+  // 确保 coords 存在且有效（对于地图项目很重要）
+  if (!fixedNote.coords || 
+      typeof fixedNote.coords.lat !== 'number' || 
+      isNaN(fixedNote.coords.lat) ||
+      typeof fixedNote.coords.lng !== 'number' || 
+      isNaN(fixedNote.coords.lng)) {
+    // 如果 coords 无效，设置默认坐标
+    // 注意：这只是一个安全措施，理想情况下不应该发生
+    fixedNote.coords = { 
+      lat: (fixedNote.coords && typeof fixedNote.coords.lat === 'number' && !isNaN(fixedNote.coords.lat)) 
+        ? fixedNote.coords.lat : 0, 
+      lng: (fixedNote.coords && typeof fixedNote.coords.lng === 'number' && !isNaN(fixedNote.coords.lng)) 
+        ? fixedNote.coords.lng : 0 
+    };
+  }
+  
+  // 确保其他必要字段存在
+  if (!fixedNote.images) {
+    fixedNote.images = [];
+  }
+  if (!fixedNote.tags) {
+    fixedNote.tags = [];
+  }
+  if (typeof fixedNote.fontSize !== 'number') {
+    fixedNote.fontSize = 3;
+  }
+  if (typeof fixedNote.boardX !== 'number') {
+    fixedNote.boardX = 0;
+  }
+  if (typeof fixedNote.boardY !== 'number') {
+    fixedNote.boardY = 0;
+  }
+  
+  return fixedNote;
 }
 
 // 转换 Note 的图片从 Base64 到图片 ID（用于迁移）
 async function migrateNoteImages(note: Note): Promise<Note> {
   const migratedNote = ensureNoteVariant({ ...note });
-  
+
   // 迁移 images 数组
   if (note.images && note.images.length > 0) {
     const imageIds: string[] = [];
     for (const imageData of note.images) {
-      const existingId = extractImageId(imageData);
-      if (existingId) {
-        imageIds.push(existingId);
-      } else {
-        // 是 Base64，需要保存并获取 ID
-        const imageId = await saveImage(imageData);
-        imageIds.push(imageId);
+      try {
+        const existingId = extractImageId(imageData);
+        if (existingId) {
+          imageIds.push(existingId);
+        } else {
+          // 是 Base64，需要保存并获取 ID
+          const imageId = await saveImage(imageData);
+          imageIds.push(imageId);
+        }
+      } catch (error) {
+        console.error(`Failed to migrate image for note ${note.id}:`, error);
+        // 跳过损坏的图片，继续处理其他图片
+        continue;
       }
     }
     migratedNote.images = imageIds;
   }
-  
+
   // 迁移 sketch
   if (note.sketch) {
-    const existingId = extractImageId(note.sketch);
-    if (existingId) {
-      migratedNote.sketch = existingId;
-    } else {
-      // 是 Base64，需要保存并获取 ID
-      const sketchId = await saveSketch(note.sketch);
-      migratedNote.sketch = sketchId;
+    try {
+      const existingId = extractImageId(note.sketch);
+      if (existingId) {
+        migratedNote.sketch = existingId;
+      } else {
+        // 是 Base64，需要保存并获取 ID
+        const sketchId = await saveSketch(note.sketch);
+        migratedNote.sketch = sketchId;
+      }
+    } catch (error) {
+      console.error(`Failed to migrate sketch for note ${note.id}:`, error);
+      // 移除损坏的sketch
+      migratedNote.sketch = undefined;
     }
   }
-  
+
   return migratedNote;
 }
 
 // 加载 Note 的图片（将图片 ID 转换为 Base64）
 export async function loadNoteImages(note: Note): Promise<Note> {
   const loadedNote = { ...note };
-  
-  // 加载 images 数组
+
+  // 加载 images 数组 - 保持原始的图片ID数组不变，只返回成功加载的图片数据
   if (note.images && note.images.length > 0) {
     const loadedImages: string[] = [];
+
     for (const imageId of note.images) {
       const existingId = extractImageId(imageId);
       if (existingId) {
@@ -127,46 +415,81 @@ export async function loadNoteImages(note: Note): Promise<Note> {
         const imageData = await loadImage(existingId);
         if (imageData) {
           loadedImages.push(imageData);
+        } else {
+          // 无法加载，但保留ID引用，等待可能的恢复
+          console.warn(`Failed to load image ${imageId} for note ${note.id}`);
         }
       } else {
         // 是 Base64（旧格式），直接使用
         loadedImages.push(imageId);
       }
     }
+
     loadedNote.images = loadedImages;
   }
-  
-  // 加载 sketch
+
+  // 加载 sketch - 保持原始的sketch ID不变
   if (note.sketch) {
     const existingId = extractImageId(note.sketch);
     if (existingId) {
       const sketchData = await loadSketch(existingId);
       if (sketchData) {
         loadedNote.sketch = sketchData;
+      } else {
+        // 无法加载，但保留ID引用，等待可能的恢复
+        console.warn(`Failed to load sketch ${existingId} for note ${note.id}`);
       }
     }
     // 如果已经是 Base64，保持不变
   }
-  
+
   return loadedNote;
+}
+
+// 确保项目数据的完整性和兼容性
+function ensureProjectCompatibility(project: Project): Project {
+  const fixedProject = { ...project };
+  
+  // 确保项目类型有效
+  if (!fixedProject.type || (fixedProject.type !== 'map' && fixedProject.type !== 'image')) {
+    // 默认根据是否有 notes 和 coords 来判断类型
+    if (fixedProject.notes && fixedProject.notes.some(note => note.coords)) {
+      fixedProject.type = 'map';
+    } else {
+      fixedProject.type = 'image';
+    }
+  }
+  
+  // 确保 notes 数组存在
+  if (!fixedProject.notes) {
+    fixedProject.notes = [];
+  }
+  
+  // 修复所有 notes 的兼容性问题
+  fixedProject.notes = fixedProject.notes.map(ensureNoteVariant);
+  
+  return fixedProject;
 }
 
 // 保存项目（分片存储，图片分离）
 export async function saveProject(project: Project): Promise<void> {
+  // 0. 确保项目数据兼容性
+  const compatibleProject = ensureProjectCompatibility(project);
+  
   // 1. 迁移项目中的图片
-  const migratedProject = { ...project };
+  const migratedProject = { ...compatibleProject };
   
   // 迁移所有 notes 的图片
   migratedProject.notes = await Promise.all(
-    project.notes.map(note => migrateNoteImages(note))
+    compatibleProject.notes.map(note => migrateNoteImages(note))
   );
   
   // 迁移背景图片
-  if (project.backgroundImage) {
-    const existingId = extractImageId(project.backgroundImage);
+  if (compatibleProject.backgroundImage) {
+    const existingId = extractImageId(compatibleProject.backgroundImage);
     if (!existingId) {
       // 是 Base64，需要保存
-      await saveBackgroundImage(project.id, project.backgroundImage);
+      await saveBackgroundImage(compatibleProject.id, compatibleProject.backgroundImage);
       // 项目数据中不存储 Base64，只标记有背景图片
       migratedProject.backgroundImage = 'stored'; // 标记为已存储
     }
@@ -197,28 +520,26 @@ export async function loadProject(projectId: string, loadImages: boolean = false
     return null;
   }
   
-  // 确保所有notes都有variant
-  if (project.notes) {
-    project.notes = project.notes.map(ensureNoteVariant);
-  }
+  // 确保项目数据的完整性和兼容性
+  const compatibleProject = ensureProjectCompatibility(project);
   
   // 如果需要加载图片，则加载所有图片
   if (loadImages) {
     // 加载背景图片
-    if (project.backgroundImage === 'stored') {
+    if (compatibleProject.backgroundImage === 'stored') {
       const bgImage = await loadBackgroundImage(projectId);
       if (bgImage) {
-        project.backgroundImage = bgImage;
+        compatibleProject.backgroundImage = bgImage;
       }
     }
     
     // 加载所有 notes 的图片
-    project.notes = await Promise.all(
-      project.notes.map(note => loadNoteImages(note))
+    compatibleProject.notes = await Promise.all(
+      compatibleProject.notes.map(note => loadNoteImages(note))
     );
   }
   
-  return project;
+  return compatibleProject;
 }
 
 // 加载所有项目 ID 列表

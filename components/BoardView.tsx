@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useMemo } from 'react';
+import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
 import { Note, Frame, Connection } from '../types';
 import { motion } from 'framer-motion';
 import { NoteEditor } from './NoteEditor';
@@ -7,7 +7,7 @@ import { Square, StickyNote, X, Pencil, Check, Minus, Move, ArrowUp, Hash, Plus,
 import exifr from 'exifr';
 import { generateId, fileToBase64 } from '../utils';
 import { THEME_COLOR, THEME_COLOR_DARK } from '../constants';
-import { saveImage, saveSketch, loadNoteImages } from '../utils/storage';
+import { saveImage, saveSketch, loadNoteImages, getViewPositionCache } from '../utils/storage';
 
 // 常量定义
 const CONNECTION_OFFSET = 40; // 连接线从连接点延伸的距离
@@ -38,16 +38,69 @@ interface BoardViewProps {
   onSwitchToMapView?: (coords?: { lat: number; lng: number }) => void;
   onSwitchToBoardView?: (coords?: { x: number; y: number }) => void;
   navigateToCoords?: { x: number; y: number } | null;
+  projectId?: string;
   onNavigateComplete?: () => void;
+  onTransformChange?: (x: number, y: number, scale: number) => void;
+  mapViewFileInputRef?: React.RefObject<HTMLInputElement>;
   themeColor?: string;
 }
 
-export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onToggleEditor, onAddNote, onDeleteNote, onEditModeChange, connections = [], onUpdateConnections, frames = [], onUpdateFrames, project, onUpdateProject, onSwitchToMapView, onSwitchToBoardView, navigateToCoords, onNavigateComplete, mapViewFileInputRef, themeColor = THEME_COLOR }) => {
+const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onToggleEditor, onAddNote, onDeleteNote, onEditModeChange, connections = [], onUpdateConnections, frames = [], onUpdateFrames, project, onUpdateProject, onSwitchToMapView, onSwitchToBoardView, navigateToCoords, projectId, onNavigateComplete, onTransformChange, mapViewFileInputRef, themeColor = THEME_COLOR }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
   
-  // Canvas Viewport State
-  const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
+  // Calculate initial transform: cache -> fit all objects -> default
+  const calculateInitialTransform = useCallback(() => {
+    if (!containerRef.current) return { x: 0, y: 0, scale: 1 };
+    
+    // 1. Check cache first
+    if (projectId) {
+      const cached = getViewPositionCache(projectId, 'board');
+      if (cached?.x !== undefined && cached?.y !== undefined && cached?.scale !== undefined) {
+        return { x: cached.x, y: cached.y, scale: cached.scale };
+      }
+    }
+    
+    // 2. Calculate to fit all objects
+    if (notes.length > 0) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      notes.forEach(note => {
+        minX = Math.min(minX, note.boardX);
+        minY = Math.min(minY, note.boardY);
+        const w = note.variant === 'compact' ? 180 : 256;
+        const h = note.variant === 'compact' ? 180 : 256;
+        maxX = Math.max(maxX, note.boardX + w);
+        maxY = Math.max(maxY, note.boardY + h);
+      });
+      
+      const padding = 100;
+      minX -= padding;
+      minY -= padding;
+      maxX += padding;
+      maxY += padding;
+      const contentWidth = maxX - minX;
+      const contentHeight = maxY - minY;
+      const { width: cW, height: cH } = containerRef.current.getBoundingClientRect();
+      
+      const scaleX = cW / contentWidth;
+      const scaleY = cH / contentHeight;
+      const newScale = Math.min(Math.max(0.2, Math.min(scaleX, scaleY) * 0.9), 4);
+      
+      const newX = (cW - contentWidth * newScale) / 2 - minX * newScale;
+      const newY = (cH - contentHeight * newScale) / 2 - minY * newScale;
+      
+      return { x: newX, y: newY, scale: newScale };
+    }
+    
+    // 3. Default
+    return { x: 0, y: 0, scale: 1 };
+  }, [notes, projectId]);
+  
+  // Canvas Viewport State - initialize with calculated transform
+  const [transform, setTransform] = useState(() => {
+    // This will be recalculated when container is ready
+    return { x: 0, y: 0, scale: 1 };
+  });
   const [isPanning, setIsPanning] = useState(false);
   
   // Edit Mode State
@@ -784,7 +837,22 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
     }).filter(p => p !== null);
   }, [connections, notes, draggingNoteId, dragOffset]);
 
-  // Initial zoom to fit all notes on mount
+  // Apply initial transform when container is ready
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const initial = calculateInitialTransform();
+    // Only set if different to avoid unnecessary updates
+    setTransform(prev => {
+      if (Math.abs(prev.x - initial.x) > 0.01 ||
+          Math.abs(prev.y - initial.y) > 0.01 ||
+          Math.abs(prev.scale - initial.scale) > 0.001) {
+        return initial;
+      }
+      return prev;
+    });
+  }, [calculateInitialTransform]);
+
+  // Initial zoom to fit all notes on mount (deprecated - now handled by calculateInitialTransform)
   useEffect(() => {
     if (notes.length > 0 && containerRef.current && !isEditMode) {
         // 使用setTimeout确保容器尺寸已计算
@@ -920,9 +988,32 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEditMode]);
 
-  // Navigate to specific coordinates when navigateToCoords is set
+  // Track transform changes and notify parent (only when transform actually changes)
+  const prevTransformRef = useRef<{ x: number, y: number, scale: number }>(transform);
+  const isRestoringRef = useRef(false);
+  
   useEffect(() => {
-    if (navigateToCoords && containerRef.current) {
+    // Only call onTransformChange if transform actually changed and we're not restoring
+    if (onTransformChange && !isRestoringRef.current) {
+      const prev = prevTransformRef.current;
+      if (Math.abs(prev.x - transform.x) > 0.01 || 
+          Math.abs(prev.y - transform.y) > 0.01 || 
+          Math.abs(prev.scale - transform.scale) > 0.001) {
+        onTransformChange(transform.x, transform.y, transform.scale);
+        prevTransformRef.current = { ...transform };
+      }
+    } else if (isRestoringRef.current) {
+      // Update ref after restoration
+      prevTransformRef.current = { ...transform };
+      isRestoringRef.current = false;
+    }
+  }, [transform, onTransformChange]);
+
+  // Navigate to specific coordinates when navigateToCoords is set, or restore saved transform
+  useEffect(() => {
+    if (!containerRef.current) return;
+    
+    if (navigateToCoords) {
       const { width, height } = containerRef.current.getBoundingClientRect();
       const targetX = navigateToCoords.x;
       const targetY = navigateToCoords.y;
@@ -965,8 +1056,18 @@ export const BoardView: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onTog
       };
       
       requestAnimationFrame(animate);
+    } else if (!navigateToCoords && containerRef.current) {
+      // If no navigate coords, use calculated initial transform
+      const initial = calculateInitialTransform();
+      if (Math.abs(initial.x - transform.x) > 0.01 || 
+          Math.abs(initial.y - transform.y) > 0.01 || 
+          Math.abs(initial.scale - transform.scale) > 0.001) {
+        isRestoringRef.current = true;
+        setTransform(initial);
+        onNavigateComplete?.();
+      }
     }
-  }, [navigateToCoords, containerRef, transform, onNavigateComplete]);
+  }, [navigateToCoords, containerRef, transform, onNavigateComplete, calculateInitialTransform]);
 
   const closeEditor = () => {
     // Delay clearing editingNote to ensure any pending state updates are processed
@@ -2245,8 +2346,9 @@ const createNoteAtCenter = (variant: 'compact') => {
           // 最小尺寸限制
           if (newWidth < 100 || newHeight < 100) return;
           
+          // Update frames using the original frame from resizingFrame state to avoid dependency on props
           onUpdateFrames?.(frames.map(f => 
-              f.id === resizingFrame.id ? { ...f, x: newX, y: newY, width: newWidth, height: newHeight } : f
+              f.id === resizingFrame.id ? { ...original, x: newX, y: newY, width: newWidth, height: newHeight } : f
           ));
           return;
       }
@@ -2315,6 +2417,38 @@ const createNoteAtCenter = (variant: 'compact') => {
   };
 
   const handleBoardPointerUp = (e: React.PointerEvent) => {
+      // 优先处理需要释放状态的操作，避免提前返回导致状态未释放
+      
+      // 如果正在调整Frame大小，结束调整
+      if (resizingFrame) {
+          setResizingFrame(null);
+          (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+          return;
+      }
+      
+      // 如果正在调整图片大小，结束调整
+      if (resizingImage) {
+          setResizingImage(null);
+          (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+          return;
+      }
+      
+      // 如果正在拖动Frame，结束拖动
+      if (draggingFrameId) {
+          setDraggingFrameId(null);
+          setDraggingFrameOffset(null);
+          return;
+      }
+      
+      // 如果正在框选，结束当前框选操作（但保持框选模式）
+      if (isBoxSelecting && boxSelectStart) {
+          // Clear box select start/end but keep box select mode active
+          setBoxSelectStart(null);
+          setBoxSelectEnd(null);
+          (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+          return;
+      }
+      
       // 检查是否点击了UI元素（按钮、面板等）
       const target = e.target as HTMLElement;
       if (target) {
@@ -2340,36 +2474,6 @@ const createNoteAtCenter = (variant: 'compact') => {
               }
               current = current.parentElement;
           }
-      }
-      
-      // 如果正在框选，结束当前框选操作（但保持框选模式）
-      if (isBoxSelecting && boxSelectStart) {
-          // Clear box select start/end but keep box select mode active
-          setBoxSelectStart(null);
-          setBoxSelectEnd(null);
-          (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-          return;
-      }
-      
-      // 如果正在拖动Frame，结束拖动
-      if (draggingFrameId) {
-          setDraggingFrameId(null);
-          setDraggingFrameOffset(null);
-          return;
-      }
-      
-      // 如果正在调整图片大小，结束调整
-      if (resizingImage) {
-          setResizingImage(null);
-          (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-          return;
-      }
-      
-      // 如果正在调整Frame大小，结束调整
-      if (resizingFrame) {
-          setResizingFrame(null);
-          (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-          return;
       }
       
       // 检查是否有实际移动（点击 vs 拖动）
@@ -4764,7 +4868,7 @@ const createNoteAtCenter = (variant: 'compact') => {
               exit={{ opacity: 0 }}
               className="fixed bottom-24 left-4 z-[500] pointer-events-auto"
           >
-            <ZoomSlider value={transform.scale} min={0.2} max={3.0} step={0.1} onChange={(val) => zoomAtViewCenter(val)} />
+            <ZoomSlider value={transform.scale} min={0.2} max={3.0} onChange={(val) => zoomAtViewCenter(val)} />
         </motion.div>
 
         <div className="fixed top-4 right-4 z-[500] flex gap-3 pointer-events-auto items-center" style={{ height: '40px' }} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
@@ -5410,3 +5514,5 @@ const createNoteAtCenter = (variant: 'compact') => {
     </motion.div>
   );
 };
+
+export const BoardView = BoardViewComponent;

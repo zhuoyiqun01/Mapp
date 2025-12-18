@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Map as MapIcon, Grid, Menu, Loader2, Table2, Cloud, CloudOff, CheckCircle2, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapView } from './components/MapView';
@@ -24,7 +24,13 @@ import {
   deleteProject as deleteProjectStorage,
   loadProject,
   deleteImage,
-  deleteSketch
+  deleteSketch,
+  getViewPositionCache,
+  setViewPositionCache,
+  clearViewPositionCache,
+  checkStorageUsage,
+  cleanupCorruptedImages,
+  attemptImageRecovery
 } from './utils/storage';
 
 export default function App() {
@@ -33,8 +39,16 @@ export default function App() {
   const [isBoardEditMode, setIsBoardEditMode] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const mapViewFileInputRef = useRef<HTMLInputElement | null>(null);
-  const [sidebarButtonY, setSidebarButtonY] = useState(96); // 初始位置 top-24 = 96px
+  const [sidebarButtonY, setSidebarButtonY] = useState(96); // 初始值，将在 useEffect 中更新为屏幕中间
   const sidebarButtonDragRef = useRef({ isDragging: false, startY: 0, startButtonY: 0 });
+  
+  // Set initial sidebar button position to vertical center
+  useEffect(() => {
+    // Calculate center position: (window height - button height) / 2
+    // Button height is approximately 50px (padding + icon size)
+    const centerY = (window.innerHeight - 50) / 2;
+    setSidebarButtonY(centerY);
+  }, []);
   
   // Navigation state for cross-view positioning
   const [navigateToMapCoords, setNavigateToMapCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -44,6 +58,42 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  
+  // Save map position to cache when switching away from map view
+  const saveMapPositionBeforeSwitch = useCallback((mapInstance: any) => {
+    if (currentProjectId && mapInstance) {
+      try {
+        const center = mapInstance.getCenter();
+        const zoom = mapInstance.getZoom();
+        if (center && typeof center.lat === 'number' && typeof center.lng === 'number') {
+          setViewPositionCache(currentProjectId, 'map', { center: [center.lat, center.lng], zoom });
+        }
+      } catch (err) {
+        console.warn('[App] Failed to get map position:', err);
+      }
+    }
+  }, [currentProjectId]);
+
+  // Save board position to cache when switching away from board view
+  const saveBoardPositionBeforeSwitch = useCallback((x: number, y: number, scale: number) => {
+    if (currentProjectId) {
+      setViewPositionCache(currentProjectId, 'board', { x, y, scale });
+    }
+  }, [currentProjectId]);
+
+  // Stable callback for map position changes - save to cache
+  const handleMapPositionChange = useCallback((center: [number, number], zoom: number) => {
+    if (currentProjectId) {
+      setViewPositionCache(currentProjectId, 'map', { center, zoom });
+    }
+  }, [currentProjectId]);
+
+  // Stable callback for board transform changes - save to cache
+  const handleBoardTransformChange = useCallback((x: number, y: number, scale: number) => {
+    if (currentProjectId) {
+      setViewPositionCache(currentProjectId, 'board', { x, y, scale });
+    }
+  }, [currentProjectId]);
 
   // Cloud Sync State
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
@@ -108,9 +158,30 @@ export default function App() {
   useEffect(() => {
     const loadProjects = async () => {
       try {
+        // 检查存储使用情况
+        const storageUsage = await checkStorageUsage();
+        if (storageUsage) {
+          console.log(`Storage usage: ${storageUsage.used.toFixed(2)}MB used, ${storageUsage.available.toFixed(2)}MB available (${storageUsage.percentage.toFixed(1)}%)`);
+          if (storageUsage.percentage > 80) {
+            console.warn('Storage usage is high, images may be automatically cleaned up by browser');
+          }
+        }
+
         // 1. 数据迁移（从旧格式到新格式）
         await migrateFromOldFormat();
-        
+
+        // 1.5. 尝试恢复丢失的图片数据
+        const recoveryResult = await attemptImageRecovery();
+        if (recoveryResult.imagesRecovered > 0 || recoveryResult.sketchesRecovered > 0) {
+          console.log(`Recovered ${recoveryResult.imagesRecovered} images and ${recoveryResult.sketchesRecovered} sketches`);
+        }
+
+        // 1.6. 保守清理明显损坏的数据（只删除无法访问的数据）
+        const cleanupResult = await cleanupCorruptedImages();
+        if (cleanupResult.imagesCleaned > 0 || cleanupResult.sketchesCleaned > 0) {
+          console.log(`Cleaned ${cleanupResult.imagesCleaned} corrupted images and ${cleanupResult.sketchesCleaned} corrupted sketches`);
+        }
+
         // 2. 从新格式加载项目（不加载图片，用于快速显示）
         let localProjects: Project[] = await loadAllProjects(false);
         
@@ -310,14 +381,24 @@ export default function App() {
           if (!prev) return updatedProject;
           
           // Create a map of existing notes with loaded images
-          const prevNotesMap = new Map(prev.notes.map(n => [n.id, n]));
+          const prevNotesMap = new Map<string, Note>(prev.notes.map(n => [n.id, n]));
           
           // Build new notes array: keep loaded images for existing notes, add new notes
-          const newNotes = updatedProject.notes.map(updatedNote => {
-            const prevNote = prevNotesMap.get(updatedNote.id);
+          const newNotes = updatedProject.notes.map((updatedNote: Note) => {
+            const prevNote: Note | undefined = prevNotesMap.get(updatedNote.id);
             if (prevNote) {
-              // Note exists, keep loaded images
-              return { ...updatedNote, images: prevNote.images, sketch: prevNote.sketch };
+              // Note exists, keep loaded images/sketch unless the updated note has newer data
+              // Check if the updated note has images/sketch that differ from the cached version
+              const hasNewImages = updatedNote.images && updatedNote.images.length > 0 &&
+                (!prevNote.images || prevNote.images.length !== updatedNote.images.length ||
+                 !prevNote.images.every((img, idx) => img === updatedNote.images?.[idx]));
+              const hasNewSketch = updatedNote.sketch && updatedNote.sketch !== prevNote.sketch;
+
+              return {
+                ...updatedNote,
+                images: hasNewImages ? updatedNote.images : (prevNote.images || []),
+                sketch: hasNewSketch ? updatedNote.sketch : prevNote.sketch
+              };
             } else {
               // New note, will need to load images when displayed
               return updatedNote;
@@ -703,7 +784,11 @@ export default function App() {
             }}
             fileInputRef={mapViewFileInputRef}
             navigateToCoords={navigateToMapCoords}
-            onNavigateComplete={() => setNavigateToMapCoords(null)}
+            projectId={currentProjectId || ''}
+            onNavigateComplete={() => {
+              setNavigateToMapCoords(null);
+            }}
+            onPositionChange={handleMapPositionChange}
             onSwitchToBoardView={(coords) => {
               // Close editor first to ensure UI state is correct
               setIsEditorOpen(false);
@@ -754,7 +839,11 @@ export default function App() {
               ));
             }}
             navigateToCoords={navigateToBoardCoords}
-            onNavigateComplete={() => setNavigateToBoardCoords(null)}
+            projectId={currentProjectId || ''}
+            onNavigateComplete={() => {
+              setNavigateToBoardCoords(null);
+            }}
+            onTransformChange={handleBoardTransformChange}
             onSwitchToMapView={(coords?: { lat: number; lng: number }) => {
               // Close editor first to ensure UI state is correct
               setIsEditorOpen(false);
@@ -822,7 +911,11 @@ export default function App() {
             Mapping
           </button>
           <button
-            onClick={() => !isImportDialogOpen && setViewMode('board')}
+            onClick={() => {
+              if (!isImportDialogOpen) {
+                setViewMode('board');
+              }
+            }}
             disabled={isImportDialogOpen}
             className={`
               flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm

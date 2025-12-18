@@ -4,6 +4,117 @@ import { MapContainer, TileLayer, Marker, ImageOverlay, useMap, useMapEvents } f
 import L from 'leaflet';
 import { Note, Coordinates, Project } from '../types';
 import { MAP_TILE_URL, MAP_TILE_URL_FALLBACK, MAP_SATELLITE_URL, MAP_ATTRIBUTION, THEME_COLOR, THEME_COLOR_DARK, MAP_STYLE_OPTIONS } from '../constants';
+import { getViewPositionCache } from '../utils/storage';
+
+// Custom Horizontal Range Slider component - similar to ZoomSlider but horizontal
+const CustomHorizontalSlider: React.FC<{
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (value: number) => void;
+  themeColor: string;
+  width: number;
+  formatValue: (value: number) => string;
+  mapInstance: L.Map | null;
+}> = ({ value, min, max, step, onChange, themeColor, width, formatValue, mapInstance }) => {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Handle slider drag state to prevent unwanted map interactions
+  useEffect(() => {
+    const handleGlobalMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    if (isDragging) {
+      document.addEventListener('mouseup', handleGlobalMouseUp);
+      // Disable map dragging while slider is being dragged
+      if (mapInstance) {
+        mapInstance.dragging.disable();
+      }
+      return () => {
+        document.removeEventListener('mouseup', handleGlobalMouseUp);
+        // Re-enable map dragging
+        if (mapInstance) {
+          mapInstance.dragging.enable();
+        }
+      };
+    }
+  }, [isDragging, mapInstance]);
+
+  const percentage = Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100));
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    setIsDragging(true);
+    (e.currentTarget as Element).setPointerCapture(e.pointerId);
+    updateValueFromPointer(e.clientX);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!isDragging) return;
+    e.stopPropagation();
+    updateValueFromPointer(e.clientX);
+  };
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    if (isDragging) {
+      setIsDragging(false);
+      (e.currentTarget as Element).releasePointerCapture(e.pointerId);
+    }
+  };
+
+  const updateValueFromPointer = (clientX: number) => {
+    if (!trackRef.current) return;
+
+    const rect = trackRef.current.getBoundingClientRect();
+    const relativeX = clientX - rect.left;
+    let percent = relativeX / rect.width;
+    percent = Math.max(0, Math.min(1, percent));
+
+    const rawValue = min + (percent * (max - min));
+    const steppedValue = Math.round(rawValue / step) * step;
+    onChange(Math.max(min, Math.min(max, steppedValue)));
+  };
+
+  return (
+    <div className="flex items-center gap-2 custom-horizontal-slider">
+      <div
+        ref={trackRef}
+        className="relative h-1 flex cursor-pointer select-none touch-none"
+        style={{ width: `${width}px` }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+      >
+        {/* Track Line */}
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gray-200 rounded-full pointer-events-none" />
+
+        {/* Filled Track */}
+        <div
+          className="absolute top-0 left-0 h-1 rounded-full pointer-events-none transition-all duration-75"
+          style={{
+            backgroundColor: themeColor,
+            width: `${percentage}%`
+          }}
+        />
+
+        {/* Circular Thumb */}
+        <div
+          className="absolute top-1/2 w-4 h-4 bg-white border-2 rounded-full shadow-md pointer-events-none transition-all duration-75 -translate-y-1/2"
+          style={{
+            borderColor: themeColor,
+            left: `calc(${percentage}% - 8px)`
+          }}
+        />
+      </div>
+      <span className="text-xs text-gray-500 whitespace-nowrap min-w-[2rem]">
+        {formatValue(value)}
+      </span>
+    </div>
+  );
+};
 import { Search, Locate, Loader2, X, Check, Satellite, Plus, Image as ImageIcon, FileJson, Type } from 'lucide-react';
 import exifr from 'exifr';
 import { NoteEditor } from './NoteEditor';
@@ -27,8 +138,9 @@ interface MapViewProps {
   onImportDialogChange?: (isOpen: boolean) => void;
   onUpdateProject?: (project: Project) => void;
   navigateToCoords?: { lat: number; lng: number } | null;
+  projectId?: string;
   onNavigateComplete?: () => void;
-  onSwitchToBoardView?: (coords?: { x: number; y: number }) => void;
+  onSwitchToBoardView?: (coords?: { x: number; y: number }, mapInstance?: L.Map) => void;
   themeColor?: string;
   mapStyleId?: string;
 }
@@ -397,6 +509,118 @@ const MapNavigationHandler = ({ coords, onComplete }: { coords: { lat: number; l
   return null;
 };
 
+// Component to render text labels on a separate high z-index pane
+const TextLabelsLayer = ({ notes, showTextLabels, pinSize, themeColor }: {
+  notes: Note[];
+  showTextLabels: boolean;
+  pinSize: number;
+  themeColor: string;
+}) => {
+  const map = useMap();
+  const labelsRef = useRef<L.LayerGroup | null>(null);
+
+  // Map slider value (0.5-2.0) to label size (0.5-1.2)
+  const mapLabelSize = (sliderValue: number): number => {
+    // Linear mapping: 0.5 -> 0.5, 2.0 -> 1.2
+    return (sliderValue - 0.5) * (1.2 - 0.5) / (2.0 - 0.5) + 0.5;
+  };
+
+  useEffect(() => {
+    if (!map) return;
+
+    // Create or get a pane for text labels with higher z-index than markerPane
+    let textLabelsPane = map.getPane('textLabelsPane');
+    if (!textLabelsPane) {
+      textLabelsPane = map.createPane('textLabelsPane');
+      // Set z-index higher than markerPane (600) and tooltipPane (650)
+      textLabelsPane.style.zIndex = '651';
+    }
+
+    // Remove existing labels
+    if (labelsRef.current) {
+      map.removeLayer(labelsRef.current);
+    }
+
+    if (!showTextLabels) {
+      return;
+    }
+
+    // Create a layer group for text labels
+    const labelsLayer = L.layerGroup([], { pane: 'textLabelsPane' });
+    labelsRef.current = labelsLayer;
+
+    // Add text labels for each note
+    notes.forEach(note => {
+      if (!note.text || !note.text.trim()) return;
+      
+      // Count Chinese characters
+      const chineseChars = note.text.match(/[\u4e00-\u9fa5]/g) || [];
+      const textLength = chineseChars.length;
+      if (textLength <= 0 || textLength > 10) return;
+
+      // Use mapped label size (0.5-1.2)
+      const mappedLabelSize = mapLabelSize(pinSize || 1.0);
+      const labelFontSize = 12 * mappedLabelSize;
+      const labelPadding = `${2 * mappedLabelSize}px ${6 * mappedLabelSize}px`;
+      const labelBackgroundColor = note.color || themeColor;
+      const baseSize = 40;
+      const isFavorite = note.isFavorite === true;
+      const scale = (isFavorite ? 2 : 1) * (pinSize || 1.0);
+      const size = baseSize * scale;
+
+      // Create a div icon for the text label
+      // Position it directly at the marker position (no offset)
+      // Use a wrapper div to handle positioning, inner div for the actual label
+      const labelIcon = L.divIcon({
+        className: 'text-label-icon',
+        html: `<div style="
+          position: absolute;
+          left: 50%;
+          top: 50%;
+          transform: translate(-50%, -50%);
+        ">
+          <div style="
+            background-color: ${labelBackgroundColor};
+            padding: ${labelPadding};
+            border-radius: 4px;
+            border: 2px solid ${themeColor};
+            white-space: nowrap;
+            font-size: ${labelFontSize}px;
+            font-weight: bold;
+            color: black;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            pointer-events: none;
+            display: inline-block;
+          ">
+            ${note.text}
+          </div>
+        </div>`,
+        iconSize: [200, 50], // Large enough container, actual size determined by content
+        iconAnchor: [100, 25], // Center of the container
+      });
+
+      const labelMarker = L.marker([note.coords.lat, note.coords.lng], {
+        icon: labelIcon,
+        pane: 'textLabelsPane',
+        interactive: false,
+      });
+
+      labelsLayer.addLayer(labelMarker);
+    });
+
+    // Add the layer group to the map
+    labelsLayer.addTo(map);
+
+    return () => {
+      if (labelsLayer && map.hasLayer(labelsLayer)) {
+        map.removeLayer(labelsLayer);
+      }
+    };
+  }, [map, notes, showTextLabels, pinSize, themeColor]);
+
+  return null;
+};
+
 // Component to block map container from receiving pointer events in capture phase
 const SearchBarContainer = ({ children }: { children: React.ReactNode }) => {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -425,7 +649,7 @@ const SearchBarContainer = ({ children }: { children: React.ReactNode }) => {
     return <div ref={containerRef}>{children}</div>;
 };
 
-const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange, mapNotes, themeColor = THEME_COLOR, showTextLabels, setShowTextLabels }: {
+const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange, mapNotes, themeColor = THEME_COLOR, showTextLabels, setShowTextLabels, pinSize, setPinSize, clusterThreshold, setClusterThreshold }: {
     onImportPhotos: () => void;
     onImportData: () => void;
     mapStyle: 'standard' | 'satellite';
@@ -434,6 +658,10 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
     themeColor?: string;
     showTextLabels: boolean;
     setShowTextLabels: (show: boolean) => void;
+    pinSize: number;
+    setPinSize: (size: number) => void;
+    clusterThreshold: number;
+    setClusterThreshold: (threshold: number) => void;
 }) => {
     const map = useMap();
     const [showImportMenu, setShowImportMenu] = useState(false);
@@ -660,9 +888,9 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
             onDoubleClick={(e) => e.stopPropagation()}
         >
             <div className="relative" ref={locateMenuRef}>
-            <button 
-                    onClick={(e) => { 
-                        e.stopPropagation(); 
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
                         setShowLocateMenu(!showLocateMenu);
                     }}
                     onPointerDown={(e) => {
@@ -688,7 +916,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                     }}
                     className="bg-white p-2 sm:p-3 rounded-xl shadow-lg text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
                     title="Locate"
-            >
+                >
                     <Locate size={18} className="sm:w-5 sm:h-5" />
                 </button>
                 {showLocateMenu && (
@@ -1029,14 +1257,17 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
     );
 }
 
-const MapZoomController = ({min, max, step = 1}: {min: number, max: number, step?: number}) => {
+const MapZoomController = ({min, max}: {min: number, max: number}) => {
     const map = useMap();
     const [zoom, setZoom] = useState(map.getZoom());
     useMapEvents({
-        zoomend: () => setZoom(map.getZoom())
+        zoomend: () => setZoom(map.getZoom()),
+        zoom: () => setZoom(map.getZoom()) // Also listen to zoom event for smoother updates
     });
     return (
-      <ZoomSlider value={zoom} min={min} max={max} step={step} onChange={(val) => map.setZoom(val)} />
+      <ZoomSlider value={zoom} min={min} max={max} onChange={(val) => {
+        map.setZoom(val);
+      }} />
     );
 };
 
@@ -1070,13 +1301,50 @@ const MapCenterHandler = ({ center, zoom }: { center: [number, number], zoom: nu
     return null;
 };
 
-export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, onNavigateComplete, onSwitchToBoardView, themeColor = THEME_COLOR, mapStyleId = 'carto-light-nolabels' }) => {
+// Component to track map position changes and notify parent
+const MapPositionTracker = ({ onPositionChange }: { onPositionChange?: (center: [number, number], zoom: number) => void }) => {
+    const map = useMap();
+
+    useEffect(() => {
+        if (!map || !onPositionChange) return;
+
+        // Track if this is the initial position (to avoid saving initial default position)
+        let isInitialPosition = true;
+        const initialTimeout = setTimeout(() => {
+          isInitialPosition = false;
+        }, 2000); // After 2 seconds, consider it a user-initiated change
+
+        const handleMoveEnd = () => {
+            const center = map.getCenter();
+            const zoom = map.getZoom();
+            // Only save if not initial position (to avoid overwriting cache with default)
+            if (!isInitialPosition) {
+              onPositionChange([center.lat, center.lng], zoom);
+            }
+        };
+
+        map.on('moveend', handleMoveEnd);
+        map.on('zoomend', handleMoveEnd);
+
+        return () => {
+            clearTimeout(initialTimeout);
+            map.off('moveend', handleMoveEnd);
+            map.off('zoomend', handleMoveEnd);
+        };
+    }, [map, onPositionChange]);
+
+    return null;
+};
+
+
+export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, projectId, onNavigateComplete, onPositionChange, onSwitchToBoardView, themeColor = THEME_COLOR, mapStyleId = 'carto-light-nolabels' }) => {
   if (!project) {
     return null;
   }
   const notes = project.notes;
   const [editingNote, setEditingNote] = useState<Partial<Note> | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -1253,6 +1521,12 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
   // Text labels display mode
   const [showTextLabels, setShowTextLabels] = useState(false);
+
+    // Pin size control
+    const [pinSize, setPinSize] = useState(1.0); // Scale factor for pin size
+
+    // Cluster threshold control
+    const [clusterThreshold, setClusterThreshold] = useState(40); // Distance threshold for clustering
   
   // Current marker index being viewed
 
@@ -1270,6 +1544,56 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     [notes]
   );
 
+  // Get cached position, last pin position, current location, or default
+  const initialMapPosition = useMemo(() => {
+    if (!isMapMode || !projectId) {
+      return null;
+    }
+
+    // 1. Check cache first
+    const cached = getViewPositionCache(projectId, 'map');
+    if (cached?.center && cached.zoom) {
+      return { center: cached.center, zoom: cached.zoom };
+    }
+
+    // 2. Use last pin position
+    if (mapNotes.length > 0) {
+      const lastNote = mapNotes[mapNotes.length - 1];
+      return {
+        center: [lastNote.coords.lat, lastNote.coords.lng] as [number, number],
+        zoom: 16
+      };
+    }
+
+    // 3. Use current location (if available)
+    if (currentLocation) {
+      return { center: [currentLocation.lat, currentLocation.lng] as [number, number], zoom: 16 };
+    }
+
+    // 4. Use default
+    return { center: defaultCenter, zoom: 16 };
+  }, [isMapMode, projectId, mapNotes, currentLocation, defaultCenter]);
+
+  // Get current location on mount (only once)
+  useEffect(() => {
+    if (!isMapMode || currentLocation) return;
+    
+    if ('geolocation' in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setCurrentLocation({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          });
+        },
+        () => {
+          // Location permission denied or error - ignore
+        },
+        { timeout: 5000, maximumAge: 60000 }
+      );
+    }
+  }, [isMapMode, currentLocation]);
+
   // Load Image Dimensions and persistence
   useEffect(() => {
     if (project.type === 'image' && project.backgroundImage) {
@@ -1283,6 +1607,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         setImageDimensions(null);
     }
   }, [project.id, project.type, project.backgroundImage]);
+
 
   // Calculate dynamic min zoom for image
   useEffect(() => {
@@ -2144,9 +2469,17 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       }
   };
 
-  const createCustomIcon = (note: Note, count?: number, showTextLabels?: boolean) => {
+  // Map slider value (0.5-2.0) to actual pin size (0.2-1.2)
+  const mapPinSize = (sliderValue: number): number => {
+    // Linear mapping: 0.5 -> 0.2, 2.0 -> 1.2
+    return (sliderValue - 0.5) * (1.2 - 0.2) / (2.0 - 0.5) + 0.2;
+  };
+
+  const createCustomIcon = (note: Note, count?: number, showTextLabels?: boolean, pinSize?: number) => {
       const isFavorite = note.isFavorite === true;
-      const scale = isFavorite ? 2 : 1;
+      // Use mapped pin size for pin, but keep original pinSize for label scaling
+      const mappedPinSize = pinSize ? mapPinSize(pinSize) : 1.0;
+      const scale = (isFavorite ? 2 : 1) * mappedPinSize;
       const baseSize = 40;
       const size = baseSize * scale;
       const borderWidth = 3; // 收藏时不加粗描边
@@ -2227,37 +2560,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         content = `<span style="transform: rotate(45deg); font-size: 20px; line-height: 1; z-index: 1; position: relative;">${note.emoji}</span>`;
       }
 
-      // Add text label if enabled and text is within length limit
-      let textLabel = '';
-      if (showTextLabels && note.text && note.text.trim()) {
-        // Count Chinese characters (considering each Chinese character as 1 unit)
-        const chineseChars = note.text.match(/[\u4e00-\u9fa5]/g) || [];
-        const textLength = chineseChars.length;
-        if (textLength > 0 && textLength <= 10) {
-          textLabel = `
-            <div style="
-              position: absolute;
-              bottom: -${size * 0.6}px;
-              left: 50%;
-              transform: translateX(-50%);
-              background-color: white;
-              padding: 2px 6px;
-              border-radius: 4px;
-              border: 2px solid ${themeColor};
-              white-space: nowrap;
-              font-size: 12px;
-              font-weight: bold;
-              color: black;
-              box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-              z-index: 2000;
-              pointer-events: none;
-            ">
-              ${note.text}
-            </div>
-          `;
-        }
-      }
-
       return L.divIcon({
           className: 'custom-icon',
           html: `<div style="
@@ -2276,8 +2578,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           ">
             ${content}
           </div>
-          ${countBadge}
-          ${textLabel}`,
+          ${countBadge}`,
           iconSize: [size, size],
           iconAnchor: [size / 2, size],
           popupAnchor: [0, -size]
@@ -2301,8 +2602,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   }, []);
   
   // Pin clustering distance threshold (in screen pixels)
-  // Increased from 25 to 40 for better clustering
-  const CLUSTER_DISTANCE_THRESHOLD = 40;
+  // Now controlled by user setting - removed constant, use clusterThreshold directly
   
   // Calculate distance between two pins on the map (in screen pixels)
   // Returns null if calculation fails
@@ -2332,7 +2632,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   }, []);
   
   // Detect if markers overlap (based on screen pixel distance)
-  const detectClusters = useCallback((notes: Note[], map: L.Map, threshold: number = CLUSTER_DISTANCE_THRESHOLD): Array<{ notes: Note[], position: [number, number] }> => {
+  const detectClusters = useCallback((notes: Note[], map: L.Map, threshold: number = clusterThreshold): Array<{ notes: Note[], position: [number, number] }> => {
     if (!map || notes.length === 0) return [];
     
     // Check if map is initialized
@@ -2380,7 +2680,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     });
     
     return clusters;
-  }, [sortNotes, calculatePinDistance]);
+  }, [sortNotes, calculatePinDistance, clusterThreshold]);
   
   // Use ref to store mapInstance to avoid closure issues
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -2435,8 +2735,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             return;
           }
           
-          // Calculate clusters
-          const clusters = detectClusters(mapNotes, currentMap);
+          // Calculate clusters with current threshold
+          const clusters = detectClusters(mapNotes, currentMap, clusterThreshold);
           setClusteredMarkers(clusters);
         } catch (e) {
           console.warn('Failed to update clusters:', e);
@@ -2516,7 +2816,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         mapInstance.off('moveend', handleMoveEnd);
       }
     };
-  }, [mapInstance, mapNotes, isMapMode]);
+  }, [mapInstance, mapNotes, isMapMode, clusterThreshold, detectClusters]);
 
   // Drag and drop handlers
   const handleDragEnter = (e: React.DragEvent) => {
@@ -2538,14 +2838,17 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const handleDragLeave = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    // Check if we're actually leaving the container (not just moving to a child element)
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const x = e.clientX;
-    const y = e.clientY;
-    
-    // If the mouse is outside the container bounds, hide the drag overlay
-    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
-      setIsDragging(false);
+    // Only hide drag overlay if editor is not open
+    if (!isEditorOpen) {
+      // Check if we're actually leaving the container (not just moving to a child element)
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const x = e.clientX;
+      const y = e.clientY;
+
+      // If the mouse is outside the container bounds, hide the drag overlay
+      if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+        setIsDragging(false);
+      }
     }
   };
 
@@ -2557,6 +2860,14 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
+
+    // If editor is open, don't process the drop - let NoteEditor handle it
+    // The drag overlay will still show to guide users
+    if (isEditorOpen) {
+      setIsDragging(false);
+      return;
+    }
+
     setIsDragging(false);
 
     const files = e.dataTransfer.files;
@@ -2616,36 +2927,53 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       onDragEnd={handleDragEnd}
     >
       {isDragging && (
-        <div 
+        <div
           className="absolute inset-0 z-[4000] backdrop-blur-sm flex items-center justify-center pointer-events-auto"
-          style={{ backgroundColor: `${themeColor}33` }}
+          style={{ backgroundColor: isEditorOpen ? '#3B82F633' : `${themeColor}33` }}
           onClick={() => setIsDragging(false)}
         >
           <div className="bg-white rounded-2xl shadow-2xl p-8 border-4 pointer-events-none" style={{ borderColor: themeColor }}>
             <div className="text-center">
               <div className="mb-4 flex justify-center">
-                <svg width="64" height="64" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-gray-700">
-                  <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" fill="none"/>
-                  <path d="M8 11V5M5 8l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
+                {isEditorOpen ? (
+                  <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-blue-600">
+                    <path d="M14 2H6C4.89543 2 4 2.89543 4 4V20C4 21.1046 4.89543 22 6 22H18C19.1046 22 20 21.1046 20 20V8L14 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <polyline points="14,2 14,8 20,8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M16 13H8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M16 17H8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M10 9H8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                ) : (
+                  <svg width="64" height="64" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-gray-700">
+                    <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                    <path d="M8 11V5M5 8l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
               </div>
-              <div className="text-xl font-bold text-gray-800">Drop images or JSON files here to import</div>
+              <div className="text-xl font-bold text-gray-800">
+                {isEditorOpen
+                  ? "Drag images to the note editor to add them"
+                  : "Drop images or JSON files here to import"
+                }
+              </div>
             </div>
           </div>
         </div>
       )}
-      <MapContainer 
-        key={project.id} 
+      <MapContainer
+        key={`${project.id}-${projectId || 'no-project'}`}
         center={
-          isMapMode 
-            ? (mapNotes.length > 0 
-                ? [mapNotes[mapNotes.length - 1].coords.lat, mapNotes[mapNotes.length - 1].coords.lng]
-                : defaultCenter)
+          isMapMode
+            ? (navigateToCoords 
+                ? [navigateToCoords.lat, navigateToCoords.lng]
+                : (initialMapPosition?.center || defaultCenter))
             : [0, 0]
-        } 
-        zoom={isMapMode ? 16 : -8}
-        minZoom={isMapMode ? 6 : -20} 
+        }
+        zoom={isMapMode ? (navigateToCoords ? 19 : (initialMapPosition?.zoom ?? 16)) : -8}
+        minZoom={isMapMode ? 6 : -20}
         maxZoom={isMapMode ? 19 : 2}
+        zoomSnap={0.1}  // Enable fractional zoom levels
+        zoomDelta={0.1}  // Allow smaller zoom increments
         crs={isMapMode ? L.CRS.EPSG3857 : L.CRS.Simple}
         style={{ height: '100%', width: '100%' }}
         zoomControl={false}
@@ -2660,6 +2988,18 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             mapInitRef.current.add(map);
             
             map.whenReady(() => {
+              // Always check and apply cached position if available and no navigateToCoords
+              // This ensures cache takes priority over initial MapContainer props
+              if (!navigateToCoords && projectId && isMapMode) {
+                const cached = getViewPositionCache(projectId, 'map');
+                if (cached?.center && cached.zoom) {
+                  // Use a small delay to ensure map is fully ready
+                  setTimeout(() => {
+                    map.setView(cached.center, cached.zoom, { animate: false });
+                  }, 50);
+                }
+              }
+              
               // Helper function to safely invalidate size and update view
               const safeInvalidateAndUpdate = () => {
                 if (!map || !map.getContainer()) return false;
@@ -2703,6 +3043,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         doubleClickZoom={false}
       >
         <MapNavigationHandler coords={navigateToCoords} onComplete={onNavigateComplete} />
+        <MapPositionTracker onPositionChange={onPositionChange} />
         {isMapMode ? (
            (() => {
              const isSatellite = effectiveMapStyle === 'satellite';
@@ -2748,13 +3089,23 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           />
         )}
         
+        {isMapMode && (
+          <TextLabelsLayer 
+            notes={mapNotes}
+            showTextLabels={showTextLabels}
+            pinSize={pinSize}
+            themeColor={themeColor}
+          />
+        )}
+        
         {isMapMode && (showTextLabels ? (
           // Text labels mode: show all markers individually without clustering
           mapNotes.map(note => (
             <Marker
               key={note.id}
               position={[note.coords.lat, note.coords.lng]}
-              icon={createCustomIcon(note, undefined, showTextLabels)}
+              icon={createCustomIcon(note, undefined, showTextLabels, pinSize)}
+              zIndexOffset={-100}
               eventHandlers={{
                 click: (e) => {
                   e.originalEvent?.stopPropagation();
@@ -2774,7 +3125,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           <Marker
             key={note.id}
             position={[note.coords.lat, note.coords.lng]}
-                  icon={createCustomIcon(note, undefined, showTextLabels)}
+                  icon={createCustomIcon(note, undefined, showTextLabels, pinSize)}
+                  zIndexOffset={-100}
                   eventHandlers={{
                     click: (e) => {
                       e.originalEvent?.stopPropagation();
@@ -2790,7 +3142,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 <Marker
                   key={`cluster-${index}`}
                   position={cluster.position}
-                  icon={createCustomIcon(cluster.notes[0], cluster.notes.length, showTextLabels)}
+                  icon={createCustomIcon(cluster.notes[0], cluster.notes.length, showTextLabels, pinSize)}
+                  zIndexOffset={-100}
                   eventHandlers={{
                     click: (e) => {
                       e.originalEvent?.stopPropagation();
@@ -2808,7 +3161,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             <Marker
               key={note.id}
               position={[note.coords.lat, note.coords.lng]}
-              icon={createCustomIcon(note, undefined, showTextLabels)}
+              icon={createCustomIcon(note, undefined, showTextLabels, pinSize)}
+              zIndexOffset={-100}
               eventHandlers={{
                 click: (e) => {
                   e.originalEvent?.stopPropagation();
@@ -2865,7 +3219,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         ))}
 
         {isMapMode && (
-          <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex gap-1.5 sm:gap-2 pointer-events-none items-start">
+          <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none items-start">
+              {/* First Row: Main Controls */}
               <MapControls
                 onImportPhotos={() => fileInputRef.current?.click()}
                 onImportData={() => dataImportInputRef.current?.click()}
@@ -2875,7 +3230,71 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 themeColor={themeColor}
                 showTextLabels={showTextLabels}
                 setShowTextLabels={setShowTextLabels}
+                pinSize={pinSize}
+                setPinSize={setPinSize}
+                clusterThreshold={clusterThreshold}
+                setClusterThreshold={setClusterThreshold}
               />
+
+              {/* Second Row: Sliders */}
+              <div className="flex gap-1.5 sm:gap-2 pointer-events-auto"
+                onPointerDown={(e) => {
+                  // Don't stop propagation for slider interactions
+                  const target = e.target as Element;
+                  if (target.closest('.custom-horizontal-slider')) {
+                    return; // Let slider handle the event
+                  }
+                  e.stopPropagation();
+                }}
+                onPointerMove={(e) => {
+                  const target = e.target as Element;
+                  if (target.closest('.custom-horizontal-slider')) {
+                    return; // Let slider handle the event
+                  }
+                  e.stopPropagation();
+                }}
+                onPointerUp={(e) => {
+                  const target = e.target as Element;
+                  if (target.closest('.custom-horizontal-slider')) {
+                    return; // Let slider handle the event
+                  }
+                  e.stopPropagation();
+                }}
+              >
+                {/* Pin Size Control */}
+                <div className="bg-white/90 backdrop-blur rounded-lg shadow-lg border border-gray-100 p-2 flex flex-col items-center gap-1">
+                    <span className="text-xs font-medium text-gray-600 whitespace-nowrap">Pin Size</span>
+                    <CustomHorizontalSlider
+                        value={pinSize}
+                        min={0.5}
+                        max={2.0}
+                        step={0.1}
+                        onChange={setPinSize}
+                        themeColor={themeColor}
+                        width={90}
+                        formatValue={(val) => `${val.toFixed(1)}x`}
+                        mapInstance={mapInstance}
+                    />
+                </div>
+
+                {/* Cluster Threshold Control */}
+                <div className="bg-white/90 backdrop-blur rounded-lg shadow-lg border border-gray-100 p-2 flex flex-col items-center gap-1">
+                    <span className="text-xs font-medium text-gray-600 whitespace-nowrap">Cluster Threshold</span>
+                    <CustomHorizontalSlider
+                        value={clusterThreshold}
+                        min={1}
+                        max={100}
+                        step={5}
+                        onChange={setClusterThreshold}
+                        themeColor={themeColor}
+                        width={90}
+                        formatValue={(val) => `${val}px`}
+                        mapInstance={mapInstance}
+                    />
+                </div>
+              </div>
+
+              {/* Third Row: Search Bar */}
               <SearchBarContainer>
               <div 
                   className="flex-1 max-w-md relative group pointer-events-auto"
@@ -3069,10 +3488,9 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         )}
 
         <div className="fixed bottom-20 sm:bottom-24 left-2 sm:left-4 z-[500]">
-           <MapZoomController 
-             min={isMapMode ? 13 : minImageZoom} 
-             max={isMapMode ? 19 : 4} 
-             step={isMapMode ? 1 : 0.1}
+           <MapZoomController
+             min={isMapMode ? 13 : minImageZoom}
+             max={isMapMode ? 19 : 4}
            />
         </div>
 
