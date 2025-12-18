@@ -649,7 +649,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                       // Process images with optimized compression for drag & drop
                       const base64Promises = batch.map(async (file) => {
                         // For drag & drop, use faster compression settings
-                        if (file.size > 1024 * 1024) { // Files larger than 1MB
+                        if (file.size > 500 * 1024) { // Files larger than 500KB
                           // Use smaller max dimensions and lower quality for large files
                           return new Promise<string>((resolve, reject) => {
                             const reader = new FileReader();
@@ -662,8 +662,16 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                                 let width = img.width;
                                 let height = img.height;
 
-                                // More aggressive size reduction for large files
-                                const maxSize = file.size > 5 * 1024 * 1024 ? 800 : 1200; // 5MB+ files get smaller
+                                // More aggressive size reduction based on file size
+                                let maxSize = 1200; // Default max dimension
+                                if (file.size > 10 * 1024 * 1024) { // 10MB+
+                                  maxSize = 600;
+                                } else if (file.size > 5 * 1024 * 1024) { // 5MB+
+                                  maxSize = 800;
+                                } else if (file.size > 2 * 1024 * 1024) { // 2MB+
+                                  maxSize = 1000;
+                                }
+
                                 if (width > maxSize || height > maxSize) {
                                   const ratio = Math.min(maxSize / width, maxSize / height);
                                   width = Math.floor(width * ratio);
@@ -680,8 +688,19 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                                 }
 
                                 ctx.drawImage(img, 0, 0, width, height);
-                                const quality = file.size > 5 * 1024 * 1024 ? 0.6 : 0.7;
+
+                                // Lower quality for better compression
+                                let quality = 0.8; // Default quality
+                                if (file.size > 5 * 1024 * 1024) {
+                                  quality = 0.5; // Very aggressive compression for large files
+                                } else if (file.size > 2 * 1024 * 1024) {
+                                  quality = 0.6; // Aggressive compression for medium files
+                                } else {
+                                  quality = 0.7; // Moderate compression for smaller files
+                                }
+
                                 const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+                                console.log(`Compressed image: ${file.name} (${file.size} bytes) -> ${width}x${height}, quality: ${quality}, result: ${(compressedDataUrl.length * 3 / 4 / 1024 / 1024).toFixed(2)}MB`);
                                 resolve(compressedDataUrl);
                               };
                               img.onerror = (error) => reject(error);

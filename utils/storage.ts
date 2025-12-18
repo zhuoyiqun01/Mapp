@@ -73,6 +73,72 @@ export async function checkStorageUsage(): Promise<{ used: number, available: nu
   return null;
 }
 
+// 检查 IndexedDB 中存储的数据详情
+export async function checkStorageDetails(): Promise<{
+  totalKeys: number;
+  imageKeys: number;
+  sketchKeys: number;
+  projectKeys: number;
+  totalImageSize: number;
+  largestImages: Array<{ key: string, size: number }>;
+} | null> {
+  try {
+    const allKeys = await keys();
+
+    const imageKeys = allKeys.filter(key =>
+      typeof key === 'string' && (key as string).startsWith(IMAGE_PREFIX)
+    );
+    const sketchKeys = allKeys.filter(key =>
+      typeof key === 'string' && (key as string).startsWith(SKETCH_PREFIX)
+    );
+    const projectKeys = allKeys.filter(key =>
+      typeof key === 'string' && (
+        (key as string).startsWith(PROJECT_PREFIX) ||
+        (key as string) === PROJECT_LIST_KEY ||
+        (key as string).startsWith(BACKGROUND_IMAGE_PREFIX) ||
+        (key as string).startsWith('mapp-')
+      )
+    );
+
+    let totalImageSize = 0;
+    const imageSizes: Array<{ key: string, size: number }> = [];
+
+    // 检查图片和涂鸦的大小
+    for (const key of [...imageKeys, ...sketchKeys]) {
+      try {
+        const data = await get<string>(key as string);
+        if (data && typeof data === 'string') {
+          const size = data.length;
+          totalImageSize += size;
+          imageSizes.push({ key: key as string, size });
+        }
+      } catch (error) {
+        console.warn(`Failed to check size for ${key}:`, error);
+      }
+    }
+
+    // 按大小排序，找出最大的几个
+    const largestImages = imageSizes
+      .sort((a, b) => b.size - a.size)
+      .slice(0, 10);
+
+    return {
+      totalKeys: allKeys.length,
+      imageKeys: imageKeys.length,
+      sketchKeys: sketchKeys.length,
+      projectKeys: projectKeys.length,
+      totalImageSize: totalImageSize / (1024 * 1024), // MB
+      largestImages: largestImages.map(item => ({
+        key: item.key,
+        size: item.size / (1024 * 1024) // MB
+      }))
+    };
+  } catch (error) {
+    console.error('Failed to check storage details:', error);
+    return null;
+  }
+}
+
 // 从 Base64 中提取图片 ID（如果是旧格式的 Base64，返回 null）
 function extractImageId(imageData: string): string | null {
   if (imageData.startsWith('img-')) {
@@ -240,6 +306,42 @@ export async function attemptImageRecovery(): Promise<{ imagesRecovered: number,
   }
 
   return { imagesRecovered, sketchesRecovered };
+}
+
+// 清理大文件以释放存储空间
+export async function cleanupLargeImages(maxSizeMB: number = 2): Promise<{ imagesCleaned: number, spaceFreed: number }> {
+  let imagesCleaned = 0;
+  let spaceFreed = 0;
+
+  try {
+    const allKeys = await keys();
+    const imageKeys = allKeys.filter(key =>
+      typeof key === 'string' && (key as string).startsWith(IMAGE_PREFIX)
+    );
+
+    for (const key of imageKeys) {
+      try {
+        const data = await get<string>(key as string);
+        if (data && typeof data === 'string') {
+          const sizeMB = (data.length * 3) / 4 / (1024 * 1024);
+          if (sizeMB > maxSizeMB) {
+            await del(key as string);
+            imagesCleaned++;
+            spaceFreed += sizeMB;
+            console.log(`Cleaned large image: ${key} (${sizeMB.toFixed(2)}MB)`);
+          }
+        }
+      } catch (error) {
+        console.warn(`Failed to check size for ${key}:`, error);
+      }
+    }
+
+    console.log(`Large image cleanup complete: ${imagesCleaned} images cleaned, ${spaceFreed.toFixed(2)}MB freed`);
+  } catch (error) {
+    console.error('Failed to cleanup large images:', error);
+  }
+
+  return { imagesCleaned, spaceFreed };
 }
 
 // 清理明显损坏的图片和sketch（只删除无法访问或明显无效的数据）

@@ -30,7 +30,9 @@ import {
   setViewPositionCache,
   clearViewPositionCache,
   checkStorageUsage,
+  checkStorageDetails,
   cleanupCorruptedImages,
+  cleanupLargeImages,
   attemptImageRecovery,
   loadNoteImages,
   ProjectSummary
@@ -177,19 +179,26 @@ export default function App() {
         console.log(`Recovered ${recoveryResult.imagesRecovered} images and ${recoveryResult.sketchesRecovered} sketches`);
       }
 
-      // Step 2: Clean up corrupted data (50%)
-      setLoadingProgress(50);
+      // Step 2: Clean up corrupted data (40%)
+      setLoadingProgress(40);
       const cleanupResult = await cleanupCorruptedImages();
       if (cleanupResult.imagesCleaned > 0 || cleanupResult.sketchesCleaned > 0) {
         console.log(`Cleaned ${cleanupResult.imagesCleaned} corrupted images and ${cleanupResult.sketchesCleaned} corrupted sketches`);
       }
 
-      // Step 3: Refresh project summaries (75%)
-      setLoadingProgress(75);
+      // Step 3: Clean up large images (>2MB) to free space (60%)
+      setLoadingProgress(60);
+      const largeCleanupResult = await cleanupLargeImages(2);
+      if (largeCleanupResult.imagesCleaned > 0) {
+        console.log(`Cleaned ${largeCleanupResult.imagesCleaned} large images, freed ${largeCleanupResult.spaceFreed.toFixed(2)}MB`);
+      }
+
+      // Step 4: Refresh project summaries (80%)
+      setLoadingProgress(80);
       const summaries = await loadProjectSummaries();
       setProjectSummaries(summaries);
 
-      // Step 4: Complete (100%)
+      // Step 5: Complete (100%)
       setLoadingProgress(100);
 
       console.log('Data check and repair completed');
@@ -301,13 +310,28 @@ export default function App() {
         // 2. 后台执行所有维护和同步任务（不阻塞UI）
         setTimeout(async () => {
           try {
-            // 检查存储使用情况
+            // 检查存储使用情况和详情
             const storageUsage = await checkStorageUsage();
             if (storageUsage) {
               console.log(`Storage usage: ${storageUsage.used.toFixed(2)}MB used, ${storageUsage.available.toFixed(2)}MB available (${storageUsage.percentage.toFixed(1)}%)`);
               if (storageUsage.percentage > 80) {
                 console.warn('Storage usage is high, images may be automatically cleaned up by browser');
               }
+            }
+
+            // 检查存储详情
+            const storageDetails = await checkStorageDetails();
+            if (storageDetails) {
+              console.log('Storage details:', {
+                totalKeys: storageDetails.totalKeys,
+                images: storageDetails.imageKeys,
+                sketches: storageDetails.sketchKeys,
+                projects: storageDetails.projectKeys,
+                totalImageSize: `${storageDetails.totalImageSize.toFixed(2)}MB`,
+                largestImages: storageDetails.largestImages.slice(0, 5).map(img =>
+                  `${img.key.split('-').pop()}: ${img.size.toFixed(2)}MB`
+                )
+              });
             }
 
             // 数据迁移（后台执行）
