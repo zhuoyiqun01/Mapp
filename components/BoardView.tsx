@@ -4970,10 +4970,19 @@ const createNoteAtCenter = (variant: 'compact') => {
                                 standardSizeScale: newScale
                             });
                         }}
-                        className="p-2 sm:p-3 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
-                        style={{ backgroundColor: 'transparent' }}
-                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${themeColor}1A`}
-                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                        className="p-2 sm:p-3 text-gray-700 flex items-center justify-center transition-colors active:scale-95"
+                        style={{
+                          backgroundColor: 'transparent',
+                          '--hover-color': themeColor
+                        } as React.CSSProperties}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = `${themeColor}1A`;
+                          e.currentTarget.style.color = themeColor;
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = 'transparent';
+                          e.currentTarget.style.color = 'rgb(55, 65, 81)'; // text-gray-700
+                        }}
                         title="放大布局"
                     >
                         <span className="text-base sm:text-lg">L+</span>
@@ -5017,10 +5026,19 @@ const createNoteAtCenter = (variant: 'compact') => {
                                 standardSizeScale: newScale
                             });
                         }}
-                        className="p-2 sm:p-3 text-gray-700 hover:text-yellow-700 flex items-center justify-center transition-colors active:scale-95"
-                        style={{ backgroundColor: 'transparent' }}
-                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${themeColor}1A`}
-                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                        className="p-2 sm:p-3 text-gray-700 flex items-center justify-center transition-colors active:scale-95"
+                        style={{
+                          backgroundColor: 'transparent',
+                          '--hover-color': themeColor
+                        } as React.CSSProperties}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = `${themeColor}1A`;
+                          e.currentTarget.style.color = themeColor;
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = 'transparent';
+                          e.currentTarget.style.color = 'rgb(55, 65, 81)'; // text-gray-700
+                        }}
                         onPointerDown={(e) => e.stopPropagation()}
                         title="缩小布局"
                     >
@@ -5414,8 +5432,8 @@ const createNoteAtCenter = (variant: 'compact') => {
                           </div>
                         </div>
                       ) : preview.isDuplicate ? (
-                        <div className="absolute inset-0 bg-yellow-500/20 rounded-lg flex items-center justify-center">
-                          <div className="text-center text-yellow-700 text-xs px-2">
+                        <div className="absolute inset-0 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${themeColor}20` }}>
+                          <div className="text-center text-xs px-2" style={{ color: themeColor }}>
                             <Check size={16} className="mx-auto mb-1" />
                             <span className="font-bold">Already imported</span>
                           </div>
