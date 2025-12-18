@@ -682,7 +682,10 @@ export async function attemptImageRecovery(): Promise<{ imagesRecovered: number,
 }
 
 // 清理重复的图片，只保留每个哈希组的第一个图片
-export async function cleanupDuplicateImages(autoDelete: boolean = false): Promise<{
+export async function cleanupDuplicateImages(autoDelete: boolean = false, options: {
+  forceDeleteSuspicious?: boolean;
+  skipSuspicious?: boolean;
+} = {}): Promise<{
   imagesCleaned: number;
   spaceFreed: number;
   keptImages: string[];
@@ -693,6 +696,7 @@ export async function cleanupDuplicateImages(autoDelete: boolean = false): Promi
     ids: string[];
     timestamps: number[];
   }>;
+  skippedSuspicious: number;
 } | null> {
   try {
     const redundancyAnalysis = await analyzeStorageRedundancy();
@@ -703,14 +707,22 @@ export async function cleanupDuplicateImages(autoDelete: boolean = false): Promi
 
     let imagesCleaned = 0;
     let spaceFreed = 0;
+    let skippedSuspicious = 0;
     const keptImages: string[] = [];
     const suspiciousGroups = detailedAnalysis?.suspiciousGroups || [];
 
     console.log(`Found ${redundancyAnalysis.duplicateGroups.length} duplicate groups, ${suspiciousGroups.length} suspicious`);
 
-    // 对于可疑的重复组，发出警告但不自动删除
+    // 处理可疑的重复组
     if (suspiciousGroups.length > 0) {
-      console.warn('⚠️  Found suspicious duplicate groups - NOT auto-deleting these:');
+      if (options.forceDeleteSuspicious) {
+        console.warn('⚠️  Force deleting suspicious duplicate groups:');
+      } else if (options.skipSuspicious) {
+        console.log('⏭️  Skipping suspicious duplicate groups (as requested):');
+      } else {
+        console.warn('⚠️  Found suspicious duplicate groups - NOT auto-deleting these:');
+      }
+
       suspiciousGroups.forEach(group => {
         console.warn(`  Hash ${group.hash.substring(0, 16)}: ${group.count} duplicates - ${group.reason}`);
         console.warn(`    IDs: ${group.ids.join(', ')}`);
@@ -722,14 +734,23 @@ export async function cleanupDuplicateImages(autoDelete: boolean = false): Promi
       // 检查这个组是否可疑
       const isSuspicious = suspiciousGroups.some(suspicious => suspicious.hash === group.hash);
 
-      if (isSuspicious) {
-        console.log(`Skipping suspicious duplicate group (hash: ${group.hash.substring(0, 16)})`);
+      if (isSuspicious && !options.forceDeleteSuspicious) {
+        if (options.skipSuspicious) {
+          console.log(`⏭️ Skipping suspicious duplicate group (hash: ${group.hash.substring(0, 16)})`);
+        } else {
+          console.log(`⚠️ Skipping suspicious duplicate group (hash: ${group.hash.substring(0, 16)})`);
+        }
         // 对于可疑的组，保留所有图片
         group.ids.forEach(id => keptImages.push(id));
+        skippedSuspicious++;
         continue;
       }
 
-      // 正常处理非可疑的重复组
+      if (isSuspicious && options.forceDeleteSuspicious) {
+        console.warn(`🔥 Force deleting suspicious duplicate group (hash: ${group.hash.substring(0, 16)})`);
+      }
+
+      // 处理重复组：保留最早的，删除其他的
       const [keepId, ...deleteIds] = group.ids;
 
       keptImages.push(keepId);
@@ -740,9 +761,11 @@ export async function cleanupDuplicateImages(autoDelete: boolean = false): Promi
             await deleteImage(deleteId);
             imagesCleaned++;
             spaceFreed += group.size / group.count;
-            console.log(`✅ Cleaned duplicate image: ${deleteId} (kept: ${keepId})`);
+            const suspiciousMark = isSuspicious ? ' (suspicious)' : '';
+            console.log(`✅ Cleaned duplicate image: ${deleteId} (kept: ${keepId})${suspiciousMark}`);
           } else {
-            console.log(`Would clean duplicate image: ${deleteId} (kept: ${keepId})`);
+            const suspiciousMark = isSuspicious ? ' (suspicious)' : '';
+            console.log(`Would clean duplicate image: ${deleteId} (kept: ${keepId})${suspiciousMark}`);
           }
         } catch (error) {
           console.warn(`Failed to delete duplicate image ${deleteId}:`, error);
@@ -750,8 +773,8 @@ export async function cleanupDuplicateImages(autoDelete: boolean = false): Promi
       }
     }
 
-    console.log(`Duplicate cleanup complete: ${imagesCleaned} images cleaned, ${spaceFreed.toFixed(2)}MB freed, ${suspiciousGroups.length} suspicious groups skipped`);
-    return { imagesCleaned, spaceFreed, keptImages, suspiciousGroups };
+    console.log(`Duplicate cleanup complete: ${imagesCleaned} images cleaned, ${spaceFreed.toFixed(2)}MB freed, ${skippedSuspicious} suspicious groups skipped`);
+    return { imagesCleaned, spaceFreed, keptImages, suspiciousGroups, skippedSuspicious };
   } catch (error) {
     console.error('Failed to cleanup duplicate images:', error);
     return null;

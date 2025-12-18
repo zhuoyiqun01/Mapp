@@ -71,6 +71,7 @@ export default function App() {
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [isDeletingProject, setIsDeletingProject] = useState(false);
   const [isRunningCleanup, setIsRunningCleanup] = useState(false);
+  const [showCleanupMenu, setShowCleanupMenu] = useState(false);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   
   // Save map position to cache when switching away from map view
@@ -153,7 +154,7 @@ export default function App() {
   }, []);
 
   // Cleanup orphaned data (images and sketches not referenced by any project)
-  const handleCleanupOrphanedData = useCallback(async () => {
+  const handleCleanupOrphanedData = useCallback(async (forceDeleteDuplicates: boolean = false) => {
     if (isRunningCleanup) {
       console.log('Cleanup already running, skipping...');
       return;
@@ -161,31 +162,44 @@ export default function App() {
 
     try {
       setIsRunningCleanup(true);
-      console.log('Starting orphaned data cleanup...');
+      console.log(`Starting ${forceDeleteDuplicates ? 'aggressive' : 'safe'} orphaned data cleanup...`);
 
       // Show loading state
       setIsLoadingProject(true);
       setLoadingProgress(0);
 
-      // Step 1: Find orphaned data (50%)
-      setLoadingProgress(50);
+      // Step 1: Find orphaned data (30%)
+      setLoadingProgress(30);
       const orphanedData = await findOrphanedData();
       console.log(`Found ${orphanedData.orphanedImages.length} orphaned images, ${orphanedData.orphanedSketches.length} orphaned sketches, ${orphanedData.orphanedBackgrounds.length} orphaned backgrounds`);
 
-      // Step 2: Clean up orphaned data (90%)
-      setLoadingProgress(90);
+      // Step 2: Clean up orphaned data (60%)
+      setLoadingProgress(60);
       const cleanupResult = await cleanupOrphanedData();
-      console.log(`Cleaned up ${cleanupResult.imagesCleaned} images, ${cleanupResult.sketchesCleaned} sketches, ${cleanupResult.backgroundsCleaned} backgrounds, freed ${(cleanupResult.spaceFreed / (1024 * 1024)).toFixed(2)}MB`);
+      console.log(`Cleaned up ${cleanupResult.imagesCleaned} orphaned images, ${cleanupResult.sketchesCleaned} orphaned sketches, ${cleanupResult.backgroundsCleaned} orphaned backgrounds, freed ${(cleanupResult.spaceFreed / (1024 * 1024)).toFixed(2)}MB`);
 
-      // Step 3: Refresh project summaries (95%)
+      // Step 3: Clean up duplicate images (90%)
+      setLoadingProgress(90);
+      const duplicateOptions = forceDeleteDuplicates ? { forceDeleteSuspicious: true } : {};
+      const duplicateCleanupResult = await cleanupDuplicateImages(true, duplicateOptions);
+      if (duplicateCleanupResult) {
+        const suspiciousAction = forceDeleteDuplicates ? 'force deleted' : 'skipped';
+        console.log(`Cleaned up ${duplicateCleanupResult.imagesCleaned} duplicate images (${duplicateCleanupResult.skippedSuspicious} suspicious ${suspiciousAction}), freed ${duplicateCleanupResult.spaceFreed.toFixed(2)}MB`);
+
+        if (duplicateCleanupResult.suspiciousGroups.length > 0 && !forceDeleteDuplicates) {
+          console.warn(`⚠️ Skipped ${duplicateCleanupResult.suspiciousGroups.length} suspicious duplicate groups. Use force mode to clean them.`);
+        }
+      }
+
+      // Step 4: Refresh project summaries (95%)
       setLoadingProgress(95);
       const summaries = await loadProjectSummaries();
       setProjectSummaries(summaries);
 
-      // Step 4: Complete (100%)
+      // Step 5: Complete (100%)
       setLoadingProgress(100);
 
-      console.log('Orphaned data cleanup completed');
+      console.log(`${forceDeleteDuplicates ? 'Aggressive' : 'Safe'} orphaned data cleanup completed`);
     } catch (error) {
       console.error('Cleanup failed:', error);
     } finally {
@@ -886,17 +900,62 @@ export default function App() {
     return (
       <div className="w-full min-h-screen relative" style={{ backgroundColor: themeColor }}>
         {/* 右上角清理按钮 */}
-        <button
-          onClick={handleCleanupOrphanedData}
-          disabled={isRunningCleanup}
-          className="absolute top-4 right-4 z-10 p-3 bg-white/90 hover:bg-white rounded-full shadow-lg transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
-          title="清理孤立数据"
-        >
-          <RefreshCw
-            size={20}
-            className={`text-gray-700 ${isRunningCleanup ? 'animate-spin' : ''}`}
+        <div className="absolute top-4 right-4 z-10">
+          <button
+            onClick={() => setShowCleanupMenu(!showCleanupMenu)}
+            disabled={isRunningCleanup}
+            className="p-3 bg-white/90 hover:bg-white rounded-full shadow-lg transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed relative"
+            title="清理数据选项"
+          >
+            <RefreshCw
+              size={20}
+              className={`text-gray-700 ${isRunningCleanup ? 'animate-spin' : ''}`}
+            />
+          </button>
+
+          {/* 清理选项菜单 */}
+          {showCleanupMenu && (
+            <div className="absolute top-full right-0 mt-2 bg-white rounded-lg shadow-xl border border-gray-200 min-w-48 py-1 z-20">
+              <button
+                onClick={() => {
+                  setShowCleanupMenu(false);
+                  handleCleanupOrphanedData(false);
+                }}
+                disabled={isRunningCleanup}
+                className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 transition-colors flex items-center gap-2"
+              >
+                <RefreshCw size={16} className="text-green-600" />
+                <div>
+                  <div className="font-medium">安全清理</div>
+                  <div className="text-xs text-gray-500">只清理孤立数据和普通重复</div>
+                </div>
+              </button>
+
+              <button
+                onClick={() => {
+                  setShowCleanupMenu(false);
+                  handleCleanupOrphanedData(true);
+                }}
+                disabled={isRunningCleanup}
+                className="w-full text-left px-4 py-3 text-sm hover:bg-red-50 transition-colors flex items-center gap-2"
+              >
+                <RefreshCw size={16} className="text-red-600" />
+                <div>
+                  <div className="font-medium">深度清理</div>
+                  <div className="text-xs text-gray-500">清理所有重复（包括可疑的）</div>
+                </div>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* 点击其他地方关闭菜单 */}
+        {showCleanupMenu && (
+          <div
+            className="fixed inset-0 z-5"
+            onClick={() => setShowCleanupMenu(false)}
           />
-        </button>
+        )}
 
         <ProjectManager
            projects={summariesToProjects(projectSummaries)}
