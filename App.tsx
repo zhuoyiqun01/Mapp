@@ -38,7 +38,7 @@ import {
   attemptImageRecovery,
   loadNoteImages,
   findOrphanedData,
-  cleanupOrphanedData,
+  cleanupOrphanedMedia,
   ProjectSummary
 } from './utils/storage';
 
@@ -175,7 +175,7 @@ export default function App() {
 
       // Step 2: Clean up orphaned data (60%)
       setLoadingProgress(60);
-      const cleanupResult = await cleanupOrphanedData();
+      const cleanupResult = await cleanupOrphanedMedia();
       console.log(`Cleaned up ${cleanupResult.imagesCleaned} orphaned images, ${cleanupResult.sketchesCleaned} orphaned sketches, ${cleanupResult.backgroundsCleaned} orphaned backgrounds, freed ${(cleanupResult.spaceFreed / (1024 * 1024)).toFixed(2)}MB`);
 
       // Step 3: Clean up duplicate images (90%)

@@ -507,22 +507,223 @@ export async function saveImage(base64Data: string): Promise<string> {
   }
 }
 
+// 添加图片到项目的引用
+export async function addImageToProject(imageId: string, projectId: string): Promise<void> {
+  try {
+    const key = `${IMAGE_PREFIX}${imageId}`;
+    const currentData = await get(key);
+
+    if (!currentData) {
+      console.warn(`Image ${imageId} not found`);
+      return;
+    }
+
+    // 处理新旧格式的兼容性
+    let imageData: any;
+    if (typeof currentData === 'string') {
+      // 旧格式：纯字符串
+      imageData = {
+        data: currentData,
+        projects: [projectId],
+        createdAt: Date.now(),
+        size: currentData.length
+      };
+    } else {
+      // 新格式：对象
+      imageData = { ...currentData };
+      if (!imageData.projects) {
+        imageData.projects = [];
+      }
+      if (!imageData.projects.includes(projectId)) {
+        imageData.projects.push(projectId);
+      }
+    }
+
+    await set(key, imageData);
+  } catch (error) {
+    console.warn(`Failed to add image ${imageId} to project ${projectId}:`, error);
+  }
+}
+
+// 从项目引用中移除图片
+export async function removeImageFromProject(imageId: string, projectId: string): Promise<void> {
+  try {
+    const key = `${IMAGE_PREFIX}${imageId}`;
+    const currentData = await get(key);
+
+    if (!currentData || typeof currentData === 'string') {
+      // 旧格式或不存在，直接返回
+      return;
+    }
+
+    const imageData = { ...currentData };
+    if (imageData.projects) {
+      imageData.projects = imageData.projects.filter((pid: string) => pid !== projectId);
+    }
+
+    await set(key, imageData);
+  } catch (error) {
+    console.warn(`Failed to remove image ${imageId} from project ${projectId}:`, error);
+  }
+}
+
+// 获取图片被哪些项目引用
+export async function getImageProjects(imageId: string): Promise<string[]> {
+  try {
+    const currentData = await get(`${IMAGE_PREFIX}${imageId}`);
+    if (!currentData) return [];
+
+    if (typeof currentData === 'string') {
+      // 旧格式，没有项目信息
+      return [];
+    }
+
+    return currentData.projects || [];
+  } catch (error) {
+    console.warn(`Failed to get projects for image ${imageId}:`, error);
+    return [];
+  }
+}
+
+// 从所有媒体文件中移除项目的引用
+export async function removeProjectFromAllMedia(projectId: string): Promise<void> {
+  try {
+    const allKeys = await keys();
+    const mediaKeys = allKeys.filter(key =>
+      typeof key === 'string' && (
+        (key as string).startsWith(IMAGE_PREFIX) ||
+        (key as string).startsWith(SKETCH_PREFIX)
+      )
+    );
+
+    console.log(`Removing project ${projectId} from ${mediaKeys.length} media files`);
+
+    const updatePromises: Promise<void>[] = [];
+
+    for (const key of mediaKeys) {
+      updatePromises.push(
+        (async () => {
+          try {
+            const currentData = await get(key);
+            if (!currentData || typeof currentData === 'string') {
+              // 旧格式或不存在，跳过
+              return;
+            }
+
+            const mediaData = { ...currentData };
+            if (mediaData.projects && Array.isArray(mediaData.projects)) {
+              const originalLength = mediaData.projects.length;
+              mediaData.projects = mediaData.projects.filter((pid: string) => pid !== projectId);
+
+              // 只有在项目列表发生变化时才更新
+              if (mediaData.projects.length !== originalLength) {
+                await set(key, mediaData);
+                console.log(`Removed project ${projectId} from ${key}`);
+              }
+            }
+          } catch (error) {
+            console.warn(`Failed to update media file ${key}:`, error);
+          }
+        })()
+      );
+    }
+
+    await Promise.allSettled(updatePromises);
+    console.log(`Completed removing project ${projectId} from all media files`);
+  } catch (error) {
+    console.warn(`Failed to remove project ${projectId} from media files:`, error);
+  }
+}
+
+// 清理没有项目引用的媒体文件（图片和涂鸦）
+export async function cleanupOrphanedMedia(): Promise<{ cleaned: number, spaceFreed: number }> {
+  let cleaned = 0;
+  let spaceFreed = 0;
+
+  try {
+    const allKeys = await keys();
+    const mediaKeys = allKeys.filter(key =>
+      typeof key === 'string' && (
+        (key as string).startsWith(IMAGE_PREFIX) ||
+        (key as string).startsWith(SKETCH_PREFIX)
+      )
+    );
+
+    console.log(`Checking ${mediaKeys.length} media files for orphaned data`);
+
+    for (const key of mediaKeys) {
+      try {
+        const currentData = await get(key);
+        if (!currentData) continue;
+
+        let shouldDelete = false;
+        let dataSize = 0;
+
+        if (typeof currentData === 'string') {
+          // 旧格式：没有项目标签，可能是孤立数据
+          shouldDelete = true;
+          dataSize = currentData.length;
+        } else {
+          // 新格式：检查项目引用
+          const projects = currentData.projects || [];
+          if (projects.length === 0) {
+            shouldDelete = true;
+            dataSize = currentData.size || currentData.data?.length || 0;
+          }
+        }
+
+        if (shouldDelete) {
+          await del(key);
+          cleaned++;
+          spaceFreed += dataSize;
+          const mediaType = (key as string).startsWith(IMAGE_PREFIX) ? 'image' : 'sketch';
+          const mediaId = (key as string).replace(IMAGE_PREFIX, '').replace(SKETCH_PREFIX, '');
+          console.log(`Cleaned orphaned ${mediaType}: ${mediaId}`);
+        }
+      } catch (error) {
+        console.warn(`Failed to check media file ${key}:`, error);
+      }
+    }
+
+    console.log(`Orphaned media cleanup complete: ${cleaned} files cleaned, ${(spaceFreed / (1024 * 1024)).toFixed(2)}MB freed`);
+  } catch (error) {
+    console.error('Failed to cleanup orphaned media:', error);
+  }
+
+  return { cleaned, spaceFreed };
+}
+
 // 从 IndexedDB 加载图片
 export async function loadImage(imageId: string): Promise<string | null> {
   try {
-    const data = await get<string>(`${IMAGE_PREFIX}${imageId}`);
+    const data = await get(`${IMAGE_PREFIX}${imageId}`);
     if (!data) {
       console.warn(`Image not found in IndexedDB: ${imageId}`);
       return null;
     }
 
-    // 验证加载的数据是否有效
-    if (!data.startsWith('data:image/')) {
-      console.error(`Invalid image data loaded for ${imageId}:`, data.substring(0, 100) + '...');
+    // 处理新旧格式的兼容性
+    let imageData: string;
+    if (typeof data === 'string') {
+      // 旧格式：纯字符串
+      imageData = data;
+    } else {
+      // 新格式：对象
+      imageData = data.data;
+    }
+
+    if (!imageData) {
+      console.warn(`Image data is empty for ${imageId}`);
       return null;
     }
 
-    return data;
+    // 验证加载的数据是否有效
+    if (!imageData.startsWith('data:image/')) {
+      console.error(`Invalid image data loaded for ${imageId}:`, imageData.substring(0, 100) + '...');
+      return null;
+    }
+
+    return imageData;
   } catch (error) {
     console.error(`Failed to load image ${imageId}:`, error);
     return null;
@@ -793,55 +994,95 @@ export async function findOrphanedData(): Promise<{
 }> {
   try {
     const allKeys = await keys();
+
+    // 获取所有媒体文件键
     const imageKeys = allKeys.filter(key =>
       typeof key === 'string' && (key as string).startsWith(IMAGE_PREFIX)
-    ).map(key => (key as string).replace(IMAGE_PREFIX, ''));
+    );
 
     const sketchKeys = allKeys.filter(key =>
       typeof key === 'string' && (key as string).startsWith(SKETCH_PREFIX)
-    ).map(key => (key as string).replace(SKETCH_PREFIX, ''));
+    );
 
     const backgroundKeys = allKeys.filter(key =>
       typeof key === 'string' && (key as string).startsWith(BACKGROUND_IMAGE_PREFIX)
     ).map(key => (key as string).replace(BACKGROUND_IMAGE_PREFIX, ''));
 
-    // 获取所有项目
-    const projectIds = await loadProjectList();
-    const projects = await Promise.all(
-      projectIds.map(id => loadProject(id, true)) // 加载完整数据包括图片
-    );
-
-    const validProjects = projects.filter(p => p !== null);
+    const orphanedImages: string[] = [];
+    const orphanedSketches: string[] = [];
     const referencedImages = new Set<string>();
     const referencedSketches = new Set<string>();
     const referencedBackgrounds = new Set<string>();
 
-    // 收集所有被引用的ID
+    // 检查所有图片数据中的项目引用
+    for (const key of imageKeys) {
+      try {
+        const currentData = await get(key);
+        if (!currentData) continue;
+
+        const imageId = (key as string).replace(IMAGE_PREFIX, '');
+
+        if (typeof currentData === 'string') {
+          // 旧格式：没有项目标签，可能是孤立数据
+          orphanedImages.push(imageId);
+        } else {
+          // 新格式：检查项目引用
+          const projects = currentData.projects || [];
+          if (projects.length === 0) {
+            orphanedImages.push(imageId);
+          } else {
+            // 记录被引用的图片
+            referencedImages.add(imageId);
+          }
+        }
+      } catch (error) {
+        console.warn(`Failed to check image ${key}:`, error);
+      }
+    }
+
+    // 检查所有涂鸦数据中的项目引用
+    for (const key of sketchKeys) {
+      try {
+        const currentData = await get(key);
+        if (!currentData) continue;
+
+        const sketchId = (key as string).replace(SKETCH_PREFIX, '');
+
+        if (typeof currentData === 'string') {
+          // 旧格式：没有项目标签，可能是孤立数据
+          orphanedSketches.push(sketchId);
+        } else {
+          // 新格式：检查项目引用
+          const projects = currentData.projects || [];
+          if (projects.length === 0) {
+            orphanedSketches.push(sketchId);
+          } else {
+            // 记录被引用的涂鸦
+            referencedSketches.add(sketchId);
+          }
+        }
+      } catch (error) {
+        console.warn(`Failed to check sketch ${key}:`, error);
+      }
+    }
+
+    // 背景图片：仍然需要通过项目数据来检查引用
+    const projectIds = await loadProjectList();
+    const projects = await Promise.all(
+      projectIds.map(id => loadProject(id, false)) // 不加载图片，只加载项目结构
+    );
+
+    const validProjects = projects.filter(p => p !== null);
+
+    // 收集背景图片引用
     for (const project of validProjects) {
-      // 背景图片
       if (project.backgroundImage && project.backgroundImage !== 'stored') {
         const bgId = extractImageId(project.backgroundImage);
         if (bgId) referencedBackgrounds.add(bgId);
       }
-
-      // 便签中的图片和涂鸦
-      for (const note of project.notes) {
-        if (note.images) {
-          for (const imageRef of note.images) {
-            const imageId = extractImageId(imageRef);
-            if (imageId) referencedImages.add(imageId);
-          }
-        }
-        if (note.sketch) {
-          const sketchId = extractImageId(note.sketch);
-          if (sketchId) referencedSketches.add(sketchId);
-        }
-      }
     }
 
-    // 找出孤立的数据
-    const orphanedImages = imageKeys.filter(id => !referencedImages.has(id));
-    const orphanedSketches = sketchKeys.filter(id => !referencedSketches.has(id));
+    // 找出孤立的背景图片
     const orphanedBackgrounds = backgroundKeys.filter(id => !referencedBackgrounds.has(id));
 
     // 计算孤立数据的总大小
@@ -1372,61 +1613,26 @@ export async function deleteProject(projectId: string): Promise<void> {
   const updatedList = projectList.filter(id => id !== projectId);
   await set(PROJECT_LIST_KEY, updatedList);
 
-  // 异步删除相关的图片文件（不阻塞UI）
-  // 加载项目数据并删除图片
+  // 异步清理项目相关的媒体文件（不阻塞UI）
   setTimeout(async () => {
     try {
-      const project = await loadProject(projectId, false);
-      if (project) {
-        // 收集所有需要删除的图片ID
-        const imageIdsToDelete: string[] = [];
-        const sketchIdsToDelete: string[] = [];
+      console.log(`Starting cleanup for deleted project: ${projectId}`);
 
-        for (const note of project.notes) {
-          // 收集图片ID
-          if (note.images) {
-            for (const imageId of note.images) {
-              const existingId = extractImageId(imageId);
-              if (existingId) {
-                imageIdsToDelete.push(existingId);
-              }
-            }
-          }
-          // 收集涂鸦ID
-          if (note.sketch) {
-            const existingId = extractImageId(note.sketch);
-            if (existingId) {
-              sketchIdsToDelete.push(existingId);
-            }
-          }
-        }
+      // 方法1：从所有媒体文件中移除项目引用
+      await removeProjectFromAllMedia(projectId);
 
-        // 并发删除所有图片和涂鸦
-        const deletePromises: Promise<void>[] = [];
+      // 方法2：清理没有任何项目引用的媒体文件
+      const cleanupResult = await cleanupOrphanedMedia();
 
-        // 删除图片
-        imageIdsToDelete.forEach(imageId => {
-          deletePromises.push(deleteImage(imageId).catch(err =>
-            console.warn(`Failed to delete image ${imageId}:`, err)
-          ));
-        });
-
-        // 删除涂鸦
-        sketchIdsToDelete.forEach(sketchId => {
-          deletePromises.push(deleteSketch(sketchId).catch(err =>
-            console.warn(`Failed to delete sketch ${sketchId}:`, err)
-          ));
-        });
-
-        // 删除背景图片
-        deletePromises.push(del(`${BACKGROUND_IMAGE_PREFIX}${projectId}`).catch(err =>
-          console.warn(`Failed to delete background image for project ${projectId}:`, err)
-        ));
-
-        // 等待所有删除操作完成（异步，不会阻塞UI）
-        await Promise.allSettled(deletePromises);
-        console.log(`Cleaned up ${imageIdsToDelete.length} images and ${sketchIdsToDelete.length} sketches for deleted project ${projectId}`);
+      // 删除背景图片
+      try {
+        await del(`${BACKGROUND_IMAGE_PREFIX}${projectId}`);
+        console.log(`Deleted background image for project ${projectId}`);
+      } catch (error) {
+        // 背景图片可能不存在，忽略错误
       }
+
+      console.log(`Project cleanup complete: ${cleanupResult.cleaned} orphaned media files removed, ${cleanupResult.spaceFreed} bytes freed`);
     } catch (error) {
       console.warn(`Failed to cleanup files for deleted project ${projectId}:`, error);
     }
