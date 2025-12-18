@@ -58,8 +58,8 @@ export const MAP_STYLE_OPTIONS: MapStyleOption[] = [
 ];
 
 // Theme Colors
-export const THEME_COLOR = '#FFDD00';
-export const THEME_COLOR_DARK = '#E6C700'; // Hover/dark variant
+export const THEME_COLOR = '#3B82F6'; // Blue-500
+export const THEME_COLOR_DARK = '#2563EB'; // Blue-600 (Hover/dark variant)
 
 export const TAG_COLORS = [
   '#f87171', // red-400

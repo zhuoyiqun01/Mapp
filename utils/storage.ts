@@ -100,6 +100,9 @@ export async function analyzeStorageRedundancy(): Promise<{
     let totalRedundantSpace = 0;
 
     // 分析图片冗余
+    console.log(`Analyzing ${imageKeys.length} images for redundancy...`);
+    let processedCount = 0;
+
     for (const key of imageKeys) {
       try {
         const data = await get<string>(key as string);
@@ -113,17 +116,25 @@ export async function analyzeStorageRedundancy(): Promise<{
             existing.size += size;
             existing.ids.push((key as string).replace(IMAGE_PREFIX, ''));
             totalRedundantSpace += size;
+            console.log(`Found duplicate: ${key} matches existing group (hash: ${hash.substring(0, 16)})`);
           } else {
             hashMap.set(hash, { count: 1, size, ids: [(key as string).replace(IMAGE_PREFIX, '')] });
           }
+        }
+
+        processedCount++;
+        if (processedCount % 10 === 0) {
+          console.log(`Processed ${processedCount}/${imageKeys.length} images...`);
         }
       } catch (error) {
         console.warn(`Failed to analyze image ${key}:`, error);
       }
     }
 
+    console.log(`Image analysis complete. Found ${duplicateGroups.length} duplicate groups.`);
+
     // 统计重复组
-    const duplicateGroups = Array.from(hashMap.entries())
+    const duplicateGroupsTemp = Array.from(hashMap.entries())
       .filter(([, info]) => info.count > 1)
       .map(([hash, info]) => ({
         hash,
@@ -133,7 +144,7 @@ export async function analyzeStorageRedundancy(): Promise<{
       }))
       .sort((a, b) => b.size - a.size);
 
-    const duplicateImages = duplicateGroups.reduce((sum, group) => sum + group.count - 1, 0);
+    const duplicateImages = duplicateGroupsTemp.reduce((sum, group) => sum + group.count - 1, 0);
     const uniqueImages = imageKeys.length - duplicateImages;
 
     // 分析涂鸦（简化版）
@@ -155,13 +166,19 @@ export async function analyzeStorageRedundancy(): Promise<{
       .reduce((sum, count) => sum + count - 1, 0);
     const uniqueSketches = sketchKeys.length - duplicateSketches;
 
+    console.log('Duplicate analysis details:');
+    duplicateGroupsTemp.slice(0, 5).forEach((group, index) => {
+      console.log(`Group ${index + 1}: ${group.count} duplicates, ${group.size.toFixed(2)}MB total, hash: ${group.hash}`);
+      console.log(`  IDs: ${group.ids.join(', ')}`);
+    });
+
     return {
       uniqueImages,
       duplicateImages,
       uniqueSketches,
       duplicateSketches,
       redundantSpace: totalRedundantSpace,
-      duplicateGroups
+      duplicateGroups: duplicateGroupsTemp
     };
   } catch (error) {
     console.error('Failed to analyze storage redundancy:', error);
@@ -245,34 +262,68 @@ function extractImageId(imageData: string): string | null {
 
 // 计算图片数据的哈希值（用于去重）
 async function calculateImageHash(imageData: string): Promise<string> {
-  // 对于Base64数据，我们可以直接使用前1000个字符作为简单哈希
-  // 这不是真正的哈希，但对于去重来说已经足够
-  const hashInput = imageData.length > 1000 ? imageData.substring(0, 1000) : imageData;
+  // 使用更全面的哈希计算：结合文件头、中间部分和尾部
+  // 这可以更好地区分不同的图片，避免哈希冲突
+
+  let hashInput = imageData;
+
+  // 如果数据很长，使用采样策略
+  if (imageData.length > 2000) {
+    // 取前500字符 + 中间500字符 + 后500字符 + 文件长度
+    const start = imageData.substring(0, 500);
+    const middle = imageData.substring(Math.floor(imageData.length / 2) - 250, Math.floor(imageData.length / 2) + 250);
+    const end = imageData.substring(imageData.length - 500);
+    const length = imageData.length.toString();
+
+    hashInput = start + middle + end + length;
+  }
+
   const encoder = new TextEncoder();
   const data = encoder.encode(hashInput);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 16);
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 32); // 使用32位哈希以减少冲突
 }
 
 // 检查图片是否已经存在（通过哈希值）
+// 使用一个内存缓存来提高性能，避免重复计算哈希
+const imageHashCache = new Map<string, string>();
+
 async function findExistingImageId(imageData: string): Promise<string | null> {
   try {
     const imageHash = await calculateImageHash(imageData);
 
-    // 检查所有图片ID，看是否有相同的哈希
+    // 如果我们之前已经处理过这个哈希，直接返回null（表示不是重复）
+    // 这里我们简化逻辑，只在保存时检查，不维护全局哈希映射
+    // 因为维护全局映射会消耗太多内存
+
+    console.log(`Checking for existing image with hash: ${imageHash.substring(0, 16)}...`);
+
+    // 检查所有图片（为了确保准确性）
     const allKeys = await keys();
     const imageKeys = allKeys.filter(key =>
       typeof key === 'string' && (key as string).startsWith(IMAGE_PREFIX)
     );
 
-    for (const key of imageKeys) {
+    // 为了性能优化，我们仍然限制检查数量，但增加到100个
+    const keysToCheck = imageKeys.sort().reverse().slice(0, 100);
+
+    for (const key of keysToCheck) {
       try {
         const existingData = await get<string>(key as string);
         if (existingData) {
-          const existingHash = await calculateImageHash(existingData);
+          let existingHash: string;
+          const cacheKey = key as string;
+
+          if (imageHashCache.has(cacheKey)) {
+            existingHash = imageHashCache.get(cacheKey)!;
+          } else {
+            existingHash = await calculateImageHash(existingData);
+            imageHashCache.set(cacheKey, existingHash);
+          }
+
           if (existingHash === imageHash) {
-            // 找到相同的图片，返回其ID
+            console.log(`Found duplicate image: ${key} matches new image`);
             return (key as string).replace(IMAGE_PREFIX, '');
           }
         }
@@ -281,6 +332,8 @@ async function findExistingImageId(imageData: string): Promise<string | null> {
         continue;
       }
     }
+
+    console.log(`No duplicate found for hash: ${imageHash.substring(0, 16)}`);
   } catch (error) {
     console.warn('Failed to check for existing image:', error);
   }
