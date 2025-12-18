@@ -57,9 +57,35 @@ export const MAP_STYLE_OPTIONS: MapStyleOption[] = [
   }
 ];
 
-// Theme Colors
-export const THEME_COLOR = '#3B82F6'; // Blue-500
-export const THEME_COLOR_DARK = '#2563EB'; // Blue-600 (Hover/dark variant)
+// Theme Colors - Dynamic from saved preference or default
+export const DEFAULT_THEME_COLOR = '#FFDD00'; // Yellow (default fallback)
+export const DEFAULT_THEME_COLOR_DARK = '#E6C300'; // Darker yellow
+
+// Get current theme color from localStorage or use default
+export const getCurrentThemeColor = (): string => {
+  try {
+    // Check localStorage first (for immediate availability)
+    const saved = localStorage.getItem('mapp-theme-color');
+    return saved || DEFAULT_THEME_COLOR;
+  } catch {
+    return DEFAULT_THEME_COLOR;
+  }
+};
+
+// Get current dark theme color
+export const getCurrentThemeColorDark = (): string => {
+  try {
+    // Check localStorage first (for immediate availability)
+    const saved = localStorage.getItem('mapp-theme-color-dark');
+    return saved || DEFAULT_THEME_COLOR_DARK;
+  } catch {
+    return DEFAULT_THEME_COLOR_DARK;
+  }
+};
+
+// Legacy constants for backward compatibility (will be deprecated)
+export const THEME_COLOR = getCurrentThemeColor();
+export const THEME_COLOR_DARK = getCurrentThemeColorDark();
 
 export const TAG_COLORS = [
   '#f87171', // red-400

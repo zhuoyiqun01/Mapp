@@ -6,7 +6,7 @@ import { ZoomSlider } from './ZoomSlider';
 import { Square, StickyNote, X, Pencil, Check, Minus, Move, ArrowUp, Hash, Plus, Image as ImageIcon, FileJson, Locate, Layers, GitBranch } from 'lucide-react';
 import exifr from 'exifr';
 import { generateId, fileToBase64 } from '../utils';
-import { THEME_COLOR, THEME_COLOR_DARK } from '../constants';
+import { DEFAULT_THEME_COLOR } from '../constants';
 import { saveImage, saveSketch, loadNoteImages, getViewPositionCache } from '../utils/storage';
 
 // 常量定义
@@ -45,7 +45,7 @@ interface BoardViewProps {
   themeColor?: string;
 }
 
-const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onToggleEditor, onAddNote, onDeleteNote, onEditModeChange, connections = [], onUpdateConnections, frames = [], onUpdateFrames, project, onUpdateProject, onSwitchToMapView, onSwitchToBoardView, navigateToCoords, projectId, onNavigateComplete, onTransformChange, mapViewFileInputRef, themeColor = THEME_COLOR }) => {
+const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onToggleEditor, onAddNote, onDeleteNote, onEditModeChange, connections = [], onUpdateConnections, frames = [], onUpdateFrames, project, onUpdateProject, onSwitchToMapView, onSwitchToBoardView, navigateToCoords, projectId, onNavigateComplete, onTransformChange, mapViewFileInputRef, themeColor = DEFAULT_THEME_COLOR }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
   

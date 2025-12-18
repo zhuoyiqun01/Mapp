@@ -8,7 +8,7 @@ import { TableView } from './components/TableView';
 import { ProjectManager } from './components/ProjectManager';
 import { Note, ViewMode, Project } from './types';
 import { get, set } from 'idb-keyval';
-import { THEME_COLOR, THEME_COLOR_DARK, MAP_STYLE_OPTIONS } from './constants';
+import { MAP_STYLE_OPTIONS } from './constants';
 import { 
   syncProjectsToCloud, 
   loadProjectsFromCloud, 
@@ -161,7 +161,7 @@ export default function App() {
       frames: [],
       connections: [],
       backgroundOpacity: 1,
-      themeColor: THEME_COLOR
+      themeColor: themeColor
     }));
   }, []);
 
@@ -254,8 +254,8 @@ export default function App() {
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
 
-  // Theme Color State
-  const [themeColor, setThemeColor] = useState<string>(THEME_COLOR);
+  // Theme Color State - start with default, will be updated from IndexedDB
+  const [themeColor, setThemeColor] = useState<string>('#FFDD00'); // Default yellow
   
   // Map Style State
   const [mapStyle, setMapStyle] = useState<string>('carto-light-nolabels');

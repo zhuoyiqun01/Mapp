@@ -5,7 +5,7 @@ import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Downl
 import { generateId, fileToBase64, formatDate, exportToJpeg, exportToJpegCentered, compressImageFromBase64 } from '../utils';
 import { loadProject, loadNoteImages, loadBackgroundImage, saveProject, loadAllProjects } from '../utils/storage';
 import { getLastSyncTime, type SyncStatus } from '../utils/sync';
-import { THEME_COLOR, THEME_COLOR_DARK } from '../constants';
+import { DEFAULT_THEME_COLOR } from '../constants';
 import { ThemeColorPicker } from './ThemeColorPicker';
 import { SettingsPanel } from './SettingsPanel';
 
@@ -139,7 +139,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   activeProject,
   onExportCSV,
   onCheckData,
-  themeColor = THEME_COLOR,
+  themeColor = DEFAULT_THEME_COLOR,
   onThemeColorChange,
   currentMapStyle = 'carto-light-nolabels',
   onMapStyleChange
