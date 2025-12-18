@@ -58,7 +58,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const [tags, setTags] = useState<Tag[]>(initialNote?.tags || []);
   const [images, setImages] = useState<string[]>(initialNote?.images || []);
   const [sketch, setSketch] = useState<string | undefined>(initialNote?.sketch);
-
+  
   // Image processing state
   const [isProcessingImages, setIsProcessingImages] = useState(false);
   
@@ -929,10 +929,10 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                               setPreviewImage(image);
                             }}
                           >
-                            <img
-                              src={image}
+                            <img 
+                              src={image} 
                               alt="便签图片"
-                              className="w-full h-full object-cover"
+                              className="w-full h-full object-cover" 
                               onError={(e) => {
                                 e.currentTarget.style.display = 'none';
                                 e.currentTarget.nextElementSibling?.classList.remove('hidden');

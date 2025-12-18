@@ -991,13 +991,13 @@ export default function App() {
     await processImportWithDeletions(importNotes, []);
   }, [processImportWithDeletions]);
 
-  // Quick data cleanup function for the refresh button
+  // Quick data cleanup function for the refresh button (only on start page)
   const handleQuickDataCleanup = useCallback(async () => {
     if (isCleaningData) return; // Prevent multiple simultaneous cleanups
 
     try {
       setIsCleaningData(true);
-      console.log('Starting quick data cleanup...');
+      console.log('Starting quick data cleanup from start page...');
 
       // Step 1: Analyze orphaned data
       const redundancyAnalysis = await analyzeDataRedundancy();
@@ -1111,81 +1111,60 @@ export default function App() {
             </div>
           </div>
 
-          {/* View mode toggles and tools */}
-          <div className="flex items-center gap-2">
-            {/* Data cleanup button - always visible */}
-            <div className="bg-red-100 border border-red-300 rounded px-2 py-1 text-xs text-red-700 font-bold">
-              清理按钮测试
+          {/* View mode toggles - only show when project is loaded */}
+          {activeProject && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => !isImportDialogOpen && setViewMode('map')}
+                disabled={isImportDialogOpen}
+                className={`
+                  flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
+                  ${viewMode === 'map'
+                    ? 'text-white shadow-md scale-105'
+                    : 'hover:bg-gray-100 text-gray-500'}
+                  ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
+                `}
+                style={viewMode === 'map' ? { backgroundColor: themeColor } : undefined}
+              >
+                <MapIcon size={20} />
+                Mapping
+              </button>
+              <button
+                onClick={() => {
+                  if (!isImportDialogOpen) {
+                    setViewMode('board');
+                  }
+                }}
+                disabled={isImportDialogOpen}
+                className={`
+                  flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
+                  ${viewMode === 'board'
+                    ? 'text-white shadow-md scale-105'
+                    : 'hover:bg-gray-100 text-gray-500'}
+                  ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
+                `}
+                style={viewMode === 'board' ? { backgroundColor: themeColor } : undefined}
+              >
+                <Grid size={20} />
+                Board
+              </button>
+              <button
+                onClick={() => !isImportDialogOpen && setViewMode('table')}
+                disabled={isImportDialogOpen}
+                className={`
+                  flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
+                  ${viewMode === 'table'
+                    ? 'text-white shadow-md scale-105'
+                    : 'hover:bg-gray-100 text-gray-500'}
+                  ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
+                `}
+                style={viewMode === 'table' ? { backgroundColor: themeColor } : undefined}
+              >
+                <Table2 size={20} />
+                Table
+              </button>
             </div>
-            <button
-              onClick={handleQuickDataCleanup}
-              disabled={isCleaningData}
-              className={`
-                p-2 rounded-lg transition-all font-medium text-sm border-2 border-blue-500 bg-blue-50
-                ${isCleaningData
-                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-300'
-                  : 'bg-blue-100 hover:bg-blue-200 text-blue-700 hover:text-blue-900 border-blue-600 hover:border-blue-700'}
-              `}
-              title="清理孤立数据"
-            >
-              <RefreshCw size={18} className={isCleaningData ? 'animate-spin' : ''} />
-            </button>
-
-            {/* View mode toggles - only show when project is loaded */}
-            {activeProject && (
-              <>
-                <button
-                  onClick={() => !isImportDialogOpen && setViewMode('map')}
-                  disabled={isImportDialogOpen}
-                  className={`
-                    flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
-                    ${viewMode === 'map'
-                      ? 'text-white shadow-md scale-105'
-                      : 'hover:bg-gray-100 text-gray-500'}
-                    ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
-                  `}
-                  style={viewMode === 'map' ? { backgroundColor: themeColor } : undefined}
-                >
-                  <MapIcon size={20} />
-                  Mapping
-                </button>
-                <button
-                  onClick={() => {
-                    if (!isImportDialogOpen) {
-                      setViewMode('board');
-                    }
-                  }}
-                  disabled={isImportDialogOpen}
-                  className={`
-                    flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
-                    ${viewMode === 'board'
-                      ? 'text-white shadow-md scale-105'
-                      : 'hover:bg-gray-100 text-gray-500'}
-                    ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
-                  `}
-                  style={viewMode === 'board' ? { backgroundColor: themeColor } : undefined}
-                >
-                  <Grid size={20} />
-                  Board
-                </button>
-                <button
-                  onClick={() => !isImportDialogOpen && setViewMode('table')}
-                  disabled={isImportDialogOpen}
-                  className={`
-                    flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
-                    ${viewMode === 'table'
-                      ? 'text-white shadow-md scale-105'
-                      : 'hover:bg-gray-100 text-gray-500'}
-                    ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
-                  `}
-                  style={viewMode === 'table' ? { backgroundColor: themeColor } : undefined}
-                >
-                  <Table2 size={20} />
-                  Table
-                </button>
-              </>
-            )}
-          </div>
+          )}
         </div>
 
         {/* Content area */}
@@ -1293,7 +1272,22 @@ export default function App() {
             />
           )
         ) : (
-          <div className="flex items-center justify-center h-full min-h-[calc(100vh-80px)]">
+          <div className="relative flex items-center justify-center h-full min-h-[calc(100vh-80px)]">
+            {/* Data cleanup button - only visible on start page */}
+            <button
+              onClick={handleQuickDataCleanup}
+              disabled={isCleaningData}
+              className={`
+                absolute top-4 right-4 p-3 rounded-lg transition-all font-medium text-sm border-2 shadow-md
+                ${isCleaningData
+                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-300'
+                  : 'bg-blue-100 hover:bg-blue-200 text-blue-700 hover:text-blue-900 border-blue-600 hover:border-blue-700'}
+              `}
+              title="清理孤立数据"
+            >
+              <RefreshCw size={20} className={isCleaningData ? 'animate-spin' : ''} />
+            </button>
+
             <div className="text-center">
               <div className="w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center" style={{ backgroundColor: `${themeColor}20` }}>
                 <MapIcon size={32} style={{ color: themeColor }} />
