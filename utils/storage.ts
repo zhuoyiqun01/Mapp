@@ -610,37 +610,72 @@ export async function loadAllProjects(loadImages: boolean = false): Promise<Proj
 
 // 删除项目
 export async function deleteProject(projectId: string): Promise<void> {
-  const project = await loadProject(projectId, false);
-  if (project) {
-    // 删除所有图片
-    for (const note of project.notes) {
-      if (note.images) {
-        for (const imageId of note.images) {
-          const existingId = extractImageId(imageId);
-          if (existingId) {
-            await deleteImage(existingId);
-          }
-        }
-      }
-      if (note.sketch) {
-        const existingId = extractImageId(note.sketch);
-        if (existingId) {
-          await deleteSketch(existingId);
-        }
-      }
-    }
-    
-    // 删除背景图片
-    await del(`${BACKGROUND_IMAGE_PREFIX}${projectId}`);
-  }
-  
-  // 删除项目数据
+  // 首先删除项目数据和更新列表（快速操作）
   await del(`${PROJECT_PREFIX}${projectId}`);
-  
-  // 更新项目列表
+
   const projectList = await loadProjectList();
   const updatedList = projectList.filter(id => id !== projectId);
   await set(PROJECT_LIST_KEY, updatedList);
+
+  // 异步删除相关的图片文件（不阻塞UI）
+  // 加载项目数据并删除图片
+  setTimeout(async () => {
+    try {
+      const project = await loadProject(projectId, false);
+      if (project) {
+        // 收集所有需要删除的图片ID
+        const imageIdsToDelete: string[] = [];
+        const sketchIdsToDelete: string[] = [];
+
+        for (const note of project.notes) {
+          // 收集图片ID
+          if (note.images) {
+            for (const imageId of note.images) {
+              const existingId = extractImageId(imageId);
+              if (existingId) {
+                imageIdsToDelete.push(existingId);
+              }
+            }
+          }
+          // 收集涂鸦ID
+          if (note.sketch) {
+            const existingId = extractImageId(note.sketch);
+            if (existingId) {
+              sketchIdsToDelete.push(existingId);
+            }
+          }
+        }
+
+        // 并发删除所有图片和涂鸦
+        const deletePromises: Promise<void>[] = [];
+
+        // 删除图片
+        imageIdsToDelete.forEach(imageId => {
+          deletePromises.push(deleteImage(imageId).catch(err =>
+            console.warn(`Failed to delete image ${imageId}:`, err)
+          ));
+        });
+
+        // 删除涂鸦
+        sketchIdsToDelete.forEach(sketchId => {
+          deletePromises.push(deleteSketch(sketchId).catch(err =>
+            console.warn(`Failed to delete sketch ${sketchId}:`, err)
+          ));
+        });
+
+        // 删除背景图片
+        deletePromises.push(del(`${BACKGROUND_IMAGE_PREFIX}${projectId}`).catch(err =>
+          console.warn(`Failed to delete background image for project ${projectId}:`, err)
+        ));
+
+        // 等待所有删除操作完成（异步，不会阻塞UI）
+        await Promise.allSettled(deletePromises);
+        console.log(`Cleaned up ${imageIdsToDelete.length} images and ${sketchIdsToDelete.length} sketches for deleted project ${projectId}`);
+      }
+    } catch (error) {
+      console.warn(`Failed to cleanup files for deleted project ${projectId}:`, error);
+    }
+  }, 100);
 }
 
 // 数据迁移：从旧格式迁移到新格式

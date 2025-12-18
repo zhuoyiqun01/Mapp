@@ -63,6 +63,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingProject, setIsLoadingProject] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
+  const [isDeletingProject, setIsDeletingProject] = useState(false);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   
   // Save map position to cache when switching away from map view
@@ -709,10 +710,19 @@ export default function App() {
   };
 
   const handleDeleteProject = async (id: string) => {
-    await deleteProjectStorage(id);
-    setProjects(prev => prev.filter(p => p.id !== id));
-    if (currentProjectId === id) {
+    setIsDeletingProject(true);
+    try {
+      await deleteProjectStorage(id);
+      // 更新项目列表
+      setProjectSummaries(prev => prev.filter(p => p.id !== id));
+      // 更新完整项目数据（如果已加载）
+      setProjects(prev => prev.filter(p => p.id !== id));
+      // 如果当前项目被删除，回到首页
+      if (currentProjectId === id) {
         setCurrentProjectId(null);
+      }
+    } finally {
+      setIsDeletingProject(false);
     }
   };
 
@@ -768,23 +778,35 @@ export default function App() {
   return (
     <div className="w-full h-screen flex flex-col bg-gray-50 overflow-hidden relative" style={{ touchAction: 'manipulation' }}>
       {/* Loading Progress Overlay */}
-      {isLoadingProject && (
+      {(isLoadingProject || isDeletingProject) && (
         <div className="fixed inset-0 z-[10000] bg-black/50 flex items-center justify-center">
           <div className="bg-white rounded-2xl p-8 shadow-2xl max-w-sm w-full mx-4">
             <div className="text-center">
               <div className="text-2xl font-bold text-gray-800 mb-4">
-                {currentProjectId ? '加载项目中...' : '检查数据中...'}
+                {isDeletingProject ? '删除项目中...' : (currentProjectId ? '加载项目中...' : '检查数据中...')}
               </div>
-              <div className="w-full bg-gray-200 rounded-full h-4 mb-4">
-                <div
-                  className="bg-blue-500 h-4 rounded-full transition-all duration-300"
-                  style={{ width: `${loadingProgress}%` }}
-                ></div>
-              </div>
-              <div className="text-lg font-semibold text-gray-600">{loadingProgress}%</div>
-              {!currentProjectId && (
-                <div className="text-sm text-gray-500 mt-2">
-                  正在修复图片数据和清理损坏文件...
+              {isLoadingProject && (
+                <>
+                  <div className="w-full bg-gray-200 rounded-full h-4 mb-4">
+                    <div
+                      className="bg-blue-500 h-4 rounded-full transition-all duration-300"
+                      style={{ width: `${loadingProgress}%` }}
+                    ></div>
+                  </div>
+                  <div className="text-lg font-semibold text-gray-600">{loadingProgress}%</div>
+                  {!currentProjectId && (
+                    <div className="text-sm text-gray-500 mt-2">
+                      正在修复图片数据和清理损坏文件...
+                    </div>
+                  )}
+                </>
+              )}
+              {isDeletingProject && (
+                <div className="flex items-center justify-center space-x-2">
+                  <Loader2 size={24} className="animate-spin text-blue-500" />
+                  <div className="text-sm text-gray-500">
+                    正在删除项目文件...
+                  </div>
                 </div>
               )}
             </div>
