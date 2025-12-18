@@ -188,11 +188,19 @@ export default function App() {
         console.log(`Cleaned ${cleanupResult.imagesCleaned} corrupted images and ${cleanupResult.sketchesCleaned} corrupted sketches`);
       }
 
-      // Step 3: Clean up duplicate images (50%)
+      // Step 3: Analyze and clean up duplicate images (50%)
       setLoadingProgress(50);
-      const duplicateCleanupResult = await cleanupDuplicateImages();
-      if (duplicateCleanupResult && duplicateCleanupResult.imagesCleaned > 0) {
-        console.log(`Cleaned ${duplicateCleanupResult.imagesCleaned} duplicate images, freed ${duplicateCleanupResult.spaceFreed.toFixed(2)}MB`);
+      const duplicateCleanupResult = await cleanupDuplicateImages(true); // autoDelete = true
+      if (duplicateCleanupResult) {
+        if (duplicateCleanupResult.suspiciousGroups.length > 0) {
+          console.warn(`⚠️ Found ${duplicateCleanupResult.suspiciousGroups.length} suspicious duplicate groups that were NOT deleted:`);
+          duplicateCleanupResult.suspiciousGroups.forEach(group => {
+            console.warn(`  ${group.count} duplicates (${group.reason}): ${group.ids.join(', ')}`);
+          });
+        }
+        if (duplicateCleanupResult.imagesCleaned > 0) {
+          console.log(`✅ Cleaned ${duplicateCleanupResult.imagesCleaned} normal duplicate images, freed ${duplicateCleanupResult.spaceFreed.toFixed(2)}MB`);
+        }
       }
 
       // Step 4: Clean up large images (>2MB) (70%)
@@ -202,12 +210,32 @@ export default function App() {
         console.log(`Cleaned ${largeCleanupResult.imagesCleaned} large images, freed ${largeCleanupResult.spaceFreed.toFixed(2)}MB`);
       }
 
-      // Step 5: Refresh project summaries (90%)
+      // Step 5: Detailed duplicate analysis (90%)
       setLoadingProgress(90);
+      const detailedAnalysis = await analyzeDuplicateImages();
+      if (detailedAnalysis) {
+        console.log('📊 Detailed duplicate analysis:');
+        console.log(`   Total duplicate groups: ${detailedAnalysis.duplicateGroups.length}`);
+        console.log(`   Suspicious groups: ${detailedAnalysis.suspiciousGroups.length}`);
+
+        if (detailedAnalysis.suspiciousGroups.length > 0) {
+          console.log('🚨 Suspicious duplicate groups (investigate these):');
+          detailedAnalysis.suspiciousGroups.forEach((group, index) => {
+            console.log(`   ${index + 1}. ${group.reason}`);
+            console.log(`      Hash: ${group.hash.substring(0, 16)}`);
+            console.log(`      Count: ${group.count}`);
+            console.log(`      IDs: ${group.ids.join(', ')}`);
+            console.log(`      Timestamps: ${group.timestamps.map(t => new Date(t).toISOString()).join(', ')}`);
+          });
+        }
+      }
+
+      // Step 6: Refresh project summaries (95%)
+      setLoadingProgress(95);
       const summaries = await loadProjectSummaries();
       setProjectSummaries(summaries);
 
-      // Step 6: Complete (100%)
+      // Step 7: Complete (100%)
       setLoadingProgress(100);
 
       console.log('Data check and repair completed');

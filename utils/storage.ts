@@ -73,6 +73,139 @@ export async function checkStorageUsage(): Promise<{ used: number, available: nu
   return null;
 }
 
+// 分析重复图片的详细信息
+export async function analyzeDuplicateImages(): Promise<{
+  duplicateGroups: Array<{
+    hash: string;
+    count: number;
+    size: number;
+    ids: string[];
+    timestamps: number[];
+    sampleData: string;
+  }>;
+  suspiciousGroups: Array<{
+    hash: string;
+    count: number;
+    reason: string;
+    ids: string[];
+    timestamps: number[];
+  }>;
+} | null> {
+  try {
+    const allKeys = await keys();
+    const imageKeys = allKeys.filter(key =>
+      typeof key === 'string' && (key as string).startsWith(IMAGE_PREFIX)
+    );
+
+    console.log(`Analyzing ${imageKeys.length} images for detailed duplicate patterns...`);
+    const hashMap = new Map<string, {
+      count: number;
+      size: number;
+      ids: string[];
+      timestamps: number[];
+      sampleData: string;
+    }>();
+
+    for (const key of imageKeys) {
+      try {
+        const data = await get<string>(key as string);
+        if (data) {
+          const hash = await calculateImageHash(data);
+          const size = (data.length * 3) / 4 / (1024 * 1024); // MB
+
+          // 提取时间戳 (从ID中提取)
+          const id = (key as string).replace(IMAGE_PREFIX, '');
+          const timestampMatch = id.match(/img-(\d+)-/);
+          const timestamp = timestampMatch ? parseInt(timestampMatch[1]) : 0;
+
+          if (hashMap.has(hash)) {
+            const existing = hashMap.get(hash)!;
+            existing.count++;
+            existing.size += size;
+            existing.ids.push(id);
+            existing.timestamps.push(timestamp);
+          } else {
+            hashMap.set(hash, {
+              count: 1,
+              size,
+              ids: [id],
+              timestamps: [timestamp],
+              sampleData: data.substring(0, 100) // 保存前100个字符用于分析
+            });
+          }
+        }
+      } catch (error) {
+        console.warn(`Failed to analyze image ${key}:`, error);
+      }
+    }
+
+    // 只保留重复的组
+    const duplicateGroups = Array.from(hashMap.entries())
+      .filter(([, info]) => info.count > 1)
+      .map(([hash, info]) => ({
+        hash,
+        count: info.count,
+        size: info.size,
+        ids: info.ids,
+        timestamps: info.timestamps,
+        sampleData: info.sampleData
+      }))
+      .sort((a, b) => b.size - a.size);
+
+    // 识别可疑的重复组
+    const suspiciousGroups = duplicateGroups
+      .filter(group => {
+        const timestamps = group.timestamps;
+        const minTime = Math.min(...timestamps);
+        const maxTime = Math.max(...timestamps);
+        const timeSpan = maxTime - minTime;
+
+        // 如果多个图片在很短时间内生成，认为是可疑的
+        if (timeSpan < 1000 && group.count > 2) { // 1秒内生成多个重复
+          return { reason: 'Multiple duplicates created within 1 second', timeSpan };
+        }
+
+        // 如果时间戳完全相同
+        if (timeSpan === 0 && group.count > 1) {
+          return { reason: 'Exact same timestamp for multiple images', timeSpan: 0 };
+        }
+
+        return false;
+      })
+      .map(group => {
+        const timestamps = group.timestamps;
+        const minTime = Math.min(...timestamps);
+        const maxTime = Math.max(...timestamps);
+        const timeSpan = maxTime - minTime;
+
+        let reason = '';
+        if (timeSpan === 0) {
+          reason = 'Exact same timestamp - possible batch import error';
+        } else if (timeSpan < 1000) {
+          reason = `Created within ${timeSpan}ms - possible rapid successive saves`;
+        }
+
+        return {
+          hash: group.hash,
+          count: group.count,
+          reason,
+          ids: group.ids,
+          timestamps: group.timestamps
+        };
+      });
+
+    console.log(`Found ${duplicateGroups.length} duplicate groups, ${suspiciousGroups.length} suspicious`);
+
+    return {
+      duplicateGroups,
+      suspiciousGroups
+    };
+  } catch (error) {
+    console.error('Failed to analyze duplicate images:', error);
+    return null;
+  }
+}
+
 // 分析存储冗余情况
 export async function analyzeStorageRedundancy(): Promise<{
   uniqueImages: number;
@@ -293,22 +426,16 @@ async function findExistingImageId(imageData: string): Promise<string | null> {
   try {
     const imageHash = await calculateImageHash(imageData);
 
-    // 如果我们之前已经处理过这个哈希，直接返回null（表示不是重复）
-    // 这里我们简化逻辑，只在保存时检查，不维护全局哈希映射
-    // 因为维护全局映射会消耗太多内存
-
-    console.log(`Checking for existing image with hash: ${imageHash.substring(0, 16)}...`);
-
     // 检查所有图片（为了确保准确性）
     const allKeys = await keys();
     const imageKeys = allKeys.filter(key =>
       typeof key === 'string' && (key as string).startsWith(IMAGE_PREFIX)
     );
 
-    // 为了性能优化，我们仍然限制检查数量，但增加到100个
-    const keysToCheck = imageKeys.sort().reverse().slice(0, 100);
+    // 为了性能，检查所有图片（不再限制数量，因为重复检测很重要）
+    console.log(`Checking for existing image with hash: ${imageHash.substring(0, 16)}... (scanning ${imageKeys.length} images)`);
 
-    for (const key of keysToCheck) {
+    for (const key of imageKeys) {
       try {
         const existingData = await get<string>(key as string);
         if (existingData) {
@@ -323,12 +450,13 @@ async function findExistingImageId(imageData: string): Promise<string | null> {
           }
 
           if (existingHash === imageHash) {
-            console.log(`Found duplicate image: ${key} matches new image`);
+            console.log(`Found duplicate image: ${key} matches new image (hash: ${imageHash.substring(0, 16)})`);
             return (key as string).replace(IMAGE_PREFIX, '');
           }
         }
       } catch (error) {
         // 忽略读取错误，继续检查下一个
+        console.warn(`Error checking image ${key}:`, error);
         continue;
       }
     }
@@ -554,36 +682,76 @@ export async function attemptImageRecovery(): Promise<{ imagesRecovered: number,
 }
 
 // 清理重复的图片，只保留每个哈希组的第一个图片
-export async function cleanupDuplicateImages(): Promise<{ imagesCleaned: number, spaceFreed: number, keptImages: string[] } | null> {
+export async function cleanupDuplicateImages(autoDelete: boolean = false): Promise<{
+  imagesCleaned: number;
+  spaceFreed: number;
+  keptImages: string[];
+  suspiciousGroups: Array<{
+    hash: string;
+    count: number;
+    reason: string;
+    ids: string[];
+    timestamps: number[];
+  }>;
+} | null> {
   try {
     const redundancyAnalysis = await analyzeStorageRedundancy();
     if (!redundancyAnalysis) return null;
 
+    // 获取详细的重复分析
+    const detailedAnalysis = await analyzeDuplicateImages();
+
     let imagesCleaned = 0;
     let spaceFreed = 0;
     const keptImages: string[] = [];
+    const suspiciousGroups = detailedAnalysis?.suspiciousGroups || [];
+
+    console.log(`Found ${redundancyAnalysis.duplicateGroups.length} duplicate groups, ${suspiciousGroups.length} suspicious`);
+
+    // 对于可疑的重复组，发出警告但不自动删除
+    if (suspiciousGroups.length > 0) {
+      console.warn('⚠️  Found suspicious duplicate groups - NOT auto-deleting these:');
+      suspiciousGroups.forEach(group => {
+        console.warn(`  Hash ${group.hash.substring(0, 16)}: ${group.count} duplicates - ${group.reason}`);
+        console.warn(`    IDs: ${group.ids.join(', ')}`);
+        console.warn(`    Timestamps: ${group.timestamps.map(t => new Date(t).toISOString()).join(', ')}`);
+      });
+    }
 
     for (const group of redundancyAnalysis.duplicateGroups) {
-      // 保留第一个ID，删除其他的
+      // 检查这个组是否可疑
+      const isSuspicious = suspiciousGroups.some(suspicious => suspicious.hash === group.hash);
+
+      if (isSuspicious) {
+        console.log(`Skipping suspicious duplicate group (hash: ${group.hash.substring(0, 16)})`);
+        // 对于可疑的组，保留所有图片
+        group.ids.forEach(id => keptImages.push(id));
+        continue;
+      }
+
+      // 正常处理非可疑的重复组
       const [keepId, ...deleteIds] = group.ids;
 
       keptImages.push(keepId);
 
       for (const deleteId of deleteIds) {
         try {
-          await deleteImage(deleteId);
-          imagesCleaned++;
-          // 估算节省的空间（组内每个重复项的大小）
-          spaceFreed += group.size / group.count;
-          console.log(`Cleaned duplicate image: ${deleteId} (kept: ${keepId})`);
+          if (autoDelete) {
+            await deleteImage(deleteId);
+            imagesCleaned++;
+            spaceFreed += group.size / group.count;
+            console.log(`✅ Cleaned duplicate image: ${deleteId} (kept: ${keepId})`);
+          } else {
+            console.log(`Would clean duplicate image: ${deleteId} (kept: ${keepId})`);
+          }
         } catch (error) {
           console.warn(`Failed to delete duplicate image ${deleteId}:`, error);
         }
       }
     }
 
-    console.log(`Duplicate cleanup complete: ${imagesCleaned} images cleaned, ${spaceFreed.toFixed(2)}MB freed`);
-    return { imagesCleaned, spaceFreed, keptImages };
+    console.log(`Duplicate cleanup complete: ${imagesCleaned} images cleaned, ${spaceFreed.toFixed(2)}MB freed, ${suspiciousGroups.length} suspicious groups skipped`);
+    return { imagesCleaned, spaceFreed, keptImages, suspiciousGroups };
   } catch (error) {
     console.error('Failed to cleanup duplicate images:', error);
     return null;
