@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Map as MapIcon, Grid, Menu, Loader2, Table2, Cloud, CloudOff, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Map as MapIcon, Grid, Menu, Loader2, Table2, Cloud, CloudOff, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapView } from './components/MapView';
 import { BoardView } from './components/BoardView';
@@ -72,6 +72,7 @@ export default function App() {
   const [isLoadingProject, setIsLoadingProject] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [isDeletingProject, setIsDeletingProject] = useState(false);
+  const [isCleaningData, setIsCleaningData] = useState(false);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
 
   // Import duplicate resolution dialog
@@ -990,6 +991,42 @@ export default function App() {
     await processImportWithDeletions(importNotes, []);
   }, [processImportWithDeletions]);
 
+  // Quick data cleanup function for the refresh button
+  const handleQuickDataCleanup = useCallback(async () => {
+    if (isCleaningData) return; // Prevent multiple simultaneous cleanups
+
+    try {
+      setIsCleaningData(true);
+      console.log('Starting quick data cleanup...');
+
+      // Step 1: Analyze orphaned data
+      const redundancyAnalysis = await analyzeDataRedundancy();
+      if (redundancyAnalysis) {
+        const orphanedSpace = (redundancyAnalysis.orphanedImageSize + redundancyAnalysis.orphanedSketchSize) / (1024 * 1024);
+        console.log(`Found ${(orphanedSpace).toFixed(2)}MB of orphaned data (${redundancyAnalysis.orphanedImages + redundancyAnalysis.orphanedSketches} files)`);
+      }
+
+      // Step 2: Cleanup orphaned data
+      const orphanedCleanup = await cleanupOrphanedData();
+      if (orphanedCleanup && (orphanedCleanup.orphanedImagesCleaned > 0 || orphanedCleanup.orphanedSketchesCleaned > 0)) {
+        const spaceFreed = (orphanedCleanup.spaceFreed / (1024 * 1024)).toFixed(2);
+        console.log(`✅ Cleaned up ${orphanedCleanup.orphanedImagesCleaned} orphaned images and ${orphanedCleanup.orphanedSketchesCleaned} sketches, freed ~${spaceFreed}MB`);
+
+        // Show success message
+        alert(`数据清理完成！\n清理了 ${orphanedCleanup.orphanedImagesCleaned} 张孤立图片和 ${orphanedCleanup.orphanedSketchesCleaned} 个孤立涂鸦\n释放空间约 ${spaceFreed}MB`);
+      } else {
+        console.log('No orphaned data found to clean up');
+        alert('没有发现需要清理的孤立数据');
+      }
+
+    } catch (error) {
+      console.error('Quick data cleanup failed:', error);
+      alert('数据清理失败，请查看控制台了解详情');
+    } finally {
+      setIsCleaningData(false);
+    }
+  }, [isCleaningData]);
+
   if (isLoading) {
     return (
       <div className="w-full min-h-screen flex flex-col items-center justify-center text-white" style={{ backgroundColor: themeColor }}>
@@ -1074,60 +1111,78 @@ export default function App() {
             </div>
           </div>
 
-          {/* View mode toggles - only show when project is loaded */}
-          {activeProject && (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => !isImportDialogOpen && setViewMode('map')}
-                disabled={isImportDialogOpen}
-                className={`
-                  flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
-                  ${viewMode === 'map'
-                    ? 'text-white shadow-md scale-105'
-                    : 'hover:bg-gray-100 text-gray-500'}
-                  ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
-                `}
-                style={viewMode === 'map' ? { backgroundColor: themeColor } : undefined}
-              >
-                <MapIcon size={20} />
-                Mapping
-              </button>
-              <button
-                onClick={() => {
-                  if (!isImportDialogOpen) {
-                    setViewMode('board');
-                  }
-                }}
-                disabled={isImportDialogOpen}
-                className={`
-                  flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
-                  ${viewMode === 'board'
-                    ? 'text-white shadow-md scale-105'
-                    : 'hover:bg-gray-100 text-gray-500'}
-                  ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
-                `}
-                style={viewMode === 'board' ? { backgroundColor: themeColor } : undefined}
-              >
-                <Grid size={20} />
-                Board
-              </button>
-              <button
-                onClick={() => !isImportDialogOpen && setViewMode('table')}
-                disabled={isImportDialogOpen}
-                className={`
-                  flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
-                  ${viewMode === 'table'
-                    ? 'text-white shadow-md scale-105'
-                    : 'hover:bg-gray-100 text-gray-500'}
-                  ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
-                `}
-                style={viewMode === 'table' ? { backgroundColor: themeColor } : undefined}
-              >
-                <Table2 size={20} />
-                Table
-              </button>
-            </div>
-          )}
+          {/* View mode toggles and tools */}
+          <div className="flex items-center gap-2">
+            {/* Data cleanup button - always visible */}
+            <button
+              onClick={handleQuickDataCleanup}
+              disabled={isCleaningData}
+              className={`
+                p-2 rounded-lg transition-all font-medium text-sm
+                ${isCleaningData
+                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  : 'hover:bg-gray-100 text-gray-600 hover:text-gray-800'}
+              `}
+              title="清理孤立数据"
+            >
+              <RefreshCw size={18} className={isCleaningData ? 'animate-spin' : ''} />
+            </button>
+
+            {/* View mode toggles - only show when project is loaded */}
+            {activeProject && (
+              <>
+                <button
+                  onClick={() => !isImportDialogOpen && setViewMode('map')}
+                  disabled={isImportDialogOpen}
+                  className={`
+                    flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
+                    ${viewMode === 'map'
+                      ? 'text-white shadow-md scale-105'
+                      : 'hover:bg-gray-100 text-gray-500'}
+                    ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
+                  `}
+                  style={viewMode === 'map' ? { backgroundColor: themeColor } : undefined}
+                >
+                  <MapIcon size={20} />
+                  Mapping
+                </button>
+                <button
+                  onClick={() => {
+                    if (!isImportDialogOpen) {
+                      setViewMode('board');
+                    }
+                  }}
+                  disabled={isImportDialogOpen}
+                  className={`
+                    flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
+                    ${viewMode === 'board'
+                      ? 'text-white shadow-md scale-105'
+                      : 'hover:bg-gray-100 text-gray-500'}
+                    ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
+                  `}
+                  style={viewMode === 'board' ? { backgroundColor: themeColor } : undefined}
+                >
+                  <Grid size={20} />
+                  Board
+                </button>
+                <button
+                  onClick={() => !isImportDialogOpen && setViewMode('table')}
+                  disabled={isImportDialogOpen}
+                  className={`
+                    flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
+                    ${viewMode === 'table'
+                      ? 'text-white shadow-md scale-105'
+                      : 'hover:bg-gray-100 text-gray-500'}
+                    ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
+                  `}
+                  style={viewMode === 'table' ? { backgroundColor: themeColor } : undefined}
+                >
+                  <Table2 size={20} />
+                  Table
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Content area */}
