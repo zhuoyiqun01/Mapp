@@ -1114,14 +1114,17 @@ export default function App() {
           {/* View mode toggles and tools */}
           <div className="flex items-center gap-2">
             {/* Data cleanup button - always visible */}
+            <div className="bg-red-100 border border-red-300 rounded px-2 py-1 text-xs text-red-700 font-bold">
+              清理按钮测试
+            </div>
             <button
               onClick={handleQuickDataCleanup}
               disabled={isCleaningData}
               className={`
-                p-2 rounded-lg transition-all font-medium text-sm
+                p-2 rounded-lg transition-all font-medium text-sm border-2 border-blue-500 bg-blue-50
                 ${isCleaningData
-                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                  : 'hover:bg-gray-100 text-gray-600 hover:text-gray-800'}
+                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-300'
+                  : 'bg-blue-100 hover:bg-blue-200 text-blue-700 hover:text-blue-900 border-blue-600 hover:border-blue-700'}
               `}
               title="清理孤立数据"
             >
