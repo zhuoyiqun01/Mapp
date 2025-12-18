@@ -73,6 +73,102 @@ export async function checkStorageUsage(): Promise<{ used: number, available: nu
   return null;
 }
 
+// 分析存储冗余情况
+export async function analyzeStorageRedundancy(): Promise<{
+  uniqueImages: number;
+  duplicateImages: number;
+  uniqueSketches: number;
+  duplicateSketches: number;
+  redundantSpace: number;
+  duplicateGroups: Array<{
+    hash: string;
+    count: number;
+    size: number;
+    ids: string[];
+  }>;
+} | null> {
+  try {
+    const allKeys = await keys();
+    const imageKeys = allKeys.filter(key =>
+      typeof key === 'string' && (key as string).startsWith(IMAGE_PREFIX)
+    );
+    const sketchKeys = allKeys.filter(key =>
+      typeof key === 'string' && (key as string).startsWith(SKETCH_PREFIX)
+    );
+
+    const hashMap = new Map<string, { count: number; size: number; ids: string[] }>();
+    let totalRedundantSpace = 0;
+
+    // 分析图片冗余
+    for (const key of imageKeys) {
+      try {
+        const data = await get<string>(key as string);
+        if (data) {
+          const hash = await calculateImageHash(data);
+          const size = (data.length * 3) / 4 / (1024 * 1024); // MB
+
+          if (hashMap.has(hash)) {
+            const existing = hashMap.get(hash)!;
+            existing.count++;
+            existing.size += size;
+            existing.ids.push((key as string).replace(IMAGE_PREFIX, ''));
+            totalRedundantSpace += size;
+          } else {
+            hashMap.set(hash, { count: 1, size, ids: [(key as string).replace(IMAGE_PREFIX, '')] });
+          }
+        }
+      } catch (error) {
+        console.warn(`Failed to analyze image ${key}:`, error);
+      }
+    }
+
+    // 统计重复组
+    const duplicateGroups = Array.from(hashMap.entries())
+      .filter(([, info]) => info.count > 1)
+      .map(([hash, info]) => ({
+        hash,
+        count: info.count,
+        size: info.size,
+        ids: info.ids
+      }))
+      .sort((a, b) => b.size - a.size);
+
+    const duplicateImages = duplicateGroups.reduce((sum, group) => sum + group.count - 1, 0);
+    const uniqueImages = imageKeys.length - duplicateImages;
+
+    // 分析涂鸦（简化版）
+    const sketchHashMap = new Map<string, number>();
+    for (const key of sketchKeys) {
+      try {
+        const data = await get<string>(key as string);
+        if (data) {
+          const hash = await calculateImageHash(data);
+          sketchHashMap.set(hash, (sketchHashMap.get(hash) || 0) + 1);
+        }
+      } catch (error) {
+        // 忽略错误
+      }
+    }
+
+    const duplicateSketches = Array.from(sketchHashMap.values())
+      .filter(count => count > 1)
+      .reduce((sum, count) => sum + count - 1, 0);
+    const uniqueSketches = sketchKeys.length - duplicateSketches;
+
+    return {
+      uniqueImages,
+      duplicateImages,
+      uniqueSketches,
+      duplicateSketches,
+      redundantSpace: totalRedundantSpace,
+      duplicateGroups
+    };
+  } catch (error) {
+    console.error('Failed to analyze storage redundancy:', error);
+    return null;
+  }
+}
+
 // 检查 IndexedDB 中存储的数据详情
 export async function checkStorageDetails(): Promise<{
   totalKeys: number;
@@ -147,10 +243,53 @@ function extractImageId(imageData: string): string | null {
   return null; // 是 Base64 数据，需要转换
 }
 
+// 计算图片数据的哈希值（用于去重）
+async function calculateImageHash(imageData: string): Promise<string> {
+  // 对于Base64数据，我们可以直接使用前1000个字符作为简单哈希
+  // 这不是真正的哈希，但对于去重来说已经足够
+  const hashInput = imageData.length > 1000 ? imageData.substring(0, 1000) : imageData;
+  const encoder = new TextEncoder();
+  const data = encoder.encode(hashInput);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 16);
+}
+
+// 检查图片是否已经存在（通过哈希值）
+async function findExistingImageId(imageData: string): Promise<string | null> {
+  try {
+    const imageHash = await calculateImageHash(imageData);
+
+    // 检查所有图片ID，看是否有相同的哈希
+    const allKeys = await keys();
+    const imageKeys = allKeys.filter(key =>
+      typeof key === 'string' && (key as string).startsWith(IMAGE_PREFIX)
+    );
+
+    for (const key of imageKeys) {
+      try {
+        const existingData = await get<string>(key as string);
+        if (existingData) {
+          const existingHash = await calculateImageHash(existingData);
+          if (existingHash === imageHash) {
+            // 找到相同的图片，返回其ID
+            return (key as string).replace(IMAGE_PREFIX, '');
+          }
+        }
+      } catch (error) {
+        // 忽略读取错误，继续检查下一个
+        continue;
+      }
+    }
+  } catch (error) {
+    console.warn('Failed to check for existing image:', error);
+  }
+
+  return null; // 没有找到相同的图片
+}
+
 // 保存图片到 IndexedDB，返回图片 ID
 export async function saveImage(base64Data: string): Promise<string> {
-  const imageId = generateImageId();
-
   // 检查 Base64 数据是否有效
   if (!base64Data || !base64Data.startsWith('data:image/')) {
     throw new Error('Invalid image data: not a valid Base64 image');
@@ -162,6 +301,16 @@ export async function saveImage(base64Data: string): Promise<string> {
     console.warn(`Large image detected: ${dataSizeMB.toFixed(2)}MB, may cause storage issues`);
   }
 
+  // 检查是否已经存在相同的图片
+  const existingId = await findExistingImageId(base64Data);
+  if (existingId) {
+    console.log(`Reusing existing image: ${existingId}`);
+    return existingId;
+  }
+
+  // 生成新的图片ID并保存
+  const imageId = generateImageId();
+
   try {
     await set(`${IMAGE_PREFIX}${imageId}`, base64Data);
     // 验证保存是否成功
@@ -169,6 +318,7 @@ export async function saveImage(base64Data: string): Promise<string> {
     if (!verifyData) {
       throw new Error('Image save verification failed');
     }
+    console.log(`Saved new image: ${imageId} (${dataSizeMB.toFixed(2)}MB)`);
     return imageId;
   } catch (error) {
     console.error('Failed to save image:', error);
@@ -198,10 +348,52 @@ export async function loadImage(imageId: string): Promise<string | null> {
   }
 }
 
+// 检查涂鸦是否已经存在（通过哈希值）
+async function findExistingSketchId(sketchData: string): Promise<string | null> {
+  try {
+    const sketchHash = await calculateImageHash(sketchData);
+
+    // 检查所有涂鸦ID，看是否有相同的哈希
+    const allKeys = await keys();
+    const sketchKeys = allKeys.filter(key =>
+      typeof key === 'string' && (key as string).startsWith(SKETCH_PREFIX)
+    );
+
+    for (const key of sketchKeys) {
+      try {
+        const existingData = await get<string>(key as string);
+        if (existingData) {
+          const existingHash = await calculateImageHash(existingData);
+          if (existingHash === sketchHash) {
+            // 找到相同的涂鸦，返回其ID
+            return (key as string).replace(SKETCH_PREFIX, '');
+          }
+        }
+      } catch (error) {
+        // 忽略读取错误，继续检查下一个
+        continue;
+      }
+    }
+  } catch (error) {
+    console.warn('Failed to check for existing sketch:', error);
+  }
+
+  return null; // 没有找到相同的涂鸦
+}
+
 // 保存 sketch 到 IndexedDB，返回 sketch ID
 export async function saveSketch(base64Data: string): Promise<string> {
+  // 检查是否已经存在相同的涂鸦
+  const existingId = await findExistingSketchId(base64Data);
+  if (existingId) {
+    console.log(`Reusing existing sketch: ${existingId}`);
+    return existingId;
+  }
+
+  // 生成新的涂鸦ID并保存
   const sketchId = generateImageId();
   await set(`${SKETCH_PREFIX}${sketchId}`, base64Data);
+  console.log(`Saved new sketch: ${sketchId}`);
   return sketchId;
 }
 
@@ -306,6 +498,43 @@ export async function attemptImageRecovery(): Promise<{ imagesRecovered: number,
   }
 
   return { imagesRecovered, sketchesRecovered };
+}
+
+// 清理重复的图片，只保留每个哈希组的第一个图片
+export async function cleanupDuplicateImages(): Promise<{ imagesCleaned: number, spaceFreed: number, keptImages: string[] } | null> {
+  try {
+    const redundancyAnalysis = await analyzeStorageRedundancy();
+    if (!redundancyAnalysis) return null;
+
+    let imagesCleaned = 0;
+    let spaceFreed = 0;
+    const keptImages: string[] = [];
+
+    for (const group of redundancyAnalysis.duplicateGroups) {
+      // 保留第一个ID，删除其他的
+      const [keepId, ...deleteIds] = group.ids;
+
+      keptImages.push(keepId);
+
+      for (const deleteId of deleteIds) {
+        try {
+          await deleteImage(deleteId);
+          imagesCleaned++;
+          // 估算节省的空间（组内每个重复项的大小）
+          spaceFreed += group.size / group.count;
+          console.log(`Cleaned duplicate image: ${deleteId} (kept: ${keepId})`);
+        } catch (error) {
+          console.warn(`Failed to delete duplicate image ${deleteId}:`, error);
+        }
+      }
+    }
+
+    console.log(`Duplicate cleanup complete: ${imagesCleaned} images cleaned, ${spaceFreed.toFixed(2)}MB freed`);
+    return { imagesCleaned, spaceFreed, keptImages };
+  } catch (error) {
+    console.error('Failed to cleanup duplicate images:', error);
+    return null;
+  }
 }
 
 // 清理大文件以释放存储空间

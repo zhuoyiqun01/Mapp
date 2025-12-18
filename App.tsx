@@ -31,8 +31,10 @@ import {
   clearViewPositionCache,
   checkStorageUsage,
   checkStorageDetails,
+  analyzeStorageRedundancy,
   cleanupCorruptedImages,
   cleanupLargeImages,
+  cleanupDuplicateImages,
   attemptImageRecovery,
   loadNoteImages,
   ProjectSummary
@@ -179,26 +181,33 @@ export default function App() {
         console.log(`Recovered ${recoveryResult.imagesRecovered} images and ${recoveryResult.sketchesRecovered} sketches`);
       }
 
-      // Step 2: Clean up corrupted data (40%)
-      setLoadingProgress(40);
+      // Step 2: Clean up corrupted data (30%)
+      setLoadingProgress(30);
       const cleanupResult = await cleanupCorruptedImages();
       if (cleanupResult.imagesCleaned > 0 || cleanupResult.sketchesCleaned > 0) {
         console.log(`Cleaned ${cleanupResult.imagesCleaned} corrupted images and ${cleanupResult.sketchesCleaned} corrupted sketches`);
       }
 
-      // Step 3: Clean up large images (>2MB) to free space (60%)
-      setLoadingProgress(60);
+      // Step 3: Clean up duplicate images (50%)
+      setLoadingProgress(50);
+      const duplicateCleanupResult = await cleanupDuplicateImages();
+      if (duplicateCleanupResult && duplicateCleanupResult.imagesCleaned > 0) {
+        console.log(`Cleaned ${duplicateCleanupResult.imagesCleaned} duplicate images, freed ${duplicateCleanupResult.spaceFreed.toFixed(2)}MB`);
+      }
+
+      // Step 4: Clean up large images (>2MB) (70%)
+      setLoadingProgress(70);
       const largeCleanupResult = await cleanupLargeImages(2);
       if (largeCleanupResult.imagesCleaned > 0) {
         console.log(`Cleaned ${largeCleanupResult.imagesCleaned} large images, freed ${largeCleanupResult.spaceFreed.toFixed(2)}MB`);
       }
 
-      // Step 4: Refresh project summaries (80%)
-      setLoadingProgress(80);
+      // Step 5: Refresh project summaries (90%)
+      setLoadingProgress(90);
       const summaries = await loadProjectSummaries();
       setProjectSummaries(summaries);
 
-      // Step 5: Complete (100%)
+      // Step 6: Complete (100%)
       setLoadingProgress(100);
 
       console.log('Data check and repair completed');
@@ -331,6 +340,24 @@ export default function App() {
                 largestImages: storageDetails.largestImages.slice(0, 5).map(img =>
                   `${img.key.split('-').pop()}: ${img.size.toFixed(2)}MB`
                 )
+              });
+            }
+
+            // 分析存储冗余
+            const redundancyAnalysis = await analyzeStorageRedundancy();
+            if (redundancyAnalysis) {
+              console.log('Storage redundancy analysis:', {
+                uniqueImages: redundancyAnalysis.uniqueImages,
+                duplicateImages: redundancyAnalysis.duplicateImages,
+                uniqueSketches: redundancyAnalysis.uniqueSketches,
+                duplicateSketches: redundancyAnalysis.duplicateSketches,
+                redundantSpace: `${redundancyAnalysis.redundantSpace.toFixed(2)}MB`,
+                topDuplicateGroups: redundancyAnalysis.duplicateGroups.slice(0, 3).map(group => ({
+                  hash: group.hash.substring(0, 8),
+                  count: group.count,
+                  totalSize: `${group.size.toFixed(2)}MB`,
+                  ids: group.ids.slice(0, 3).join(', ') + (group.ids.length > 3 ? '...' : '')
+                }))
               });
             }
 
