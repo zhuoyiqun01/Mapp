@@ -443,6 +443,188 @@ async function imagesAreIdentical(data1: string, data2: string): Promise<boolean
   }
 }
 
+// 分析数据冗余和孤立数据
+export async function analyzeDataRedundancy(): Promise<{
+  totalKeys: number;
+  projectKeys: number;
+  imageKeys: number;
+  sketchKeys: number;
+  otherKeys: number;
+
+  // 项目数据
+  activeProjects: number;
+  totalProjects: number;
+
+  // 图片分析
+  referencedImages: Set<string>;
+  referencedSketches: Set<string>;
+  totalImages: number;
+  totalSketches: number;
+  orphanedImages: number;
+  orphanedSketches: number;
+  orphanedImageSize: number;
+  orphanedSketchSize: number;
+
+  // 其他冗余
+  duplicateHashes: number;
+  suspiciousDuplicates: number;
+
+  // 建议清理
+  recommendedCleanup: {
+    orphanedImages: string[];
+    orphanedSketches: string[];
+    suspiciousDuplicates: Array<{
+      hash: string;
+      count: number;
+      reason: string;
+    }>;
+  };
+} | null> {
+  try {
+    const allKeys = await keys();
+    console.log(`Analyzing ${allKeys.length} total keys in IndexedDB...`);
+
+    // 分类统计
+    const projectKeys = allKeys.filter(key =>
+      typeof key === 'string' && (key as string).startsWith(PROJECT_PREFIX)
+    );
+
+    const imageKeys = allKeys.filter(key =>
+      typeof key === 'string' && (key as string).startsWith(IMAGE_PREFIX)
+    );
+
+    const sketchKeys = allKeys.filter(key =>
+      typeof key === 'string' && (key as string).startsWith(SKETCH_PREFIX)
+    );
+
+    const otherKeys = allKeys.filter(key =>
+      typeof key === 'string' &&
+      !(key as string).startsWith(PROJECT_PREFIX) &&
+      !(key as string).startsWith(IMAGE_PREFIX) &&
+      !(key as string).startsWith(SKETCH_PREFIX)
+    );
+
+    console.log(`Found ${projectKeys.length} projects, ${imageKeys.length} images, ${sketchKeys.length} sketches, ${otherKeys.length} other keys`);
+
+    // 收集所有被项目引用的图片ID
+    const referencedImages = new Set<string>();
+    const referencedSketches = new Set<string>();
+
+    for (const projectKey of projectKeys) {
+      try {
+        const project = await get<Project>(projectKey as string);
+        if (project && project.notes) {
+          for (const note of project.notes) {
+            // 收集图片引用
+            if (note.images) {
+              for (const imageId of note.images) {
+                const existingId = extractImageId(imageId);
+                if (existingId) {
+                  referencedImages.add(existingId);
+                }
+              }
+            }
+            // 收集涂鸦引用
+            if (note.sketch) {
+              const existingId = extractImageId(note.sketch);
+              if (existingId) {
+                referencedSketches.add(existingId);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.warn(`Failed to analyze project ${projectKey}:`, error);
+      }
+    }
+
+    console.log(`Found ${referencedImages.size} referenced images and ${referencedSketches.size} referenced sketches`);
+
+    // 找出孤立的数据
+    const orphanedImages: string[] = [];
+    const orphanedSketches: string[] = [];
+    let orphanedImageSize = 0;
+    let orphanedSketchSize = 0;
+
+    // 检查图片
+    for (const imageKey of imageKeys) {
+      const imageId = (imageKey as string).replace(IMAGE_PREFIX, '');
+      if (!referencedImages.has(imageId)) {
+        try {
+          const imageData = await get<string>(imageKey as string);
+          if (imageData) {
+            const size = (imageData.length * 3) / 4; // 估算解码后大小
+            orphanedImageSize += size;
+            orphanedImages.push(imageId);
+          }
+        } catch (error) {
+          console.warn(`Failed to check orphaned image ${imageId}:`, error);
+        }
+      }
+    }
+
+    // 检查涂鸦
+    for (const sketchKey of sketchKeys) {
+      const sketchId = (sketchKey as string).replace(SKETCH_PREFIX, '');
+      if (!referencedSketches.has(sketchId)) {
+        try {
+          const sketchData = await get<string>(sketchKey as string);
+          if (sketchData) {
+            const size = (sketchData.length * 3) / 4; // 估算解码后大小
+            orphanedSketchSize += size;
+            orphanedSketches.push(sketchId);
+          }
+        } catch (error) {
+          console.warn(`Failed to check orphaned sketch ${sketchId}:`, error);
+        }
+      }
+    }
+
+    // 获取重复分析
+    const duplicateAnalysis = await analyzeDuplicateImages();
+
+    const result = {
+      totalKeys: allKeys.length,
+      projectKeys: projectKeys.length,
+      imageKeys: imageKeys.length,
+      sketchKeys: sketchKeys.length,
+      otherKeys: otherKeys.length,
+
+      activeProjects: projectKeys.length,
+      totalProjects: projectKeys.length,
+
+      referencedImages: referencedImages,
+      referencedSketches: referencedSketches,
+      totalImages: imageKeys.length,
+      totalSketches: sketchKeys.length,
+      orphanedImages: orphanedImages.length,
+      orphanedSketches: orphanedSketches.length,
+      orphanedImageSize,
+      orphanedSketchSize,
+
+      duplicateHashes: duplicateAnalysis?.duplicateGroups.length || 0,
+      suspiciousDuplicates: duplicateAnalysis?.suspiciousGroups.length || 0,
+
+      recommendedCleanup: {
+        orphanedImages,
+        orphanedSketches,
+        suspiciousDuplicates: duplicateAnalysis?.suspiciousGroups || []
+      }
+    };
+
+    console.log('Data redundancy analysis complete:');
+    console.log(`  Orphaned images: ${orphanedImages.length} (${(orphanedImageSize / (1024 * 1024)).toFixed(2)}MB)`);
+    console.log(`  Orphaned sketches: ${orphanedSketches.length} (${(orphanedSketchSize / (1024 * 1024)).toFixed(2)}MB)`);
+    console.log(`  Suspicious duplicates: ${result.suspiciousDuplicates}`);
+
+    return result;
+
+  } catch (error) {
+    console.error('Failed to analyze data redundancy:', error);
+    return null;
+  }
+}
+
 // 检查 IndexedDB 中存储的数据详情
 export async function checkStorageDetails(): Promise<{
   totalKeys: number;
@@ -878,6 +1060,65 @@ export async function cleanupDuplicateImages(autoDelete: boolean = false): Promi
     return { imagesCleaned, spaceFreed, keptImages, suspiciousGroups };
   } catch (error) {
     console.error('Failed to cleanup duplicate images:', error);
+    return null;
+  }
+}
+
+// 清理孤立数据（未被任何项目引用的图片和涂鸦）
+export async function cleanupOrphanedData(): Promise<{
+  orphanedImagesCleaned: number;
+  orphanedSketchesCleaned: number;
+  spaceFreed: number;
+} | null> {
+  try {
+    console.log('Starting orphaned data cleanup...');
+
+    const analysis = await analyzeDataRedundancy();
+    if (!analysis) {
+      console.error('Failed to analyze data for cleanup');
+      return null;
+    }
+
+    const { recommendedCleanup } = analysis;
+    let spaceFreed = 0;
+
+    // 清理孤立图片
+    console.log(`Cleaning up ${recommendedCleanup.orphanedImages.length} orphaned images...`);
+    for (const imageId of recommendedCleanup.orphanedImages) {
+      try {
+        await deleteImage(imageId);
+        console.log(`Cleaned orphaned image: ${imageId}`);
+      } catch (error) {
+        console.warn(`Failed to delete orphaned image ${imageId}:`, error);
+      }
+    }
+
+    // 清理孤立涂鸦
+    console.log(`Cleaning up ${recommendedCleanup.orphanedSketches.length} orphaned sketches...`);
+    for (const sketchId of recommendedCleanup.orphanedSketches) {
+      try {
+        await deleteSketch(sketchId);
+        console.log(`Cleaned orphaned sketch: ${sketchId}`);
+      } catch (error) {
+        console.warn(`Failed to delete orphaned sketch ${sketchId}:`, error);
+      }
+    }
+
+    // 估算释放的空间（从之前的分析中获取）
+    // 注意：这里只是估算，实际空间释放可能不同
+
+    const result = {
+      orphanedImagesCleaned: recommendedCleanup.orphanedImages.length,
+      orphanedSketchesCleaned: recommendedCleanup.orphanedSketches.length,
+      spaceFreed: analysis.orphanedImageSize + analysis.orphanedSketchSize
+    };
+
+    console.log(`Orphaned data cleanup complete: ${result.orphanedImagesCleaned} images and ${result.orphanedSketchesCleaned} sketches cleaned, ~${(result.spaceFreed / (1024 * 1024)).toFixed(2)}MB freed`);
+
+    return result;
+
+  } catch (error) {
+    console.error('Failed to cleanup orphaned data:', error);
     return null;
   }
 }

@@ -33,6 +33,8 @@ import {
   checkStorageUsage,
   checkStorageDetails,
   analyzeStorageRedundancy,
+  analyzeDataRedundancy,
+  cleanupOrphanedData,
   cleanupCorruptedImages,
   cleanupLargeImages,
   cleanupDuplicateImages,
@@ -228,8 +230,37 @@ export default function App() {
         console.log(`Cleaned ${largeCleanupResult.imagesCleaned} large images, freed ${largeCleanupResult.spaceFreed.toFixed(2)}MB`);
       }
 
-      // Step 5: Detailed duplicate analysis (90%)
+      // Step 5: Data redundancy analysis (85%)
+      setLoadingProgress(85);
+      const redundancyAnalysis = await analyzeDataRedundancy();
+      if (redundancyAnalysis) {
+        console.log('🔍 Data redundancy analysis:');
+        console.log(`   Total keys: ${redundancyAnalysis.totalKeys}`);
+        console.log(`   Projects: ${redundancyAnalysis.projectKeys}`);
+        console.log(`   Images: ${redundancyAnalysis.imageKeys} (${redundancyAnalysis.orphanedImages} orphaned)`);
+        console.log(`   Sketches: ${redundancyAnalysis.sketchKeys} (${redundancyAnalysis.orphanedSketches} orphaned)`);
+        console.log(`   Other data: ${redundancyAnalysis.otherKeys}`);
+
+        const orphanedSpace = (redundancyAnalysis.orphanedImageSize + redundancyAnalysis.orphanedSketchSize) / (1024 * 1024);
+        console.log(`   🗑️  Orphaned data: ${(orphanedSpace).toFixed(2)}MB (${redundancyAnalysis.orphanedImages + redundancyAnalysis.orphanedSketches} files)`);
+
+        if (redundancyAnalysis.suspiciousDuplicates > 0) {
+          console.log(`   ⚠️  Suspicious duplicates: ${redundancyAnalysis.suspiciousDuplicates} groups`);
+        }
+      }
+
+      // Step 6: Cleanup orphaned data (90%)
       setLoadingProgress(90);
+      const orphanedCleanup = await cleanupOrphanedData();
+      if (orphanedCleanup) {
+        console.log(`🧹 Cleaned up orphaned data:`);
+        console.log(`   Images: ${orphanedCleanup.orphanedImagesCleaned}`);
+        console.log(`   Sketches: ${orphanedCleanup.orphanedSketchesCleaned}`);
+        console.log(`   Space freed: ~${(orphanedCleanup.spaceFreed / (1024 * 1024)).toFixed(2)}MB`);
+      }
+
+      // Step 7: Detailed duplicate analysis (95%)
+      setLoadingProgress(95);
       const detailedAnalysis = await analyzeDuplicateImages();
       if (detailedAnalysis) {
         console.log('📊 Detailed duplicate analysis:');
@@ -248,12 +279,12 @@ export default function App() {
         }
       }
 
-      // Step 6: Refresh project summaries (95%)
-      setLoadingProgress(95);
+      // Step 8: Refresh project summaries (98%)
+      setLoadingProgress(98);
       const summaries = await loadProjectSummaries();
       setProjectSummaries(summaries);
 
-      // Step 7: Complete (100%)
+      // Step 9: Complete (100%)
       setLoadingProgress(100);
 
       console.log('Data check and repair completed');
