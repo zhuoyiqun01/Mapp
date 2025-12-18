@@ -319,312 +319,6 @@ export async function analyzeStorageRedundancy(): Promise<{
   }
 }
 
-// 检查当前项目的重复（用于导入时）
-export async function checkProjectDuplicatesForImport(
-  importNotes: Note[],
-  projectId: string
-): Promise<Array<{
-  importIndex: number;
-  existingNoteId: string;
-  duplicateType: 'image' | 'sketch' | 'both';
-  existingNoteTitle?: string;
-}>> {
-  const duplicates: Array<{
-    importIndex: number;
-    existingNoteId: string;
-    duplicateType: 'image' | 'sketch' | 'both';
-    existingNoteTitle?: string;
-  }> = [];
-
-  try {
-    // 获取当前项目的所有便签（包含图片数据）
-    const project = await loadProject(projectId, true);
-    if (!project) return duplicates;
-
-    for (let i = 0; i < importNotes.length; i++) {
-      const importNote = importNotes[i];
-
-      // 检查图片重复
-      if (importNote.images?.length) {
-        for (const importImageId of importNote.images) {
-          // 获取导入图片的实际数据
-          const importImageData = await getImageDataForComparison(importImageId);
-
-          if (importImageData) {
-            for (const existingNote of project.notes) {
-              if (existingNote.images?.length) {
-                for (const existingImageId of existingNote.images) {
-                  const existingImageData = await getImageDataForComparison(existingImageId);
-
-                  if (existingImageData && await imagesAreIdentical(importImageData, existingImageData)) {
-                    duplicates.push({
-                      importIndex: i,
-                      existingNoteId: existingNote.id,
-                      duplicateType: 'image',
-                      existingNoteTitle: existingNote.title
-                    });
-                    break; // 找到一个重复就停止检查这个导入图片
-                  }
-                }
-              }
-              if (duplicates.some(d => d.importIndex === i)) break; // 如果已经记录了这个导入项的重复，跳到下一个
-            }
-          }
-        }
-      }
-
-      // 检查涂鸦重复
-      if (importNote.sketch) {
-        const importSketchData = await getImageDataForComparison(importNote.sketch);
-
-        if (importSketchData) {
-          for (const existingNote of project.notes) {
-            if (existingNote.sketch) {
-              const existingSketchData = await getImageDataForComparison(existingNote.sketch);
-
-              if (existingSketchData && await imagesAreIdentical(importSketchData, existingSketchData)) {
-                // 检查是否已经记录了这个导入项的图片重复
-                const existingDupIndex = duplicates.findIndex(d => d.importIndex === i);
-                if (existingDupIndex >= 0) {
-                  // 更新为both
-                  duplicates[existingDupIndex].duplicateType = 'both';
-                } else {
-                  duplicates.push({
-                    importIndex: i,
-                    existingNoteId: existingNote.id,
-                    duplicateType: 'sketch',
-                    existingNoteTitle: existingNote.title
-                  });
-                }
-                break;
-              }
-            }
-          }
-        }
-      }
-    }
-
-  } catch (error) {
-    console.warn('Failed to check project duplicates for import:', error);
-  }
-
-  return duplicates;
-}
-
-// 辅助函数：获取图片数据用于比较
-async function getImageDataForComparison(imageId: string): Promise<string | null> {
-  try {
-    // 如果是base64数据，直接返回
-    if (imageId.startsWith('data:image/')) {
-      return imageId;
-    }
-
-    // 如果是ID，从存储中获取
-    if (imageId.startsWith('img-')) {
-      return await get(`${IMAGE_PREFIX}${imageId}`);
-    }
-
-    return null;
-  } catch (error) {
-    console.warn(`Failed to get image data for ${imageId}:`, error);
-    return null;
-  }
-}
-
-// 辅助函数：比较两张图片是否相同
-async function imagesAreIdentical(data1: string, data2: string): Promise<boolean> {
-  try {
-    const hash1 = await calculateImageHash(data1);
-    const hash2 = await calculateImageHash(data2);
-    return hash1 === hash2;
-  } catch (error) {
-    console.warn('Failed to compare images:', error);
-    return false;
-  }
-}
-
-// 分析数据冗余和孤立数据
-export async function analyzeDataRedundancy(): Promise<{
-  totalKeys: number;
-  projectKeys: number;
-  imageKeys: number;
-  sketchKeys: number;
-  otherKeys: number;
-
-  // 项目数据
-  activeProjects: number;
-  totalProjects: number;
-
-  // 图片分析
-  referencedImages: Set<string>;
-  referencedSketches: Set<string>;
-  totalImages: number;
-  totalSketches: number;
-  orphanedImages: number;
-  orphanedSketches: number;
-  orphanedImageSize: number;
-  orphanedSketchSize: number;
-
-  // 其他冗余
-  duplicateHashes: number;
-  suspiciousDuplicates: number;
-
-  // 建议清理
-  recommendedCleanup: {
-    orphanedImages: string[];
-    orphanedSketches: string[];
-    suspiciousDuplicates: Array<{
-      hash: string;
-      count: number;
-      reason: string;
-    }>;
-  };
-} | null> {
-  try {
-    const allKeys = await keys();
-    console.log(`Analyzing ${allKeys.length} total keys in IndexedDB...`);
-
-    // 分类统计
-    const projectKeys = allKeys.filter(key =>
-      typeof key === 'string' && (key as string).startsWith(PROJECT_PREFIX)
-    );
-
-    const imageKeys = allKeys.filter(key =>
-      typeof key === 'string' && (key as string).startsWith(IMAGE_PREFIX)
-    );
-
-    const sketchKeys = allKeys.filter(key =>
-      typeof key === 'string' && (key as string).startsWith(SKETCH_PREFIX)
-    );
-
-    const otherKeys = allKeys.filter(key =>
-      typeof key === 'string' &&
-      !(key as string).startsWith(PROJECT_PREFIX) &&
-      !(key as string).startsWith(IMAGE_PREFIX) &&
-      !(key as string).startsWith(SKETCH_PREFIX)
-    );
-
-    console.log(`Found ${projectKeys.length} projects, ${imageKeys.length} images, ${sketchKeys.length} sketches, ${otherKeys.length} other keys`);
-
-    // 收集所有被项目引用的图片ID
-    const referencedImages = new Set<string>();
-    const referencedSketches = new Set<string>();
-
-    for (const projectKey of projectKeys) {
-      try {
-        const project = await get<Project>(projectKey as string);
-        if (project && project.notes) {
-          for (const note of project.notes) {
-            // 收集图片引用
-            if (note.images) {
-              for (const imageId of note.images) {
-                const existingId = extractImageId(imageId);
-                if (existingId) {
-                  referencedImages.add(existingId);
-                }
-              }
-            }
-            // 收集涂鸦引用
-            if (note.sketch) {
-              const existingId = extractImageId(note.sketch);
-              if (existingId) {
-                referencedSketches.add(existingId);
-              }
-            }
-          }
-        }
-      } catch (error) {
-        console.warn(`Failed to analyze project ${projectKey}:`, error);
-      }
-    }
-
-    console.log(`Found ${referencedImages.size} referenced images and ${referencedSketches.size} referenced sketches`);
-
-    // 找出孤立的数据
-    const orphanedImages: string[] = [];
-    const orphanedSketches: string[] = [];
-    let orphanedImageSize = 0;
-    let orphanedSketchSize = 0;
-
-    // 检查图片
-    for (const imageKey of imageKeys) {
-      const imageId = (imageKey as string).replace(IMAGE_PREFIX, '');
-      if (!referencedImages.has(imageId)) {
-        try {
-          const imageData = await get<string>(imageKey as string);
-          if (imageData) {
-            const size = (imageData.length * 3) / 4; // 估算解码后大小
-            orphanedImageSize += size;
-            orphanedImages.push(imageId);
-          }
-        } catch (error) {
-          console.warn(`Failed to check orphaned image ${imageId}:`, error);
-        }
-      }
-    }
-
-    // 检查涂鸦
-    for (const sketchKey of sketchKeys) {
-      const sketchId = (sketchKey as string).replace(SKETCH_PREFIX, '');
-      if (!referencedSketches.has(sketchId)) {
-        try {
-          const sketchData = await get<string>(sketchKey as string);
-          if (sketchData) {
-            const size = (sketchData.length * 3) / 4; // 估算解码后大小
-            orphanedSketchSize += size;
-            orphanedSketches.push(sketchId);
-          }
-        } catch (error) {
-          console.warn(`Failed to check orphaned sketch ${sketchId}:`, error);
-        }
-      }
-    }
-
-    // 获取重复分析
-    const duplicateAnalysis = await analyzeDuplicateImages();
-
-    const result = {
-      totalKeys: allKeys.length,
-      projectKeys: projectKeys.length,
-      imageKeys: imageKeys.length,
-      sketchKeys: sketchKeys.length,
-      otherKeys: otherKeys.length,
-
-      activeProjects: projectKeys.length,
-      totalProjects: projectKeys.length,
-
-      referencedImages: referencedImages,
-      referencedSketches: referencedSketches,
-      totalImages: imageKeys.length,
-      totalSketches: sketchKeys.length,
-      orphanedImages: orphanedImages.length,
-      orphanedSketches: orphanedSketches.length,
-      orphanedImageSize,
-      orphanedSketchSize,
-
-      duplicateHashes: duplicateAnalysis?.duplicateGroups.length || 0,
-      suspiciousDuplicates: duplicateAnalysis?.suspiciousGroups.length || 0,
-
-      recommendedCleanup: {
-        orphanedImages,
-        orphanedSketches,
-        suspiciousDuplicates: duplicateAnalysis?.suspiciousGroups || []
-      }
-    };
-
-    console.log('Data redundancy analysis complete:');
-    console.log(`  Orphaned images: ${orphanedImages.length} (${(orphanedImageSize / (1024 * 1024)).toFixed(2)}MB)`);
-    console.log(`  Orphaned sketches: ${orphanedSketches.length} (${(orphanedSketchSize / (1024 * 1024)).toFixed(2)}MB)`);
-    console.log(`  Suspicious duplicates: ${result.suspiciousDuplicates}`);
-
-    return result;
-
-  } catch (error) {
-    console.error('Failed to analyze data redundancy:', error);
-    return null;
-  }
-}
-
 // 检查 IndexedDB 中存储的数据详情
 export async function checkStorageDetails(): Promise<{
   totalKeys: number;
@@ -1064,62 +758,183 @@ export async function cleanupDuplicateImages(autoDelete: boolean = false): Promi
   }
 }
 
-// 清理孤立数据（未被任何项目引用的图片和涂鸦）
-export async function cleanupOrphanedData(): Promise<{
-  orphanedImagesCleaned: number;
-  orphanedSketchesCleaned: number;
-  spaceFreed: number;
-} | null> {
+// 查找孤立数据（不再被项目引用的图片和涂鸦）
+export async function findOrphanedData(): Promise<{
+  orphanedImages: string[];
+  orphanedSketches: string[];
+  orphanedBackgrounds: string[];
+  totalOrphanedSpace: number;
+  referencedImages: Set<string>;
+  referencedSketches: Set<string>;
+  referencedBackgrounds: Set<string>;
+}> {
   try {
-    console.log('Starting orphaned data cleanup...');
+    const allKeys = await keys();
+    const imageKeys = allKeys.filter(key =>
+      typeof key === 'string' && (key as string).startsWith(IMAGE_PREFIX)
+    ).map(key => (key as string).replace(IMAGE_PREFIX, ''));
 
-    const analysis = await analyzeDataRedundancy();
-    if (!analysis) {
-      console.error('Failed to analyze data for cleanup');
-      return null;
+    const sketchKeys = allKeys.filter(key =>
+      typeof key === 'string' && (key as string).startsWith(SKETCH_PREFIX)
+    ).map(key => (key as string).replace(SKETCH_PREFIX, ''));
+
+    const backgroundKeys = allKeys.filter(key =>
+      typeof key === 'string' && (key as string).startsWith(BACKGROUND_IMAGE_PREFIX)
+    ).map(key => (key as string).replace(BACKGROUND_IMAGE_PREFIX, ''));
+
+    // 获取所有项目
+    const projectIds = await loadProjectList();
+    const projects = await Promise.all(
+      projectIds.map(id => loadProject(id, true)) // 加载完整数据包括图片
+    );
+
+    const validProjects = projects.filter(p => p !== null);
+    const referencedImages = new Set<string>();
+    const referencedSketches = new Set<string>();
+    const referencedBackgrounds = new Set<string>();
+
+    // 收集所有被引用的ID
+    for (const project of validProjects) {
+      // 背景图片
+      if (project.backgroundImage && project.backgroundImage !== 'stored') {
+        const bgId = extractImageId(project.backgroundImage);
+        if (bgId) referencedBackgrounds.add(bgId);
+      }
+
+      // 便签中的图片和涂鸦
+      for (const note of project.notes) {
+        if (note.images) {
+          for (const imageRef of note.images) {
+            const imageId = extractImageId(imageRef);
+            if (imageId) referencedImages.add(imageId);
+          }
+        }
+        if (note.sketch) {
+          const sketchId = extractImageId(note.sketch);
+          if (sketchId) referencedSketches.add(sketchId);
+        }
+      }
     }
 
-    const { recommendedCleanup } = analysis;
+    // 找出孤立的数据
+    const orphanedImages = imageKeys.filter(id => !referencedImages.has(id));
+    const orphanedSketches = sketchKeys.filter(id => !referencedSketches.has(id));
+    const orphanedBackgrounds = backgroundKeys.filter(id => !referencedBackgrounds.has(id));
+
+    // 计算孤立数据的总大小
+    let totalOrphanedSpace = 0;
+
+    for (const imageId of orphanedImages) {
+      try {
+        const data = await get<string>(`${IMAGE_PREFIX}${imageId}`);
+        if (data) {
+          totalOrphanedSpace += (data.length * 3) / 4;
+        }
+      } catch (error) {
+        // 忽略错误
+      }
+    }
+
+    for (const sketchId of orphanedSketches) {
+      try {
+        const data = await get<string>(`${SKETCH_PREFIX}${sketchId}`);
+        if (data) {
+          totalOrphanedSpace += (data.length * 3) / 4;
+        }
+      } catch (error) {
+        // 忽略错误
+      }
+    }
+
+    console.log(`Found ${orphanedImages.length} orphaned images, ${orphanedSketches.length} orphaned sketches, ${orphanedBackgrounds.length} orphaned backgrounds`);
+    console.log(`Total orphaned space: ${(totalOrphanedSpace / (1024 * 1024)).toFixed(2)}MB`);
+
+    return {
+      orphanedImages,
+      orphanedSketches,
+      orphanedBackgrounds,
+      totalOrphanedSpace,
+      referencedImages,
+      referencedSketches,
+      referencedBackgrounds
+    };
+  } catch (error) {
+    console.error('Failed to find orphaned data:', error);
+    return {
+      orphanedImages: [],
+      orphanedSketches: [],
+      orphanedBackgrounds: [],
+      totalOrphanedSpace: 0,
+      referencedImages: new Set(),
+      referencedSketches: new Set(),
+      referencedBackgrounds: new Set()
+    };
+  }
+}
+
+// 清理孤立数据
+export async function cleanupOrphanedData(): Promise<{
+  imagesCleaned: number;
+  sketchesCleaned: number;
+  backgroundsCleaned: number;
+  spaceFreed: number;
+}> {
+  try {
+    const orphanedData = await findOrphanedData();
+
+    let imagesCleaned = 0;
+    let sketchesCleaned = 0;
+    let backgroundsCleaned = 0;
     let spaceFreed = 0;
 
-    // 清理孤立图片
-    console.log(`Cleaning up ${recommendedCleanup.orphanedImages.length} orphaned images...`);
-    for (const imageId of recommendedCleanup.orphanedImages) {
+    // 删除孤立的图片
+    for (const imageId of orphanedData.orphanedImages) {
       try {
         await deleteImage(imageId);
-        console.log(`Cleaned orphaned image: ${imageId}`);
+        imagesCleaned++;
       } catch (error) {
         console.warn(`Failed to delete orphaned image ${imageId}:`, error);
       }
     }
 
-    // 清理孤立涂鸦
-    console.log(`Cleaning up ${recommendedCleanup.orphanedSketches.length} orphaned sketches...`);
-    for (const sketchId of recommendedCleanup.orphanedSketches) {
+    // 删除孤立的涂鸦
+    for (const sketchId of orphanedData.orphanedSketches) {
       try {
         await deleteSketch(sketchId);
-        console.log(`Cleaned orphaned sketch: ${sketchId}`);
+        sketchesCleaned++;
       } catch (error) {
         console.warn(`Failed to delete orphaned sketch ${sketchId}:`, error);
       }
     }
 
-    // 估算释放的空间（从之前的分析中获取）
-    // 注意：这里只是估算，实际空间释放可能不同
+    // 删除孤立的背景图片
+    for (const bgId of orphanedData.orphanedBackgrounds) {
+      try {
+        await del(`${BACKGROUND_IMAGE_PREFIX}${bgId}`);
+        backgroundsCleaned++;
+      } catch (error) {
+        console.warn(`Failed to delete orphaned background ${bgId}:`, error);
+      }
+    }
 
-    const result = {
-      orphanedImagesCleaned: recommendedCleanup.orphanedImages.length,
-      orphanedSketchesCleaned: recommendedCleanup.orphanedSketches.length,
-      spaceFreed: analysis.orphanedImageSize + analysis.orphanedSketchSize
+    spaceFreed = orphanedData.totalOrphanedSpace;
+
+    console.log(`Orphaned data cleanup complete: ${imagesCleaned} images, ${sketchesCleaned} sketches, ${backgroundsCleaned} backgrounds cleaned, ${(spaceFreed / (1024 * 1024)).toFixed(2)}MB freed`);
+
+    return {
+      imagesCleaned,
+      sketchesCleaned,
+      backgroundsCleaned,
+      spaceFreed
     };
-
-    console.log(`Orphaned data cleanup complete: ${result.orphanedImagesCleaned} images and ${result.orphanedSketchesCleaned} sketches cleaned, ~${(result.spaceFreed / (1024 * 1024)).toFixed(2)}MB freed`);
-
-    return result;
-
   } catch (error) {
     console.error('Failed to cleanup orphaned data:', error);
-    return null;
+    return {
+      imagesCleaned: 0,
+      sketchesCleaned: 0,
+      backgroundsCleaned: 0,
+      spaceFreed: 0
+    };
   }
 }
 

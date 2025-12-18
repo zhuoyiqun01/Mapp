@@ -137,7 +137,6 @@ interface MapViewProps {
   onToggleEditor: (isOpen: boolean) => void;
   onImportDialogChange?: (isOpen: boolean) => void;
   onUpdateProject?: (project: Project) => void;
-  onImportData?: (importNotes: Note[]) => void; // 新增：导入数据回调
   navigateToCoords?: { lat: number; lng: number } | null;
   projectId?: string;
   onNavigateComplete?: () => void;
@@ -618,7 +617,7 @@ const TextLabelsLayer = ({ notes, showTextLabels, pinSize, themeColor }: {
       }
     };
   }, [map, notes, showTextLabels, pinSize, themeColor]);
-
+  
   return null;
 };
 
@@ -889,9 +888,9 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
             onDoubleClick={(e) => e.stopPropagation()}
         >
             <div className="relative" ref={locateMenuRef}>
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation();
+            <button 
+                    onClick={(e) => { 
+                        e.stopPropagation(); 
                         setShowLocateMenu(!showLocateMenu);
                     }}
                     onPointerDown={(e) => {
@@ -917,7 +916,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                     }}
                     className="bg-white p-2 sm:p-3 rounded-xl shadow-lg text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
                     title="Locate"
-                >
+            >
                     <Locate size={18} className="sm:w-5 sm:h-5" />
                 </button>
                 {showLocateMenu && (
@@ -1338,7 +1337,7 @@ const MapPositionTracker = ({ onPositionChange }: { onPositionChange?: (center: 
 };
 
 
-export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, onImportData, fileInputRef: externalFileInputRef, navigateToCoords, projectId, onNavigateComplete, onPositionChange, onSwitchToBoardView, themeColor = THEME_COLOR, mapStyleId = 'carto-light-nolabels' }) => {
+export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, projectId, onNavigateComplete, onPositionChange, onSwitchToBoardView, themeColor = THEME_COLOR, mapStyleId = 'carto-light-nolabels' }) => {
   if (!project) {
     return null;
   }
@@ -2378,13 +2377,13 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-
+      
       if (!data.project || !data.project.notes) {
         alert('Invalid project file format');
         return;
       }
 
-      const importedNotes = (data.project.notes || []).filter((note: Note) =>
+      const importedNotes = (data.project.notes || []).filter((note: Note) => 
         note.coords && note.coords.lat && note.coords.lng
       );
 
@@ -2393,46 +2392,41 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         return;
       }
 
-      // 如果有导入数据回调，使用它进行重复检查，否则使用原有逻辑
-      if (onImportData) {
-        onImportData(importedNotes);
+      // Check for duplicates and merge
+      const existingNotes = project.notes || [];
+      const isDuplicateNote = (note1: Note, note2: Note): boolean => {
+        if (!note1.coords || !note2.coords) return false;
+        const latDiff = Math.abs(note1.coords.lat - note2.coords.lat);
+        const lngDiff = Math.abs(note1.coords.lng - note2.coords.lng);
+        const textMatch = (note1.text || '').trim() === (note2.text || '').trim();
+        return latDiff < 0.0001 && lngDiff < 0.0001 && textMatch;
+      };
+
+      const uniqueImportedNotes = importedNotes.filter((importedNote: Note) => {
+        return !existingNotes.some((existingNote: Note) => 
+          isDuplicateNote(importedNote, existingNote)
+        );
+      });
+
+      // Generate new IDs for imported notes
+      const newNotes = uniqueImportedNotes.map((note: Note) => ({
+        ...note,
+        isFavorite: note.isFavorite ?? false,
+        id: generateId(),
+        createdAt: Date.now() + Math.random()
+      }));
+
+      const mergedNotes = [...existingNotes, ...newNotes];
+      
+      if (onUpdateProject) {
+        onUpdateProject({ ...project, notes: mergedNotes });
+      }
+
+      const duplicateCount = importedNotes.length - uniqueImportedNotes.length;
+      if (duplicateCount > 0) {
+        alert(`Successfully imported ${uniqueImportedNotes.length} new notes. ${duplicateCount} duplicate(s) were skipped.`);
       } else {
-        // 后备逻辑：使用原有的简单重复检查
-        const existingNotes = project.notes || [];
-        const isDuplicateNote = (note1: Note, note2: Note): boolean => {
-          if (!note1.coords || !note2.coords) return false;
-          const latDiff = Math.abs(note1.coords.lat - note2.coords.lat);
-          const lngDiff = Math.abs(note1.coords.lng - note2.coords.lng);
-          const textMatch = (note1.text || '').trim() === (note2.text || '').trim();
-          return latDiff < 0.0001 && lngDiff < 0.0001 && textMatch;
-        };
-
-        const uniqueImportedNotes = importedNotes.filter((importedNote: Note) => {
-          return !existingNotes.some((existingNote: Note) =>
-            isDuplicateNote(importedNote, existingNote)
-          );
-        });
-
-        // Generate new IDs for imported notes
-        const newNotes = uniqueImportedNotes.map((note: Note) => ({
-          ...note,
-          isFavorite: note.isFavorite ?? false,
-          id: generateId(),
-          createdAt: Date.now() + Math.random()
-        }));
-
-        const mergedNotes = [...existingNotes, ...newNotes];
-
-        if (onUpdateProject) {
-          onUpdateProject({ ...project, notes: mergedNotes });
-        }
-
-        const duplicateCount = importedNotes.length - uniqueImportedNotes.length;
-        if (duplicateCount > 0) {
-          alert(`Successfully imported ${uniqueImportedNotes.length} new notes. ${duplicateCount} duplicate(s) were skipped.`);
-        } else {
-          alert(`Successfully imported ${uniqueImportedNotes.length} note(s).`);
-        }
+        alert(`Successfully imported ${uniqueImportedNotes.length} note(s).`);
       }
     } catch (error) {
       console.error('Failed to import data:', error);
@@ -2565,15 +2559,15 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         // Show emoji, background is yellow
         content = `<span style="transform: rotate(45deg); font-size: 20px; line-height: 1; z-index: 1; position: relative;">${note.emoji}</span>`;
       }
-
+      
       return L.divIcon({
           className: 'custom-icon',
           html: `<div style="
             position: relative;
-            background-color: ${backgroundColor};
-            width: ${size}px;
-            height: ${size}px;
-            border-radius: 50% 50% 50% 0;
+            background-color: ${backgroundColor}; 
+            width: ${size}px; 
+            height: ${size}px; 
+            border-radius: 50% 50% 50% 0; 
             transform: rotate(-45deg) ${isFavorite ? 'scale(1)' : ''};
             display: flex;
             align-items: center;
@@ -2846,14 +2840,14 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     e.stopPropagation();
     // Only hide drag overlay if editor is not open
     if (!isEditorOpen) {
-      // Check if we're actually leaving the container (not just moving to a child element)
-      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      const x = e.clientX;
-      const y = e.clientY;
-
-      // If the mouse is outside the container bounds, hide the drag overlay
-      if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
-        setIsDragging(false);
+    // Check if we're actually leaving the container (not just moving to a child element)
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const x = e.clientX;
+    const y = e.clientY;
+    
+    // If the mouse is outside the container bounds, hide the drag overlay
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+      setIsDragging(false);
       }
     }
   };
@@ -2933,7 +2927,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       onDragEnd={handleDragEnd}
     >
       {isDragging && (
-        <div
+        <div 
           className="absolute inset-0 z-[4000] backdrop-blur-sm flex items-center justify-center pointer-events-auto"
           style={{ backgroundColor: isEditorOpen ? '#3B82F633' : `${themeColor}33` }}
           onClick={() => setIsDragging(false)}
@@ -2950,10 +2944,10 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                     <path d="M10 9H8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                   </svg>
                 ) : (
-                  <svg width="64" height="64" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-gray-700">
-                    <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" fill="none"/>
-                    <path d="M8 11V5M5 8l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
+                <svg width="64" height="64" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-gray-700">
+                  <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                  <path d="M8 11V5M5 8l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
                 )}
               </div>
               <div className="text-xl font-bold text-gray-800">
@@ -2966,17 +2960,17 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           </div>
         </div>
       )}
-      <MapContainer
+      <MapContainer 
         key={`${project.id}-${projectId || 'no-project'}`}
         center={
-          isMapMode
+          isMapMode 
             ? (navigateToCoords 
                 ? [navigateToCoords.lat, navigateToCoords.lng]
                 : (initialMapPosition?.center || defaultCenter))
             : [0, 0]
-        }
+        } 
         zoom={isMapMode ? (navigateToCoords ? 19 : (initialMapPosition?.zoom ?? 16)) : -8}
-        minZoom={isMapMode ? 6 : -20}
+        minZoom={isMapMode ? 6 : -20} 
         maxZoom={isMapMode ? 19 : 2}
         zoomSnap={0.1}  // Enable fractional zoom levels
         zoomDelta={0.1}  // Allow smaller zoom increments
@@ -3128,12 +3122,12 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               // Single marker, display directly
               const note = cluster.notes[0];
               return (
-          <Marker
-            key={note.id}
+          <Marker 
+            key={note.id} 
             position={[note.coords.lat, note.coords.lng]}
                   icon={createCustomIcon(note, undefined, showTextLabels, pinSize)}
                   zIndexOffset={-100}
-                  eventHandlers={{
+                  eventHandlers={{ 
                     click: (e) => {
                       e.originalEvent?.stopPropagation();
                       e.originalEvent?.stopImmediatePropagation();
@@ -3145,12 +3139,12 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             } else {
               // Multiple markers, show cluster
               return (
-                <Marker
+                <Marker 
                   key={`cluster-${index}`}
                   position={cluster.position}
                   icon={createCustomIcon(cluster.notes[0], cluster.notes.length, showTextLabels, pinSize)}
                   zIndexOffset={-100}
-                  eventHandlers={{
+                  eventHandlers={{ 
                     click: (e) => {
                       e.originalEvent?.stopPropagation();
                       e.originalEvent?.stopImmediatePropagation();
@@ -3164,12 +3158,12 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         ) : (
           // Show single markers (non-map mode or when no clustering)
           mapNotes.map(note => (
-            <Marker
-              key={note.id}
+            <Marker 
+              key={note.id} 
               position={[note.coords.lat, note.coords.lng]}
               icon={createCustomIcon(note, undefined, showTextLabels, pinSize)}
               zIndexOffset={-100}
-              eventHandlers={{
+              eventHandlers={{ 
                 click: (e) => {
                   e.originalEvent?.stopPropagation();
                   e.originalEvent?.stopImmediatePropagation();
@@ -3227,8 +3221,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         {isMapMode && (
           <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none items-start">
               {/* First Row: Main Controls */}
-              <MapControls
-                onImportPhotos={() => fileInputRef.current?.click()}
+              <MapControls 
+                onImportPhotos={() => fileInputRef.current?.click()} 
                 onImportData={() => dataImportInputRef.current?.click()}
                 mapStyle={mapStyle}
                 onMapStyleChange={(style) => setLocalMapStyle(style)}
@@ -3494,9 +3488,9 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         )}
 
         <div className="fixed bottom-20 sm:bottom-24 left-2 sm:left-4 z-[500]">
-           <MapZoomController
-             min={isMapMode ? 13 : minImageZoom}
-             max={isMapMode ? 19 : 4}
+           <MapZoomController 
+             min={isMapMode ? 13 : minImageZoom} 
+             max={isMapMode ? 19 : 4} 
            />
         </div>
 
