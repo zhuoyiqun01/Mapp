@@ -20,6 +20,7 @@ import {
 import {
   migrateFromOldFormat,
   loadAllProjects,
+  loadProjectSummaries,
   saveProject,
   deleteProject as deleteProjectStorage,
   loadProject,
@@ -30,7 +31,9 @@ import {
   clearViewPositionCache,
   checkStorageUsage,
   cleanupCorruptedImages,
-  attemptImageRecovery
+  attemptImageRecovery,
+  loadNoteImages,
+  ProjectSummary
 } from './utils/storage';
 
 export default function App() {
@@ -56,7 +59,10 @@ export default function App() {
   
   // Project State
   const [projects, setProjects] = useState<Project[]>([]);
+  const [projectSummaries, setProjectSummaries] = useState<ProjectSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingProject, setIsLoadingProject] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState(0);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   
   // Save map position to cache when switching away from map view
@@ -94,6 +100,94 @@ export default function App() {
       setViewPositionCache(currentProjectId, 'board', { x, y, scale });
     }
   }, [currentProjectId]);
+
+  // Load complete project data with progress
+  const loadCompleteProject = useCallback(async (projectId: string): Promise<Project | null> => {
+    setIsLoadingProject(true);
+    setLoadingProgress(0);
+
+    try {
+      // Step 1: Load project without images (10%)
+      setLoadingProgress(10);
+      const project = await loadProject(projectId, false);
+      if (!project) return null;
+
+      // Step 2: Load images for each note (remaining 90%)
+      if (project.notes.length > 0) {
+        const totalNotes = project.notes.length;
+        let loadedNotes = 0;
+
+        // Load images in batches to show progress
+        const batchSize = 5;
+        for (let i = 0; i < totalNotes; i += batchSize) {
+          const batch = project.notes.slice(i, i + batchSize);
+          await Promise.all(
+            batch.map(async (note, index) => {
+              const loadedNote = await loadNoteImages(note);
+              // Update the note in the project
+              project.notes[i + index] = loadedNote;
+            })
+          );
+
+          loadedNotes += batch.length;
+          const progress = 10 + (loadedNotes / totalNotes) * 90;
+          setLoadingProgress(Math.min(100, Math.round(progress)));
+        }
+      } else {
+        setLoadingProgress(100);
+      }
+
+      return project;
+    } finally {
+      setIsLoadingProject(false);
+      setLoadingProgress(0);
+    }
+  }, []);
+
+  // Convert ProjectSummary to basic Project for display
+  const summariesToProjects = useCallback((summaries: ProjectSummary[]): Project[] => {
+    return summaries.map(summary => ({
+      id: summary.id,
+      name: summary.name,
+      type: summary.type,
+      createdAt: summary.createdAt,
+      backgroundImage: undefined,
+      notes: [], // Empty for now, will be loaded when selected
+      frames: [],
+      connections: [],
+      backgroundOpacity: 1,
+      themeColor: THEME_COLOR
+    }));
+  }, []);
+
+  // Project selection handler with loading
+  const handleSelectProject = useCallback(async (id: string) => {
+    if (currentProjectId && currentProjectId !== id) {
+      console.log('[App] Clearing cache for old project:', currentProjectId);
+      clearViewPositionCache(currentProjectId);
+    }
+
+    setCurrentProjectId(id);
+    setIsSidebarOpen(false);
+    setNavigateToMapCoords(null); // Clear navigation intent on project switch
+    setNavigateToBoardCoords(null); // Clear navigation intent on project switch
+
+    // Load complete project data
+    const completeProject = await loadCompleteProject(id);
+    if (completeProject) {
+      // Update the project in the projects array
+      setProjects(prev => {
+        const existingIndex = prev.findIndex(p => p.id === id);
+        if (existingIndex >= 0) {
+          const updated = [...prev];
+          updated[existingIndex] = completeProject;
+          return updated;
+        } else {
+          return [...prev, completeProject];
+        }
+      });
+    }
+  }, [currentProjectId, loadCompleteProject]);
 
   // Cloud Sync State
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
@@ -182,12 +276,9 @@ export default function App() {
           console.log(`Cleaned ${cleanupResult.imagesCleaned} corrupted images and ${cleanupResult.sketchesCleaned} corrupted sketches`);
         }
 
-        // 2. 从新格式加载项目（不加载图片，用于快速显示）
-        let localProjects: Project[] = await loadAllProjects(false);
-        
-        if (localProjects.length > 0) {
-          setProjects(localProjects);
-        }
+        // 2. 只加载项目摘要（快速显示项目列表）
+        const summaries = await loadProjectSummaries();
+        setProjectSummaries(summaries);
         
         setIsLoading(false);
         
@@ -199,34 +290,38 @@ export default function App() {
           try {
             setSyncStatus('syncing');
             const cloudResult = await loadProjectsFromCloud();
-            
+
             if (cloudResult.success && cloudResult.projects) {
+              // 获取完整的本地项目数据用于合并
+              const fullLocalProjects = await loadAllProjects(true);
               // 合并本地和云端数据
-              const merged = mergeProjects(localProjects, cloudResult.projects);
-              
+              const merged = mergeProjects(fullLocalProjects, cloudResult.projects);
+
               // 如果合并后的数据与本地不同，更新本地
-              const localIds = new Set(localProjects.map(p => p.id));
+              const localIds = new Set(fullLocalProjects.map(p => p.id));
               const mergedIds = new Set(merged.map(p => p.id));
-              const hasChanges = localProjects.length !== merged.length ||
+              const hasChanges = fullLocalProjects.length !== merged.length ||
                 [...localIds].some(id => !mergedIds.has(id)) ||
                 merged.some(p => {
-                  const local = localProjects.find(lp => lp.id === p.id);
+                  const local = fullLocalProjects.find(lp => lp.id === p.id);
                   return !local || (local.version || 0) < (p.version || 0);
                 });
-        
+
               if (hasChanges) {
                 // 保存合并后的项目
                 for (const project of merged) {
                   await saveProject(project);
                 }
-                setProjects(merged);
+                // 更新项目摘要
+                const summaries = await loadProjectSummaries();
+                setProjectSummaries(summaries);
               }
-              
+
               // 如果云端有更新，同步到云端
               if (!cloudResult.isNewDevice) {
                 await syncProjectsToCloud(merged);
               }
-              
+
               setSyncStatus('success');
               setTimeout(() => setSyncStatus('idle'), 2000);
             } else if (cloudResult.error) {
@@ -239,8 +334,9 @@ export default function App() {
               }, 3000);
         } else {
               // 新设备，上传本地数据到云端
-              if (localProjects.length > 0) {
-                await syncProjectsToCloud(localProjects);
+              const fullLocalProjects = await loadAllProjects(true);
+              if (fullLocalProjects.length > 0) {
+                await syncProjectsToCloud(fullLocalProjects);
               }
               setSyncStatus('success');
               setTimeout(() => setSyncStatus('idle'), 2000);
@@ -617,11 +713,11 @@ export default function App() {
   if (!activeProject) {
     return (
       <div className="w-full min-h-screen" style={{ backgroundColor: themeColor }}>
-      <ProjectManager 
-         projects={projects}
+      <ProjectManager
+         projects={summariesToProjects(projectSummaries)}
          currentProjectId={null}
          onCreateProject={handleCreateProject}
-         onSelectProject={setCurrentProjectId}
+         onSelectProject={handleSelectProject}
          onDeleteProject={handleDeleteProject}
          onUpdateProject={handleUpdateProject}
          themeColor={themeColor}
@@ -633,6 +729,23 @@ export default function App() {
 
   return (
     <div className="w-full h-screen flex flex-col bg-gray-50 overflow-hidden relative" style={{ touchAction: 'manipulation' }}>
+      {/* Loading Progress Overlay */}
+      {isLoadingProject && (
+        <div className="fixed inset-0 z-[10000] bg-black/50 flex items-center justify-center">
+          <div className="bg-white rounded-2xl p-8 shadow-2xl max-w-sm w-full mx-4">
+            <div className="text-center">
+              <div className="text-2xl font-bold text-gray-800 mb-4">加载项目中...</div>
+              <div className="w-full bg-gray-200 rounded-full h-4 mb-4">
+                <div
+                  className="bg-blue-500 h-4 rounded-full transition-all duration-300"
+                  style={{ width: `${loadingProgress}%` }}
+                ></div>
+              </div>
+              <div className="text-lg font-semibold text-gray-600">{loadingProgress}%</div>
+            </div>
+          </div>
+        </div>
+      )}
       
       <AnimatePresence>
       {isSidebarOpen && (
@@ -658,12 +771,12 @@ export default function App() {
                }}
                style={{ willChange: 'transform' }}
              >
-              <ProjectManager 
+              <ProjectManager
                  isSidebar
-                 projects={projects}
+                 projects={summariesToProjects(projectSummaries)}
                  currentProjectId={currentProjectId}
                  onCreateProject={handleCreateProject}
-                 onSelectProject={(id) => { setCurrentProjectId(id); setIsSidebarOpen(false); }}
+                 onSelectProject={handleSelectProject}
                  onDeleteProject={handleDeleteProject}
          onUpdateProject={handleUpdateProject}
                  onCloseSidebar={() => setIsSidebarOpen(false)}

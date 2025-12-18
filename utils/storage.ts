@@ -547,6 +547,58 @@ export async function loadProjectList(): Promise<string[]> {
   return await get<string[]>(PROJECT_LIST_KEY) || [];
 }
 
+// 加载项目摘要（只包含基本信息，不包含图片，用于项目列表显示）
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  type: 'map' | 'image';
+  createdAt: number;
+  notesCount: number;
+  hasImages: boolean;
+  hasSketches: boolean;
+}
+
+export async function loadProjectSummaries(): Promise<ProjectSummary[]> {
+  const projectIds = await loadProjectList();
+  const summaries: ProjectSummary[] = [];
+
+  for (const projectId of projectIds) {
+    try {
+      const project = await loadProject(projectId, false);
+      if (project) {
+        // 计算项目统计信息
+        let hasImages = false;
+        let hasSketches = false;
+
+        for (const note of project.notes) {
+          if (note.images && note.images.length > 0) {
+            hasImages = true;
+          }
+          if (note.sketch) {
+            hasSketches = true;
+          }
+          // 如果都找到了就可以提前退出
+          if (hasImages && hasSketches) break;
+        }
+
+        summaries.push({
+          id: project.id,
+          name: project.name,
+          type: project.type,
+          createdAt: project.createdAt,
+          notesCount: project.notes.length,
+          hasImages,
+          hasSketches
+        });
+      }
+    } catch (error) {
+      console.error(`Failed to load project summary for ${projectId}:`, error);
+    }
+  }
+
+  return summaries;
+}
+
 // 加载所有项目（不加载图片，用于列表显示）
 export async function loadAllProjects(loadImages: boolean = false): Promise<Project[]> {
   const projectList = await loadProjectList();
