@@ -264,8 +264,6 @@ export async function analyzeStorageRedundancy(): Promise<{
       }
     }
 
-    console.log(`Image analysis complete. Found ${duplicateGroups.length} duplicate groups.`);
-
     // 统计重复组
     const duplicateGroupsTemp = Array.from(hashMap.entries())
       .filter(([, info]) => info.count > 1)
@@ -276,6 +274,8 @@ export async function analyzeStorageRedundancy(): Promise<{
         ids: info.ids
       }))
       .sort((a, b) => b.size - a.size);
+
+    console.log(`Image analysis complete. Found ${duplicateGroupsTemp.length} duplicate groups.`);
 
     const duplicateImages = duplicateGroupsTemp.reduce((sum, group) => sum + group.count - 1, 0);
     const uniqueImages = imageKeys.length - duplicateImages;
