@@ -137,6 +137,7 @@ interface MapViewProps {
   onToggleEditor: (isOpen: boolean) => void;
   onImportDialogChange?: (isOpen: boolean) => void;
   onUpdateProject?: (project: Project) => void;
+  onImportData?: (importNotes: Note[]) => void; // 新增：导入数据回调
   navigateToCoords?: { lat: number; lng: number } | null;
   projectId?: string;
   onNavigateComplete?: () => void;
@@ -1337,7 +1338,7 @@ const MapPositionTracker = ({ onPositionChange }: { onPositionChange?: (center: 
 };
 
 
-export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, projectId, onNavigateComplete, onPositionChange, onSwitchToBoardView, themeColor = THEME_COLOR, mapStyleId = 'carto-light-nolabels' }) => {
+export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, onImportData, fileInputRef: externalFileInputRef, navigateToCoords, projectId, onNavigateComplete, onPositionChange, onSwitchToBoardView, themeColor = THEME_COLOR, mapStyleId = 'carto-light-nolabels' }) => {
   if (!project) {
     return null;
   }
@@ -2377,13 +2378,13 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-      
+
       if (!data.project || !data.project.notes) {
         alert('Invalid project file format');
         return;
       }
 
-      const importedNotes = (data.project.notes || []).filter((note: Note) => 
+      const importedNotes = (data.project.notes || []).filter((note: Note) =>
         note.coords && note.coords.lat && note.coords.lng
       );
 
@@ -2392,41 +2393,46 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         return;
       }
 
-      // Check for duplicates and merge
-      const existingNotes = project.notes || [];
-      const isDuplicateNote = (note1: Note, note2: Note): boolean => {
-        if (!note1.coords || !note2.coords) return false;
-        const latDiff = Math.abs(note1.coords.lat - note2.coords.lat);
-        const lngDiff = Math.abs(note1.coords.lng - note2.coords.lng);
-        const textMatch = (note1.text || '').trim() === (note2.text || '').trim();
-        return latDiff < 0.0001 && lngDiff < 0.0001 && textMatch;
-      };
-
-      const uniqueImportedNotes = importedNotes.filter((importedNote: Note) => {
-        return !existingNotes.some((existingNote: Note) => 
-          isDuplicateNote(importedNote, existingNote)
-        );
-      });
-
-      // Generate new IDs for imported notes
-      const newNotes = uniqueImportedNotes.map((note: Note) => ({
-        ...note,
-        isFavorite: note.isFavorite ?? false,
-        id: generateId(),
-        createdAt: Date.now() + Math.random()
-      }));
-
-      const mergedNotes = [...existingNotes, ...newNotes];
-      
-      if (onUpdateProject) {
-        onUpdateProject({ ...project, notes: mergedNotes });
-      }
-
-      const duplicateCount = importedNotes.length - uniqueImportedNotes.length;
-      if (duplicateCount > 0) {
-        alert(`Successfully imported ${uniqueImportedNotes.length} new notes. ${duplicateCount} duplicate(s) were skipped.`);
+      // 如果有导入数据回调，使用它进行重复检查，否则使用原有逻辑
+      if (onImportData) {
+        onImportData(importedNotes);
       } else {
-        alert(`Successfully imported ${uniqueImportedNotes.length} note(s).`);
+        // 后备逻辑：使用原有的简单重复检查
+        const existingNotes = project.notes || [];
+        const isDuplicateNote = (note1: Note, note2: Note): boolean => {
+          if (!note1.coords || !note2.coords) return false;
+          const latDiff = Math.abs(note1.coords.lat - note2.coords.lat);
+          const lngDiff = Math.abs(note1.coords.lng - note2.coords.lng);
+          const textMatch = (note1.text || '').trim() === (note2.text || '').trim();
+          return latDiff < 0.0001 && lngDiff < 0.0001 && textMatch;
+        };
+
+        const uniqueImportedNotes = importedNotes.filter((importedNote: Note) => {
+          return !existingNotes.some((existingNote: Note) =>
+            isDuplicateNote(importedNote, existingNote)
+          );
+        });
+
+        // Generate new IDs for imported notes
+        const newNotes = uniqueImportedNotes.map((note: Note) => ({
+          ...note,
+          isFavorite: note.isFavorite ?? false,
+          id: generateId(),
+          createdAt: Date.now() + Math.random()
+        }));
+
+        const mergedNotes = [...existingNotes, ...newNotes];
+
+        if (onUpdateProject) {
+          onUpdateProject({ ...project, notes: mergedNotes });
+        }
+
+        const duplicateCount = importedNotes.length - uniqueImportedNotes.length;
+        if (duplicateCount > 0) {
+          alert(`Successfully imported ${uniqueImportedNotes.length} new notes. ${duplicateCount} duplicate(s) were skipped.`);
+        } else {
+          alert(`Successfully imported ${uniqueImportedNotes.length} note(s).`);
+        }
       }
     } catch (error) {
       console.error('Failed to import data:', error);

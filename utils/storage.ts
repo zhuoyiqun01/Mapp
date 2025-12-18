@@ -319,6 +319,130 @@ export async function analyzeStorageRedundancy(): Promise<{
   }
 }
 
+// 检查当前项目的重复（用于导入时）
+export async function checkProjectDuplicatesForImport(
+  importNotes: Note[],
+  projectId: string
+): Promise<Array<{
+  importIndex: number;
+  existingNoteId: string;
+  duplicateType: 'image' | 'sketch' | 'both';
+  existingNoteTitle?: string;
+}>> {
+  const duplicates: Array<{
+    importIndex: number;
+    existingNoteId: string;
+    duplicateType: 'image' | 'sketch' | 'both';
+    existingNoteTitle?: string;
+  }> = [];
+
+  try {
+    // 获取当前项目的所有便签（包含图片数据）
+    const project = await loadProject(projectId, true);
+    if (!project) return duplicates;
+
+    for (let i = 0; i < importNotes.length; i++) {
+      const importNote = importNotes[i];
+
+      // 检查图片重复
+      if (importNote.images?.length) {
+        for (const importImageId of importNote.images) {
+          // 获取导入图片的实际数据
+          const importImageData = await getImageDataForComparison(importImageId);
+
+          if (importImageData) {
+            for (const existingNote of project.notes) {
+              if (existingNote.images?.length) {
+                for (const existingImageId of existingNote.images) {
+                  const existingImageData = await getImageDataForComparison(existingImageId);
+
+                  if (existingImageData && await imagesAreIdentical(importImageData, existingImageData)) {
+                    duplicates.push({
+                      importIndex: i,
+                      existingNoteId: existingNote.id,
+                      duplicateType: 'image',
+                      existingNoteTitle: existingNote.title
+                    });
+                    break; // 找到一个重复就停止检查这个导入图片
+                  }
+                }
+              }
+              if (duplicates.some(d => d.importIndex === i)) break; // 如果已经记录了这个导入项的重复，跳到下一个
+            }
+          }
+        }
+      }
+
+      // 检查涂鸦重复
+      if (importNote.sketch) {
+        const importSketchData = await getImageDataForComparison(importNote.sketch);
+
+        if (importSketchData) {
+          for (const existingNote of project.notes) {
+            if (existingNote.sketch) {
+              const existingSketchData = await getImageDataForComparison(existingNote.sketch);
+
+              if (existingSketchData && await imagesAreIdentical(importSketchData, existingSketchData)) {
+                // 检查是否已经记录了这个导入项的图片重复
+                const existingDupIndex = duplicates.findIndex(d => d.importIndex === i);
+                if (existingDupIndex >= 0) {
+                  // 更新为both
+                  duplicates[existingDupIndex].duplicateType = 'both';
+                } else {
+                  duplicates.push({
+                    importIndex: i,
+                    existingNoteId: existingNote.id,
+                    duplicateType: 'sketch',
+                    existingNoteTitle: existingNote.title
+                  });
+                }
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+
+  } catch (error) {
+    console.warn('Failed to check project duplicates for import:', error);
+  }
+
+  return duplicates;
+}
+
+// 辅助函数：获取图片数据用于比较
+async function getImageDataForComparison(imageId: string): Promise<string | null> {
+  try {
+    // 如果是base64数据，直接返回
+    if (imageId.startsWith('data:image/')) {
+      return imageId;
+    }
+
+    // 如果是ID，从存储中获取
+    if (imageId.startsWith('img-')) {
+      return await get(`${IMAGE_PREFIX}${imageId}`);
+    }
+
+    return null;
+  } catch (error) {
+    console.warn(`Failed to get image data for ${imageId}:`, error);
+    return null;
+  }
+}
+
+// 辅助函数：比较两张图片是否相同
+async function imagesAreIdentical(data1: string, data2: string): Promise<boolean> {
+  try {
+    const hash1 = await calculateImageHash(data1);
+    const hash2 = await calculateImageHash(data2);
+    return hash1 === hash2;
+  } catch (error) {
+    console.warn('Failed to compare images:', error);
+    return false;
+  }
+}
+
 // 检查 IndexedDB 中存储的数据详情
 export async function checkStorageDetails(): Promise<{
   totalKeys: number;

@@ -6,6 +6,7 @@ import { MapView } from './components/MapView';
 import { BoardView } from './components/BoardView';
 import { TableView } from './components/TableView';
 import { ProjectManager } from './components/ProjectManager';
+import { ImportDuplicateDialog } from './components/ImportDuplicateDialog';
 import { Note, ViewMode, Project } from './types';
 import { get, set } from 'idb-keyval';
 import { MAP_STYLE_OPTIONS } from './constants';
@@ -37,6 +38,7 @@ import {
   cleanupDuplicateImages,
   attemptImageRecovery,
   loadNoteImages,
+  checkProjectDuplicatesForImport,
   ProjectSummary
 } from './utils/storage';
 
@@ -69,6 +71,22 @@ export default function App() {
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [isDeletingProject, setIsDeletingProject] = useState(false);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+
+  // Import duplicate resolution dialog
+  const [importDuplicateDialog, setImportDuplicateDialog] = useState<{
+    duplicates: Array<{
+      importIndex: number;
+      existingNoteId: string;
+      duplicateType: 'image' | 'sketch' | 'both';
+      existingNoteTitle?: string;
+    }>;
+    importNotes: Note[];
+    onResolve: (resolutions: Array<{
+      importIndex: number;
+      action: 'skip' | 'replace' | 'keep_both';
+    }>) => void;
+    onCancel: () => void;
+  } | null>(null);
   
   // Save map position to cache when switching away from map view
   const saveMapPositionBeforeSwitch = useCallback((mapInstance: any) => {
@@ -827,6 +845,120 @@ export default function App() {
     window.location.reload();
   };
 
+  // Handle import data with duplicate checking
+  const handleImportData = useCallback(async (importNotes: Note[]) => {
+    if (!currentProjectId) {
+      alert('No project selected');
+      return;
+    }
+
+    try {
+      // Check for duplicates with current project
+      const duplicates = await checkProjectDuplicatesForImport(importNotes, currentProjectId);
+
+      if (duplicates.length > 0) {
+        // Show duplicate resolution dialog
+        setImportDuplicateDialog({
+          duplicates,
+          importNotes,
+          onResolve: handleDuplicateResolution,
+          onCancel: () => setImportDuplicateDialog(null)
+        });
+      } else {
+        // No duplicates, import directly
+        await processImport(importNotes);
+      }
+    } catch (error) {
+      console.error('Failed to check import duplicates:', error);
+      alert('Failed to check for duplicates. Please try again.');
+    }
+  }, [currentProjectId]);
+
+  // Handle user's duplicate resolution choices
+  const handleDuplicateResolution = useCallback(async (resolutions: Array<{
+    importIndex: number;
+    action: 'skip' | 'replace' | 'keep_both';
+  }>) => {
+    if (!currentProjectId) return;
+
+    try {
+      const notesToImport: Note[] = [];
+      const notesToDelete: string[] = [];
+
+      // Process each resolution
+      resolutions.forEach(resolution => {
+        const importNote = importDuplicateDialog!.importNotes[resolution.importIndex];
+        const duplicate = importDuplicateDialog!.duplicates.find(d => d.importIndex === resolution.importIndex);
+
+        switch (resolution.action) {
+          case 'skip':
+            // Do nothing - skip this note
+            break;
+          case 'replace':
+            // Mark for deletion and import
+            if (duplicate) {
+              notesToDelete.push(duplicate.existingNoteId);
+            }
+            notesToImport.push(importNote);
+            break;
+          case 'keep_both':
+            // Import as new note
+            notesToImport.push(importNote);
+            break;
+        }
+      });
+
+      // Execute the import
+      await processImportWithDeletions(notesToImport, notesToDelete);
+
+      // Close dialog
+      setImportDuplicateDialog(null);
+
+      alert(`Import completed. ${notesToImport.length} notes imported, ${notesToDelete.length} notes replaced.`);
+
+    } catch (error) {
+      console.error('Failed to resolve duplicates:', error);
+      alert('Failed to complete import. Please try again.');
+    }
+  }, [currentProjectId, importDuplicateDialog]);
+
+  // Process import with optional deletions
+  const processImportWithDeletions = useCallback(async (importNotes: Note[], deleteNoteIds: string[] = []) => {
+    if (!currentProjectId) return;
+
+    const currentProject = projects.find(p => p.id === currentProjectId);
+    if (!currentProject) return;
+
+    // Delete specified notes
+    let updatedNotes = [...currentProject.notes];
+    deleteNoteIds.forEach(noteId => {
+      updatedNotes = updatedNotes.filter(note => note.id !== noteId);
+    });
+
+    // Generate new IDs and add timestamps for imported notes
+    const newNotes = importNotes.map((note: Note) => ({
+      ...note,
+      isFavorite: note.isFavorite ?? false,
+      id: `note-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      createdAt: Date.now() + Math.random()
+    }));
+
+    // Merge notes
+    const mergedNotes = [...updatedNotes, ...newNotes];
+
+    // Update project
+    const updatedProject = { ...currentProject, notes: mergedNotes };
+    setProjects(prev => prev.map(p => p.id === currentProjectId ? updatedProject : p));
+
+    // Save to storage
+    await saveProject(updatedProject);
+  }, [currentProjectId, projects]);
+
+  // Process regular import (no deletions)
+  const processImport = useCallback(async (importNotes: Note[]) => {
+    await processImportWithDeletions(importNotes, []);
+  }, [processImportWithDeletions]);
+
   if (isLoading) {
     return (
       <div className="w-full min-h-screen flex flex-col items-center justify-center text-white" style={{ backgroundColor: themeColor }}>
@@ -854,358 +986,249 @@ export default function App() {
     );
   }
 
-  return (
-    <div className="w-full h-screen flex flex-col bg-gray-50 overflow-hidden relative" style={{ touchAction: 'manipulation' }}>
-      {/* Loading Progress Overlay */}
-      {(isLoadingProject || isDeletingProject) && (
-        <div className="fixed inset-0 z-[10000] bg-black/50 flex items-center justify-center">
-          <div className="bg-white rounded-2xl p-8 shadow-2xl max-w-sm w-full mx-4">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-gray-800 mb-4">
-                {isDeletingProject ? '删除项目中...' : (currentProjectId ? '加载项目中...' : '检查数据中...')}
-              </div>
-              {isLoadingProject && (
-                <>
-                  <div className="w-full bg-gray-200 rounded-full h-4 mb-4">
-                    <div
-                      className="bg-blue-500 h-4 rounded-full transition-all duration-300"
-                      style={{ width: `${loadingProgress}%` }}
-                    ></div>
-                  </div>
-                  <div className="text-lg font-semibold text-gray-600">{loadingProgress}%</div>
-                  {!currentProjectId && (
-                    <div className="text-sm text-gray-500 mt-2">
-                      正在修复图片数据和清理损坏文件...
-                    </div>
-                  )}
-                </>
-              )}
-              {isDeletingProject && (
-                <div className="flex items-center justify-center space-x-2">
-                  <Loader2 size={24} className="animate-spin text-blue-500" />
-                  <div className="text-sm text-gray-500">
-                    正在删除项目文件...
-                  </div>
-                </div>
-              )}
-            </div>
+  // Store the main content
+  const mainContentElement = (
+    <div className="w-full min-h-screen bg-gray-50">
+      {/* Loading overlay */}
+      {isLoadingProject && (
+        <div className="fixed inset-0 z-[3000] bg-black/50 backdrop-blur-sm flex flex-col items-center justify-center text-white p-4">
+          <Loader2 size={48} className="animate-spin mb-4" />
+          <div className="font-bold text-xl mb-2">
+            {isDeletingProject ? "Deleting project..." : "Loading project..."}
           </div>
+          <div className="text-sm mb-4">
+            {isDeletingProject ? "Cleaning up files in the background..." : "Loading images and data..."}
+          </div>
+          <div className="w-48 h-2 bg-gray-700 rounded-full overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all duration-300 ease-out"
+              style={{ width: `${loadingProgress}%`, backgroundColor: themeColor }}
+            ></div>
+          </div>
+          <div className="mt-2 text-xs">{loadingProgress}%</div>
         </div>
       )}
-      
-      <AnimatePresence>
-      {isSidebarOpen && (
-          <div className="fixed inset-0 z-[2000] flex overflow-hidden">
-             <motion.div 
-               className="fixed inset-0 bg-black/20 backdrop-blur-sm" 
-               onClick={() => setIsSidebarOpen(false)}
-               initial={{ opacity: 0 }}
-               animate={{ opacity: 1 }}
-               exit={{ opacity: 0 }}
-               transition={{ duration: 0.2 }}
-               style={{ willChange: 'opacity' }}
-             />
-             <motion.div 
-               className="relative h-full w-[62%] z-[2001] overflow-hidden"
-               initial={{ x: '-100%' }}
-               animate={{ x: 0 }}
-               exit={{ x: '-100%' }}
-               transition={{ 
-                 type: "tween", 
-                 duration: 0.3, 
-                 ease: [0.4, 0, 0.2, 1]
-               }}
-               style={{ willChange: 'transform' }}
-             >
-              <ProjectManager
-                 isSidebar
-                 projects={summariesToProjects(projectSummaries)}
-                 currentProjectId={currentProjectId}
-                 onCreateProject={handleCreateProject}
-                 onSelectProject={handleSelectProject}
-                 onDeleteProject={handleDeleteProject}
-         onUpdateProject={handleUpdateProject}
-                 onCloseSidebar={() => setIsSidebarOpen(false)}
-                  onBackToHome={() => { setCurrentProjectId(null); }}
-                  viewMode={viewMode}
-                  activeProject={activeProject}
-                  onExportCSV={handleExportCSV}
-                  syncStatus={syncStatus}
-                  themeColor={themeColor}
-                  onThemeColorChange={handleThemeColorChange}
-                  currentMapStyle={mapStyle}
-                  onMapStyleChange={(styleId) => {
-                    setMapStyle(styleId);
-                    set('mapp-map-style', styleId);
-                  }}
-              />
-             </motion.div>
-        </div>
-      )}
-      </AnimatePresence>
 
-      <div className="flex-1 relative overflow-hidden z-0">
-        
-        {/* 同步状态指示器 - 只在侧边栏打开时显示（在侧边栏内） */}
-        {/* 主视图中不再显示云图标，统一在侧边栏显示 */}
-        
-        {!isEditorOpen && !isBoardEditMode && (
-          <button 
-             onClick={(e) => {
-               // 只有在没有拖动时才触发点击
-               if (!sidebarButtonDragRef.current.isDragging) {
-                 setIsSidebarOpen(true);
-               }
-             }}
-             onMouseDown={(e) => {
-               sidebarButtonDragRef.current = {
-                 isDragging: false,
-                 startY: e.clientY,
-                 startButtonY: sidebarButtonY
-               };
-             }}
-             onMouseMove={(e) => {
-               const dragState = sidebarButtonDragRef.current;
-               if (e.buttons === 1) { // 左键按下
-                 const deltaY = e.clientY - dragState.startY;
-                 if (Math.abs(deltaY) > 5) {
-                   dragState.isDragging = true;
-                   const newY = Math.max(0, Math.min(window.innerHeight - 50, dragState.startButtonY + deltaY));
-                   setSidebarButtonY(newY);
-                 }
-               }
-             }}
-             onMouseUp={() => {
-               // 延迟重置isDragging，确保onClick不会触发
-               setTimeout(() => {
-                 sidebarButtonDragRef.current.isDragging = false;
-               }, 10);
-             }}
-             onTouchStart={(e) => {
-               const touch = e.touches[0];
-               sidebarButtonDragRef.current = {
-                 isDragging: false,
-                 startY: touch.clientY,
-                 startButtonY: sidebarButtonY
-               };
-             }}
-             onTouchMove={(e) => {
-               const touch = e.touches[0];
-               const dragState = sidebarButtonDragRef.current;
-               const deltaY = touch.clientY - dragState.startY;
-               if (Math.abs(deltaY) > 5) {
-                 dragState.isDragging = true;
-                 const newY = Math.max(0, Math.min(window.innerHeight - 50, dragState.startButtonY + deltaY));
-                 setSidebarButtonY(newY);
-               }
-             }}
-             onTouchEnd={() => {
-               setTimeout(() => {
-                 sidebarButtonDragRef.current.isDragging = false;
-               }, 10);
-             }}
-            className="absolute left-0 z-[900] pl-3 pr-4 rounded-r-xl shadow-lg text-white transition-none cursor-move"
-             style={{ 
-               backgroundColor: themeColor,
-               top: `${sidebarButtonY}px`, 
-               paddingTop: '12.8px', 
-               paddingBottom: '12.8px' 
-             }}
-             onMouseEnter={(e) => {
-               const darkR = Math.max(0, Math.floor(parseInt(themeColor.slice(1, 3), 16) * 0.9));
-               const darkG = Math.max(0, Math.floor(parseInt(themeColor.slice(3, 5), 16) * 0.9));
-               const darkB = Math.max(0, Math.floor(parseInt(themeColor.slice(5, 7), 16) * 0.9));
-               const darkHex = '#' + [darkR, darkG, darkB].map(x => {
-                 const hex = x.toString(16);
-                 return hex.length === 1 ? '0' + hex : hex;
-               }).join('').toUpperCase();
-               e.currentTarget.style.backgroundColor = darkHex;
-             }}
-             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
-          >
-             <Menu size={18} />
-          </button>
-        )}
-
-        {viewMode === 'map' ? (
-          <MapView 
-            project={activeProject}
-            onAddNote={addNote}
-            onUpdateNote={updateNote}
-            onDeleteNote={deleteNote}
-            onToggleEditor={setIsEditorOpen}
-            onImportDialogChange={setIsImportDialogOpen}
-            onUpdateProject={(project) => {
-              if (!currentProjectId) return;
-              setProjects(prev => prev.map(p => 
-                p.id === currentProjectId ? project : p
-              ));
-            }}
-            fileInputRef={mapViewFileInputRef}
-            navigateToCoords={navigateToMapCoords}
-            projectId={currentProjectId || ''}
-            onNavigateComplete={() => {
-              setNavigateToMapCoords(null);
-            }}
-            onPositionChange={handleMapPositionChange}
-            onSwitchToBoardView={(coords) => {
-              // Close editor first to ensure UI state is correct
-              setIsEditorOpen(false);
-              // Use requestAnimationFrame to ensure state updates are batched
-              requestAnimationFrame(() => {
-                if (coords) {
-                  setNavigateToBoardCoords(coords);
-                }
-                setViewMode('board');
-              });
-            }}
-            themeColor={themeColor}
-            mapStyleId={mapStyle}
-          />
-        ) : viewMode === 'board' ? (
-          <BoardView 
-            notes={activeProject.notes}
-            onAddNote={addNote}
-            onUpdateNote={updateNote}
-            onDeleteNote={deleteNote}
-            onToggleEditor={setIsEditorOpen}
-            onEditModeChange={setIsBoardEditMode}
-            connections={activeProject.connections || []}
-            onUpdateConnections={(connections) => {
-              if (!currentProjectId) return;
-              setProjects(prev => prev.map(p => {
-                if (p.id === currentProjectId) {
-                  return { ...p, connections };
-                }
-                return p;
-              }));
-            }}
-            frames={activeProject.frames || []}
-            onUpdateFrames={(frames) => {
-              if (!currentProjectId) return;
-              setProjects(prev => prev.map(p => {
-                if (p.id === currentProjectId) {
-                  return { ...p, frames };
-                }
-                return p;
-              }));
-            }}
-            project={activeProject}
-            onUpdateProject={(projectUpdate) => {
-              if (!currentProjectId) return;
-              setProjects(prev => prev.map(p => 
-                p.id === currentProjectId ? { ...p, ...projectUpdate } : p
-              ));
-            }}
-            navigateToCoords={navigateToBoardCoords}
-            projectId={currentProjectId || ''}
-            onNavigateComplete={() => {
-              setNavigateToBoardCoords(null);
-            }}
-            onTransformChange={handleBoardTransformChange}
-            onSwitchToMapView={(coords?: { lat: number; lng: number }) => {
-              // Close editor first to ensure UI state is correct
-              setIsEditorOpen(false);
-              // Switch view first, then set navigation coordinates after a short delay
-              // This ensures MapView is mounted and ready to receive navigation
-              setViewMode('map');
-              // Set navigation coordinates after MapView has mounted
-              if (coords) {
-                setTimeout(() => {
-                  setNavigateToMapCoords(coords);
-                }, 100);
-              }
-              // Trigger MapView's file input after a short delay
-              setTimeout(() => {
-                mapViewFileInputRef.current?.click();
-              }, 300);
-            }}
-            onSwitchToBoardView={(coords?: { x: number; y: number }) => {
-              if (coords) {
-                setNavigateToBoardCoords(coords);
-              }
-              setViewMode('board');
-            }}
-            mapViewFileInputRef={mapViewFileInputRef}
-            themeColor={themeColor}
-          />
-        ) : (
-          <TableView 
-            project={activeProject}
-            onUpdateNote={updateNote}
-            onUpdateFrames={(frames) => {
-              if (!currentProjectId) return;
-              setProjects(prev => prev.map(p => {
-                if (p.id === currentProjectId) {
-                  return { ...p, frames };
-                }
-                return p;
-              }));
-            }}
-            onSwitchToBoardView={(coords?: { x: number; y: number }) => {
-              if (coords) {
-                setNavigateToBoardCoords(coords);
-              }
-              setViewMode('board');
-            }}
-          />
-        )}
+      {/* Sidebar */}
+      <div className={`fixed left-0 top-0 h-full z-40 transition-transform duration-300 ${
+        isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+      }`}>
+        <ProjectManager
+          projects={projectSummaries}
+          onSelectProject={handleSelectProject}
+          onCreateProject={handleCreateProject}
+          onDeleteProject={handleDeleteProject}
+          onCheckData={handleCheckData}
+          isDeletingProject={isDeletingProject}
+          themeColor={themeColor}
+        />
       </div>
 
-      {!isEditorOpen && !isBoardEditMode && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-white/90 backdrop-blur-md p-1.5 rounded-2xl shadow-xl border border-white/50 flex gap-1 animate-in slide-in-from-bottom-4 fade-in">
-          <button
-            onClick={() => !isImportDialogOpen && setViewMode('map')}
-            disabled={isImportDialogOpen}
-            className={`
-              flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
-              ${viewMode === 'map' 
-                ? 'text-white shadow-md scale-105' 
-                : 'hover:bg-gray-100 text-gray-500'}
-              ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
-            `}
-            style={viewMode === 'map' ? { backgroundColor: themeColor } : undefined}
-          >
-            <MapIcon size={20} />
-            Mapping
-          </button>
-          <button
-            onClick={() => {
-              if (!isImportDialogOpen) {
-                setViewMode('board');
-              }
-            }}
-            disabled={isImportDialogOpen}
-            className={`
-              flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
-              ${viewMode === 'board' 
-                ? 'text-white shadow-md scale-105' 
-                : 'hover:bg-gray-100 text-gray-500'}
-              ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
-            `}
-            style={viewMode === 'board' ? { backgroundColor: themeColor } : undefined}
-          >
-            <Grid size={20} />
-            Board
-          </button>
-          <button
-            onClick={() => !isImportDialogOpen && setViewMode('table')}
-            disabled={isImportDialogOpen}
-            className={`
-              flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
-              ${viewMode === 'table' 
-                ? 'text-white shadow-md scale-105' 
-                : 'hover:bg-gray-100 text-gray-500'}
-              ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
-            `}
-            style={viewMode === 'table' ? { backgroundColor: themeColor } : undefined}
-          >
-            <Table2 size={20} />
-            Table
-          </button>
-        </div>
-      )}
+      {/* Main content */}
+      <div className={`transition-all duration-300 ${isSidebarOpen ? 'ml-80' : 'ml-0'}`}>
+        {/* Header */}
+        <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              <Menu size={20} className="text-gray-600" />
+            </button>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: themeColor }}></div>
+              <h1 className="text-xl font-bold text-gray-800">
+                {activeProject?.name || 'No Project Selected'}
+              </h1>
+            </div>
+          </div>
 
+          {/* View mode toggles - only show when project is loaded */}
+          {activeProject && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => !isImportDialogOpen && setViewMode('map')}
+                disabled={isImportDialogOpen}
+                className={`
+                  flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
+                  ${viewMode === 'map'
+                    ? 'text-white shadow-md scale-105'
+                    : 'hover:bg-gray-100 text-gray-500'}
+                  ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
+                `}
+                style={viewMode === 'map' ? { backgroundColor: themeColor } : undefined}
+              >
+                <MapIcon size={20} />
+                Mapping
+              </button>
+              <button
+                onClick={() => {
+                  if (!isImportDialogOpen) {
+                    setViewMode('board');
+                  }
+                }}
+                disabled={isImportDialogOpen}
+                className={`
+                  flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
+                  ${viewMode === 'board'
+                    ? 'text-white shadow-md scale-105'
+                    : 'hover:bg-gray-100 text-gray-500'}
+                  ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
+                `}
+                style={viewMode === 'board' ? { backgroundColor: themeColor } : undefined}
+              >
+                <Grid size={20} />
+                Board
+              </button>
+              <button
+                onClick={() => !isImportDialogOpen && setViewMode('table')}
+                disabled={isImportDialogOpen}
+                className={`
+                  flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
+                  ${viewMode === 'table'
+                    ? 'text-white shadow-md scale-105'
+                    : 'hover:bg-gray-100 text-gray-500'}
+                  ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
+                `}
+                style={viewMode === 'table' ? { backgroundColor: themeColor } : undefined}
+              >
+                <Table2 size={20} />
+                Table
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Content area */}
+        {activeProject ? (
+          viewMode === 'map' ? (
+            <MapView
+              project={activeProject}
+              onAddNote={addNote}
+              onUpdateNote={updateNote}
+              onDeleteNote={deleteNote}
+              onToggleEditor={setIsEditorOpen}
+              onImportDialogChange={setIsImportDialogOpen}
+              onUpdateProject={(project) => {
+                if (!currentProjectId) return;
+                setProjects(prev => prev.map(p =>
+                  p.id === currentProjectId ? project : p
+                ));
+              }}
+              onImportData={handleImportData}
+              fileInputRef={mapViewFileInputRef}
+              navigateToCoords={navigateToMapCoords}
+              projectId={currentProjectId || ''}
+              onNavigateComplete={() => {
+                setNavigateToMapCoords(null);
+              }}
+              onPositionChange={handleMapPositionChange}
+              onSwitchToBoardView={(coords) => {
+                // Close editor first to ensure UI state is correct
+                setIsEditorOpen(false);
+                // Use requestAnimationFrame to ensure state updates are batched
+                requestAnimationFrame(() => {
+                  if (coords) {
+                    setNavigateToBoardCoords(coords);
+                  }
+                  setViewMode('board');
+                });
+              }}
+              themeColor={themeColor}
+              mapStyleId={mapStyle}
+            />
+          ) : viewMode === 'board' ? (
+            <BoardView
+              notes={activeProject.notes}
+              onAddNote={addNote}
+              onUpdateNote={updateNote}
+              onDeleteNote={deleteNote}
+              onEditModeChange={setIsBoardEditMode}
+              connections={activeProject.connections || []}
+              onUpdateConnections={(connections) => {
+                if (!currentProjectId) return;
+                const updatedProject = { ...activeProject, connections };
+                setProjects(prev => prev.map(p =>
+                  p.id === currentProjectId ? updatedProject : p
+                ));
+                saveProject(updatedProject);
+              }}
+              frames={activeProject.frames || []}
+              onUpdateFrames={(frames) => {
+                if (!currentProjectId) return;
+                const updatedProject = { ...activeProject, frames };
+                setProjects(prev => prev.map(p =>
+                  p.id === currentProjectId ? updatedProject : p
+                ));
+                saveProject(updatedProject);
+              }}
+              project={activeProject}
+              onUpdateProject={(project) => {
+                if (!currentProjectId) return;
+                setProjects(prev => prev.map(p =>
+                  p.id === currentProjectId ? project : p
+                ));
+              }}
+              onSwitchToMapView={(coords) => {
+                setIsEditorOpen(false);
+                requestAnimationFrame(() => {
+                  if (coords) {
+                    setNavigateToMapCoords(coords);
+                  }
+                  setViewMode('map');
+                });
+              }}
+              onSwitchToBoardView={() => setViewMode('board')}
+              navigateToCoords={navigateToBoardCoords}
+              projectId={currentProjectId || ''}
+              onNavigateComplete={() => {
+                setNavigateToBoardCoords(null);
+              }}
+              onTransformChange={handleBoardTransformChange}
+              mapViewFileInputRef={mapViewFileInputRef}
+              themeColor={themeColor}
+            />
+          ) : (
+            <TableView
+              notes={activeProject.notes}
+              onUpdateNote={updateNote}
+              onDeleteNote={deleteNote}
+              project={activeProject}
+              onUpdateProject={(project) => {
+                if (!currentProjectId) return;
+                setProjects(prev => prev.map(p =>
+                  p.id === currentProjectId ? project : p
+                ));
+              }}
+              themeColor={themeColor}
+            />
+          )
+        ) : (
+          <div className="flex items-center justify-center h-full min-h-[calc(100vh-80px)]">
+            <div className="text-center">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center" style={{ backgroundColor: `${themeColor}20` }}>
+                <MapIcon size={32} style={{ color: themeColor }} />
+              </div>
+              <h2 className="text-xl font-bold text-gray-700 mb-2">Select a Project</h2>
+              <p className="text-gray-500">Choose a project from the sidebar to start mapping</p>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
+  );
+
+  return (
+    <>
+      {mainContentElement}
+      {importDuplicateDialog && (
+        <ImportDuplicateDialog
+          duplicates={importDuplicateDialog.duplicates}
+          importNotes={importDuplicateDialog.importNotes}
+          onResolve={importDuplicateDialog.onResolve}
+          onCancel={importDuplicateDialog.onCancel}
+        />
+      )}
+    </>
   );
 }
