@@ -4868,7 +4868,7 @@ const createNoteAtCenter = (variant: 'compact') => {
               exit={{ opacity: 0 }}
               className="fixed bottom-24 left-4 z-[500] pointer-events-auto"
           >
-            <ZoomSlider value={transform.scale} min={0.2} max={3.0} onChange={(val) => zoomAtViewCenter(val)} />
+            <ZoomSlider value={transform.scale} min={0.2} max={3.0} onChange={(val) => zoomAtViewCenter(val)} themeColor={themeColor} />
         </motion.div>
 
         <div className="fixed top-4 right-4 z-[500] flex gap-3 pointer-events-auto items-center" style={{ height: '40px' }} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>

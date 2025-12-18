@@ -1257,7 +1257,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
     );
 }
 
-const MapZoomController = ({min, max}: {min: number, max: number}) => {
+const MapZoomController = ({min, max, themeColor}: {min: number, max: number, themeColor: string}) => {
     const map = useMap();
     const [zoom, setZoom] = useState(map.getZoom());
     useMapEvents({
@@ -1267,7 +1267,7 @@ const MapZoomController = ({min, max}: {min: number, max: number}) => {
     return (
       <ZoomSlider value={zoom} min={min} max={max} onChange={(val) => {
         map.setZoom(val);
-      }} />
+      }} themeColor={themeColor} />
     );
 };
 
@@ -3488,9 +3488,10 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         )}
 
         <div className="fixed bottom-20 sm:bottom-24 left-2 sm:left-4 z-[500]">
-           <MapZoomController 
-             min={isMapMode ? 13 : minImageZoom} 
-             max={isMapMode ? 19 : 4} 
+           <MapZoomController
+             min={isMapMode ? 13 : minImageZoom}
+             max={isMapMode ? 19 : 4}
+             themeColor={themeColor}
            />
         </div>
 

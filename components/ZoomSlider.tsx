@@ -1,6 +1,6 @@
 
 import React, { useRef, useEffect, useState } from 'react';
-import { THEME_COLOR } from '../constants';
+import { DEFAULT_THEME_COLOR } from '../constants';
 
 interface ZoomSliderProps {
   value: number;
@@ -8,9 +8,10 @@ interface ZoomSliderProps {
   max: number;
   onChange: (val: number) => void;
   onDragChange?: (isDragging: boolean) => void;
+  themeColor?: string;
 }
 
-export const ZoomSlider: React.FC<ZoomSliderProps> = ({ value, min, max, onChange, onDragChange }) => {
+export const ZoomSlider: React.FC<ZoomSliderProps> = ({ value, min, max, onChange, onDragChange, themeColor = DEFAULT_THEME_COLOR }) => {
   const trackRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -81,15 +82,15 @@ export const ZoomSlider: React.FC<ZoomSliderProps> = ({ value, min, max, onChang
             <div className="absolute top-0 bottom-0 w-1 bg-gray-200 rounded-full pointer-events-none" />
 
             {/* Filled Track */}
-            <div 
+            <div
                 className="absolute bottom-0 w-1 rounded-full pointer-events-none transition-all duration-75"
-                style={{ backgroundColor: THEME_COLOR, height: `${percentage}%` }}
+                style={{ backgroundColor: themeColor, height: `${percentage}%` }}
             />
 
             {/* Circular Thumb */}
-            <div 
+            <div
                 className="absolute w-5 h-5 bg-white border-2 rounded-full shadow-md pointer-events-none transition-all duration-75"
-                style={{ borderColor: THEME_COLOR, bottom: `calc(${percentage}% - 10px)` }}
+                style={{ borderColor: themeColor, bottom: `calc(${percentage}% - 10px)` }}
             />
         </div>
     </div>
