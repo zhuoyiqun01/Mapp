@@ -10,11 +10,30 @@ interface MapZoomControllerProps {
 
 export const MapZoomController: React.FC<MapZoomControllerProps> = ({ min, max, themeColor }) => {
   const map = useMap();
-  const [zoom, setZoom] = useState(map.getZoom());
+  const [zoom, setZoom] = useState(() => {
+    try {
+      return map.getZoom();
+    } catch (error) {
+      console.warn('MapZoomController: Failed to get initial zoom:', error);
+      return 16; // Default zoom level
+    }
+  });
 
   useMapEvents({
-    zoomend: () => setZoom(map.getZoom()),
-    zoom: () => setZoom(map.getZoom()) // Also listen to zoom event for smoother updates
+    zoomend: () => {
+      try {
+        setZoom(map.getZoom());
+      } catch (error) {
+        console.warn('MapZoomController: Failed to get zoom on zoomend:', error);
+      }
+    },
+    zoom: () => {
+      try {
+        setZoom(map.getZoom());
+      } catch (error) {
+        console.warn('MapZoomController: Failed to get zoom on zoom:', error);
+      }
+    }
   });
 
   return (
@@ -23,9 +42,14 @@ export const MapZoomController: React.FC<MapZoomControllerProps> = ({ min, max, 
       min={min}
       max={max}
       onChange={(val) => {
-        map.setZoom(val);
+        try {
+          map.setZoom(val);
+        } catch (error) {
+          console.warn('MapZoomController: Failed to set zoom:', error);
+        }
       }}
       themeColor={themeColor}
     />
   );
 };
+

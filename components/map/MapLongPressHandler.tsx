@@ -135,9 +135,13 @@ export const MapLongPressHandler: React.FC<MapLongPressHandlerProps> = ({ onLong
         const rect = container.getBoundingClientRect();
         const relativeX = clientX - rect.left;
         const relativeY = clientY - rect.top;
-        const latlng = map.containerPointToLatLng([relativeX, relativeY]);
-        if (navigator.vibrate) navigator.vibrate(50);
-        onLongPress(latlng);
+        try {
+          const latlng = map.containerPointToLatLng([relativeX, relativeY]);
+          if (navigator.vibrate) navigator.vibrate(50);
+          onLongPress(latlng);
+        } catch (error) {
+          console.warn('MapLongPressHandler: Failed to handle long press:', error);
+        }
         startPosRef.current = null;
         timerRef.current = null;
       }, 600);

@@ -10,3 +10,4 @@ export const LONG_PRESS_DURATION = 1500; // 长按触发时间（毫秒）
 export const VIBRATION_SHORT = 10; // 短振动时间（毫秒）
 export const VIBRATION_MEDIUM = 15; // 中等振动时间（毫秒）
 export const VIBRATION_LONG = 20; // 长振动时间（毫秒）
+

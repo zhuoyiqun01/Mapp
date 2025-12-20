@@ -11,19 +11,28 @@ export const MapNavigationHandler: React.FC<MapNavigationHandlerProps> = ({ coor
 
   useEffect(() => {
     if (coords && map) {
-      map.setView([coords.lat, coords.lng], 19, {
-        animate: true,
-        duration: 1
-      });
+      try {
+        map.setView([coords.lat, coords.lng], 19, {
+          animate: true,
+          duration: 1
+        });
 
-      // Call onComplete after animation
-      const timeoutId = setTimeout(() => {
-        onComplete?.();
-      }, 1000);
+        // Call onComplete after animation
+        const timeoutId = setTimeout(() => {
+          try {
+            onComplete?.();
+          } catch (error) {
+            console.warn('MapNavigationHandler: Failed to call onComplete:', error);
+          }
+        }, 1000);
 
-      return () => clearTimeout(timeoutId);
+        return () => clearTimeout(timeoutId);
+      } catch (error) {
+        console.warn('MapNavigationHandler: Failed to set view:', error);
+      }
     }
   }, [coords, map, onComplete]);
 
   return null;
 };
+

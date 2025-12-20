@@ -18,9 +18,15 @@ export const MapPositionTracker: React.FC<MapPositionTrackerProps> = ({ onPositi
         clearTimeout(timeoutRef.current);
       }
       timeoutRef.current = setTimeout(() => {
-        const center = map.getCenter();
-        const zoom = map.getZoom();
-        onPositionChange([center.lat, center.lng], zoom);
+        try {
+          if (map) {
+            const center = map.getCenter();
+            const zoom = map.getZoom();
+            onPositionChange([center.lat, center.lng], zoom);
+          }
+        } catch (error) {
+          console.warn('MapPositionTracker: Failed to get map position:', error);
+        }
       }, 2000); // 2 second delay
     };
 
@@ -38,3 +44,4 @@ export const MapPositionTracker: React.FC<MapPositionTrackerProps> = ({ onPositi
 
   return null;
 };
+
