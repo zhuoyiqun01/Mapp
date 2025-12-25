@@ -888,35 +888,6 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
 }
 
 
-// Ensure map is properly centered after initialization (only once)
-const MapCenterHandler = ({ center, zoom }: { center: [number, number], zoom: number }) => {
-    const map = useMap();
-    const hasCenteredRef = useRef(false);
-    
-    useEffect(() => {
-        // 只在首次初始化时执行一次
-        if (hasCenteredRef.current || !map) return;
-        
-        // 等待地图完全初始化后再设置视图
-        map.whenReady(() => {
-            if (hasCenteredRef.current) return;
-            
-            // 使用 invalidateSize 确保地图尺寸正确
-            map.invalidateSize();
-            // 使用 setTimeout 确保在下一个事件循环中执行，此时容器尺寸应该已经正确
-            setTimeout(() => {
-                if (!hasCenteredRef.current) {
-                    map.invalidateSize();
-                    // 重新设置视图以确保居中（仅首次）
-                    map.setView(center, zoom, { animate: false });
-                    hasCenteredRef.current = true;
-                }
-            }, 0);
-        });
-    }, []); // 空依赖数组，只在组件挂载时执行一次
-    
-    return null;
-};
 
 // Component to track map position changes and notify parent
 const MapPositionTracker = ({ onPositionChange }: { onPositionChange?: (center: [number, number], zoom: number) => void }) => {
