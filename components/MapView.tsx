@@ -3116,16 +3116,18 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         )}
 
         </div>
-
-        <div className="fixed bottom-20 sm:bottom-24 left-2 sm:left-4 z-[500]">
-           <MapZoomController
-             min={isMapMode ? 13 : minImageZoom}
-             max={isMapMode ? 19 : 4}
-             themeColor={themeColor}
-           />
-        </div>
         )}
     </MapContainer>
+
+    {isMapMode && (
+      <div className="fixed bottom-20 sm:bottom-24 left-2 sm:left-4 z-[500]">
+         <MapZoomController
+           min={13}
+           max={19}
+           themeColor={themeColor}
+         />
+      </div>
+    )}
 
     {isEditorOpen && (
         <NoteEditor 
