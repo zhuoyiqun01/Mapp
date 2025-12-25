@@ -1275,7 +1275,7 @@ export default function App() {
             themeColor={themeColor}
           />
         ) : (
-          <TableView 
+          <TableView
             project={activeProject}
             onUpdateNote={updateNote}
             onUpdateFrames={(frames) => {
@@ -1293,6 +1293,7 @@ export default function App() {
               }
               setViewMode('board');
             }}
+            themeColor={themeColor}
           />
         )}
       </div>

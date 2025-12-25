@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Note, Project, Frame } from '../types';
 import { GripVertical, Edit2, Check, Plus, X, ExternalLink } from 'lucide-react';
-import { TAG_COLORS, THEME_COLOR } from '../constants';
+import { TAG_COLORS } from '../constants';
 import { generateId } from '../utils';
 import { NoteEditor } from './NoteEditor';
 
@@ -10,9 +10,10 @@ interface TableViewProps {
   onUpdateNote: (note: Note) => void;
   onUpdateFrames?: (frames: Frame[]) => void;
   onSwitchToBoardView?: (coords?: { x: number; y: number }) => void;
+  themeColor: string;
 }
 
-export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onUpdateFrames, onSwitchToBoardView }) => {
+export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onUpdateFrames, onSwitchToBoardView, themeColor }) => {
   const [tableLevel, setTableLevel] = useState<'Primary' | 'Secondary'>('Primary');
   const [draggedNoteId, setDraggedNoteId] = useState<string | null>(null);
   const [draggedOverGroup, setDraggedOverGroup] = useState<string | null>(null);
@@ -262,7 +263,7 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
         </div>
 
         {/* Table level toggle */}
-        <div className="flex gap-1 bg-gray-200 rounded-lg p-0.5">
+        <div className="flex gap-1 rounded-lg p-0.5">
           <button
             onClick={() => setTableLevel('Primary')}
             className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
@@ -270,7 +271,7 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
                 ? 'text-white shadow-sm'
                 : 'text-gray-600 hover:text-gray-900'
             }`}
-            style={tableLevel === 'Primary' ? { backgroundColor: THEME_COLOR } : undefined}
+            style={tableLevel === 'Primary' ? { backgroundColor: themeColor } : undefined}
           >
             Primary ({standardNotes.length})
           </button>
@@ -281,7 +282,7 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
                 ? 'text-white shadow-sm'
                 : 'text-gray-600 hover:text-gray-900'
             }`}
-            style={tableLevel === 'Secondary' ? { backgroundColor: THEME_COLOR } : undefined}
+            style={tableLevel === 'Secondary' ? { backgroundColor: themeColor } : undefined}
           >
             Secondary ({compactNotes.length})
           </button>
