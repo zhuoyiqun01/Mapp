@@ -25,10 +25,12 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
         .map(note => {
           // Calculate text width (approximate)
           const text = note.text?.trim() || '';
-          const fontSize = Math.max(10, pinSize / 3);
+          const isFavorite = note.isFavorite === true;
+          const scale = isFavorite ? 2 : 1; // Scale favorite labels like pins
+          const fontSize = Math.max(10, pinSize / 3) * scale;
           const approxCharWidth = fontSize * 0.6; // Approximate character width
-          const padding = 12; // 6px * 2 for horizontal padding
-          const textWidth = Math.min(text.length * approxCharWidth + padding, 120);
+          const padding = 12 * scale; // Scale padding with favorite status
+          const textWidth = Math.min(text.length * approxCharWidth + padding, 120 * scale);
 
           const icon = new DivIcon({
             html: `
@@ -64,6 +66,7 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
               position={[note.coords.lat, note.coords.lng]}
               icon={icon}
               interactive={false}
+              zIndexOffset={isFavorite ? 200 : 0} // Favorite labels on top
             />
           );
         })}

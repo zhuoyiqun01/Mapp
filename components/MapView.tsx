@@ -2071,8 +2071,9 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           " />
         </div>`;
       } else if (note.emoji) {
-        // Show emoji, background is yellow
-        content = `<span style="transform: rotate(45deg); font-size: 20px; line-height: 1; z-index: 1; position: relative;">${note.emoji}</span>`;
+        // Show emoji, background is yellow, scale with pin size and favorite status
+        const emojiSize = 20 * scale; // Scale emoji with pin size
+        content = `<span style="transform: rotate(45deg); font-size: ${emojiSize}px; line-height: 1; z-index: 1; position: relative;">${note.emoji}</span>`;
       }
       
       return L.divIcon({
@@ -2620,7 +2621,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               key={note.id}
               position={[note.coords.lat, note.coords.lng]}
               icon={createCustomIcon(note, undefined, showTextLabels, pinSize)}
-              zIndexOffset={-100}
+              zIndexOffset={note.isFavorite ? 100 : -100}
               eventHandlers={{
                 click: (e) => {
                   e.originalEvent?.stopPropagation();
@@ -2637,11 +2638,11 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               // Single marker, display directly
               const note = cluster.notes[0];
               return (
-          <Marker 
-            key={note.id} 
+          <Marker
+            key={note.id}
             position={[note.coords.lat, note.coords.lng]}
                   icon={createCustomIcon(note, undefined, showTextLabels, pinSize)}
-                  zIndexOffset={-100}
+                  zIndexOffset={note.isFavorite ? 100 : -100}
                   eventHandlers={{ 
                     click: (e) => {
                       e.originalEvent?.stopPropagation();
@@ -2654,11 +2655,11 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             } else {
               // Multiple markers, show cluster
               return (
-                <Marker 
+                <Marker
                   key={`cluster-${index}`}
                   position={cluster.position}
                   icon={createCustomIcon(cluster.notes[0], cluster.notes.length, showTextLabels, pinSize)}
-                  zIndexOffset={-100}
+                  zIndexOffset={cluster.notes.some(note => note.isFavorite) ? 100 : -100}
                   eventHandlers={{ 
                     click: (e) => {
                       e.originalEvent?.stopPropagation();
@@ -2673,11 +2674,11 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         ) : (
           // Show single markers (non-map mode or when no clustering)
           getFilteredNotes.map(note => (
-            <Marker 
-              key={note.id} 
+            <Marker
+              key={note.id}
               position={[note.coords.lat, note.coords.lng]}
               icon={createCustomIcon(note, undefined, showTextLabels, pinSize)}
-              zIndexOffset={-100}
+              zIndexOffset={note.isFavorite ? 100 : -100}
               eventHandlers={{ 
                 click: (e) => {
                   e.originalEvent?.stopPropagation();
