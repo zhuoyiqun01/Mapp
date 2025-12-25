@@ -771,7 +771,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
             </div>
 
             {/* Frame Layer Button */}
-            {true && ( // 临时强制显示用于调试
+            {frames.length > 0 && (
 
                 <div className="relative" ref={frameLayerRef}>
                     <button
@@ -818,6 +818,37 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                         >
                             <div className="px-3 py-2 text-xs font-bold text-gray-500 uppercase tracking-wide">Frame Layers</div>
                             <div className="h-px bg-gray-100 mb-1" />
+                            {/* Default Layer - for notes without frames */}
+                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-3 h-3 rounded border border-gray-300 flex items-center justify-center text-xs text-gray-400">
+                                        •
+                                    </div>
+                                    <span className="text-sm text-gray-700">Default</span>
+                                </div>
+                                <input
+                                    type="checkbox"
+                                    checked={frameLayerVisibility['default'] ?? true}
+                                    onChange={(e) => {
+                                        e.stopPropagation();
+                                        setFrameLayerVisibility(prev => ({
+                                            ...prev,
+                                            'default': !prev['default']
+                                        }));
+                                    }}
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
+                                        frameLayerVisibility['default'] ?? true
+                                            ? ''
+                                            : 'bg-transparent'
+                                    }`}
+                                    style={{
+                                        backgroundColor: (frameLayerVisibility['default'] ?? true) ? themeColor : 'transparent',
+                                        borderColor: themeColor
+                                    }}
+                                />
+                            </div>
                             {frames.map((frame) => (
                                 <div key={frame.id} className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
                                     <div className="flex items-center gap-2">
@@ -941,9 +972,9 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     }
 
     return notes.filter(note => {
-      // If note has no frame associations, show it
+      // If note has no frame associations, check default layer visibility
       if (!note.groupIds || note.groupIds.length === 0) {
-        return true;
+        return frameLayerVisibility['default'] !== false; // Default to true if not set
       }
 
       // Show note if any of its associated frames are visible
@@ -2810,7 +2841,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         ))}
 
         {isMapMode && (
-          <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none items-start">
+          <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none items-end">
               {/* First Row: Main Controls */}
               <MapControls
                 onImportPhotos={() => fileInputRef.current?.click()}
