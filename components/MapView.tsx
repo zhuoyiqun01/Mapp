@@ -867,29 +867,18 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
     // If show all is enabled, show all notes
     if (showAllFrames) {
-      console.log('Frame filtering: Show All enabled, showing all notes');
       return notes;
     }
 
-    const filtered = notes.filter(note => {
+    return notes.filter(note => {
       // If note has no frame associations, hide it when Show All is disabled
       if (!note.groupIds || note.groupIds.length === 0) {
         return false; // Hide notes without frame associations when filtering is active
       }
 
       // Show note if any of its associated frames are visible (OR logic)
-      const shouldShow = note.groupIds.some(frameId => frameLayerVisibility[frameId] !== false);
-      return shouldShow;
+      return note.groupIds.some(frameId => frameLayerVisibility[frameId] !== false);
     });
-
-    console.log('Frame filtering:', {
-      showAllFrames,
-      totalNotes: notes.length,
-      filteredNotes: filtered.length,
-      frameVisibility: frameLayerVisibility
-    });
-
-    return filtered;
   }, [notes, project.frames, frameLayerVisibility, showAllFrames]);
   
   // Image import related state
@@ -2269,7 +2258,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           }
           
           // Calculate clusters with current threshold
-          const clusters = detectClusters(mapNotes, currentMap, clusterThreshold);
+          const clusters = detectClusters(getFilteredNotes, currentMap, clusterThreshold);
           setClusteredMarkers(clusters);
         } catch (e) {
           console.warn('Failed to update clusters:', e);
@@ -2349,7 +2338,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         mapInstance.off('moveend', handleMoveEnd);
       }
     };
-  }, [mapInstance, mapNotes, isMapMode, clusterThreshold, detectClusters]);
+  }, [mapInstance, getFilteredNotes, isMapMode, clusterThreshold, detectClusters]);
 
   // Drag and drop handlers
   const handleDragEnter = (e: React.DragEvent) => {
@@ -2623,8 +2612,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         )}
         
         {isMapMode && (
-          <TextLabelsLayer 
-            notes={mapNotes}
+          <TextLabelsLayer
+            notes={getFilteredNotes}
             showTextLabels={showTextLabels}
             pinSize={pinSize}
             themeColor={themeColor}
