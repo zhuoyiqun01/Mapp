@@ -3114,9 +3114,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
              </div>
           </div>
         )}
-
-        </div>
-        )}
     </MapContainer>
 
     {isMapMode && (
