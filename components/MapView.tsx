@@ -2995,11 +2995,35 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           </div>
         )}
         {isMapMode && (
-          <MapZoomController
-            min={13}
-            max={19}
-            themeColor={themeColor}
-          />
+          <div className="fixed bottom-20 sm:bottom-24 left-2 sm:left-4 z-[500]">
+            <div className="bg-white p-2 rounded-xl shadow-lg">
+              <div className="flex flex-col gap-1">
+                <button
+                  onClick={() => {
+                    // 使用map实例直接控制缩放
+                    if (mapInstance) {
+                      mapInstance.zoomIn();
+                    }
+                  }}
+                  className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded"
+                  title="Zoom In"
+                >
+                  +
+                </button>
+                <button
+                  onClick={() => {
+                    if (mapInstance) {
+                      mapInstance.zoomOut();
+                    }
+                  }}
+                  className="w-8 h-8 flex items-center justify-center text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded"
+                  title="Zoom Out"
+                >
+                  −
+                </button>
+              </div>
+            </div>
+          </div>
         )}
     </MapContainer>
 
