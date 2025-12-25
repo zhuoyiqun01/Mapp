@@ -855,66 +855,6 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
     });
   }, [calculateInitialTransform]);
 
-  // Initial zoom to fit all notes on mount (deprecated - now handled by calculateInitialTransform)
-  useEffect(() => {
-    if (notes.length > 0 && containerRef.current && !isEditMode) {
-        // 使用setTimeout确保容器尺寸已计算
-        const timer = setTimeout(() => {
-            if (!containerRef.current) return;
-            
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        notes.forEach(note => {
-            minX = Math.min(minX, note.boardX);
-            minY = Math.min(minY, note.boardY);
-            const w = note.variant === 'compact' ? 180 : 256;
-            const h = note.variant === 'compact' ? 180 : 256;
-            maxX = Math.max(maxX, note.boardX + w);
-            maxY = Math.max(maxY, note.boardY + h);
-        });
-
-        const padding = 100;
-        minX -= padding; minY -= padding;
-        maxX += padding; maxY += padding;
-        const contentWidth = maxX - minX;
-        const contentHeight = maxY - minY;
-        const { width: cW, height: cH } = containerRef.current.getBoundingClientRect();
-
-        const scaleX = cW / contentWidth;
-        const scaleY = cH / contentHeight;
-            const newScale = Math.min(Math.max(0.2, Math.min(scaleX, scaleY) * 0.9), 4); // 90%缩放以留出边距
-
-        const newX = (cW - contentWidth * newScale) / 2 - minX * newScale;
-        const newY = (cH - contentHeight * newScale) / 2 - minY * newScale;
-
-            // 使用动画过渡，避免突然跳跃
-            const startTransform = { ...transform };
-            const endTransform = { x: newX, y: newY, scale: newScale };
-            const duration = 400; // 400ms 动画
-            const startTime = Date.now();
-            
-            const animate = () => {
-              const elapsed = Date.now() - startTime;
-              const progress = Math.min(elapsed / duration, 1);
-              // 使用 easeOutCubic 缓动函数
-              const eased = 1 - Math.pow(1 - progress, 3);
-              
-              setTransform({
-                x: startTransform.x + (endTransform.x - startTransform.x) * eased,
-                y: startTransform.y + (endTransform.y - startTransform.y) * eased,
-                scale: startTransform.scale + (endTransform.scale - startTransform.scale) * eased
-              });
-              
-              if (progress < 1) {
-                requestAnimationFrame(animate);
-              }
-            };
-            
-            requestAnimationFrame(animate);
-        }, 100);
-        
-        return () => clearTimeout(timer);
-    }
-  }, [notes.length, isEditMode]); // 只在notes数量变化或退出编辑模式时触发
 
   // Zoom to Fit on Enter Edit Mode with animation
   useEffect(() => {
