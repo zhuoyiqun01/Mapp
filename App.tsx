@@ -403,7 +403,7 @@ export default function App() {
         const summaries = await loadProjectSummaries();
         setProjectSummaries(summaries);
         setIsLoading(false);
-
+        
         // 2. 后台执行所有维护和同步任务（不阻塞UI）
         setTimeout(async () => {
           try {
@@ -447,8 +447,8 @@ export default function App() {
                   ids: group.ids.slice(0, 3).join(', ') + (group.ids.length > 3 ? '...' : '')
                 }))
               });
-            }
-
+        }
+        
             // 数据迁移（后台执行）
             await migrateFromOldFormat();
 
@@ -457,76 +457,76 @@ export default function App() {
             if (cleanupResult.imagesCleaned > 0 || cleanupResult.sketchesCleaned > 0) {
               console.log(`Cleaned ${cleanupResult.imagesCleaned} corrupted images and ${cleanupResult.sketchesCleaned} corrupted sketches`);
             }
-
+        
             // 云端同步（后台执行）
-            // 检查 Supabase 是否配置，避免不必要的尝试
-            const hasSupabaseConfig = import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-            if (hasSupabaseConfig) {
-              try {
-                setSyncStatus('syncing');
-                const cloudResult = await loadProjectsFromCloud();
-
-                if (cloudResult.success && cloudResult.projects) {
+        // 检查 Supabase 是否配置，避免不必要的尝试
+        const hasSupabaseConfig = import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY;
+        
+        if (hasSupabaseConfig) {
+          try {
+            setSyncStatus('syncing');
+            const cloudResult = await loadProjectsFromCloud();
+            
+            if (cloudResult.success && cloudResult.projects) {
                   // 获取完整的本地项目数据用于合并
                   const fullLocalProjects = await loadAllProjects(true);
-                  // 合并本地和云端数据
+              // 合并本地和云端数据
                   const merged = mergeProjects(fullLocalProjects, cloudResult.projects);
-
-                  // 如果合并后的数据与本地不同，更新本地
+              
+              // 如果合并后的数据与本地不同，更新本地
                   const localIds = new Set(fullLocalProjects.map(p => p.id));
-                  const mergedIds = new Set(merged.map(p => p.id));
+              const mergedIds = new Set(merged.map(p => p.id));
                   const hasChanges = fullLocalProjects.length !== merged.length ||
-                    [...localIds].some(id => !mergedIds.has(id)) ||
-                    merged.some(p => {
+                [...localIds].some(id => !mergedIds.has(id)) ||
+                merged.some(p => {
                       const local = fullLocalProjects.find(lp => lp.id === p.id);
-                      return !local || (local.version || 0) < (p.version || 0);
-                    });
-
-                  if (hasChanges) {
-                    // 保存合并后的项目
-                    for (const project of merged) {
-                      await saveProject(project);
-                    }
+                  return !local || (local.version || 0) < (p.version || 0);
+                });
+        
+              if (hasChanges) {
+                // 保存合并后的项目
+                for (const project of merged) {
+                  await saveProject(project);
+                }
                     // 更新项目摘要
                     const summaries = await loadProjectSummaries();
                     setProjectSummaries(summaries);
-                  }
-
-                  // 如果云端有更新，同步到云端
-                  if (!cloudResult.isNewDevice) {
-                    await syncProjectsToCloud(merged);
-                  }
-
-                  setSyncStatus('success');
-                  setTimeout(() => setSyncStatus('idle'), 2000);
-                } else if (cloudResult.error) {
-                  console.warn('Cloud load failed, using local data:', cloudResult.error);
-                  setSyncStatus('error');
-                  setSyncError(cloudResult.error);
-                  setTimeout(() => {
-                    setSyncStatus('idle');
-                    setSyncError(null);
-                  }, 3000);
-            } else {
-                  // 新设备，上传本地数据到云端
+              }
+              
+              // 如果云端有更新，同步到云端
+              if (!cloudResult.isNewDevice) {
+                await syncProjectsToCloud(merged);
+              }
+              
+              setSyncStatus('success');
+              setTimeout(() => setSyncStatus('idle'), 2000);
+            } else if (cloudResult.error) {
+              console.warn('Cloud load failed, using local data:', cloudResult.error);
+              setSyncStatus('error');
+              setSyncError(cloudResult.error);
+              setTimeout(() => {
+                setSyncStatus('idle');
+                setSyncError(null);
+              }, 3000);
+        } else {
+              // 新设备，上传本地数据到云端
                   const fullLocalProjects = await loadAllProjects(true);
                   if (fullLocalProjects.length > 0) {
                     await syncProjectsToCloud(fullLocalProjects);
-                  }
-                  setSyncStatus('success');
-                  setTimeout(() => setSyncStatus('idle'), 2000);
-                }
-              } catch (err) {
-                console.error("云端同步失败:", err);
-                setSyncStatus('error');
-                setSyncError(err instanceof Error ? err.message : '同步失败');
-                setTimeout(() => {
-                  setSyncStatus('idle');
-                  setSyncError(null);
-                }, 3000);
               }
+              setSyncStatus('success');
+              setTimeout(() => setSyncStatus('idle'), 2000);
             }
+          } catch (err) {
+            console.error("云端同步失败:", err);
+            setSyncStatus('error');
+            setSyncError(err instanceof Error ? err.message : '同步失败');
+            setTimeout(() => {
+              setSyncStatus('idle');
+              setSyncError(null);
+            }, 3000);
+             }
+        }
           } catch (error) {
             console.warn('Background tasks failed:', error);
           }
@@ -851,13 +851,13 @@ export default function App() {
   const handleDeleteProject = async (id: string) => {
     setIsDeletingProject(true);
     try {
-      await deleteProjectStorage(id);
+    await deleteProjectStorage(id);
       // 更新项目列表
       setProjectSummaries(prev => prev.filter(p => p.id !== id));
       // 更新完整项目数据（如果已加载）
-      setProjects(prev => prev.filter(p => p.id !== id));
+    setProjects(prev => prev.filter(p => p.id !== id));
       // 如果当前项目被删除，回到首页
-      if (currentProjectId === id) {
+    if (currentProjectId === id) {
         setCurrentProjectId(null);
       }
     } finally {
@@ -957,17 +957,17 @@ export default function App() {
           />
         )}
 
-        <ProjectManager
+      <ProjectManager 
            projects={summariesToProjects(projectSummaries)}
-           currentProjectId={null}
-           onCreateProject={handleCreateProject}
+         currentProjectId={null}
+         onCreateProject={handleCreateProject}
            onSelectProject={handleSelectProject}
-           onDeleteProject={handleDeleteProject}
-           onUpdateProject={handleUpdateProject}
+         onDeleteProject={handleDeleteProject}
+         onUpdateProject={handleUpdateProject}
            onCheckData={handleCheckData}
-           themeColor={themeColor}
-           onThemeColorChange={handleThemeColorChange}
-        />
+         themeColor={themeColor}
+         onThemeColorChange={handleThemeColorChange}
+      />
       </div>
     );
   }
@@ -1035,7 +1035,7 @@ export default function App() {
                }}
                style={{ willChange: 'transform' }}
              >
-              <ProjectManager
+              <ProjectManager 
                  isSidebar
                  projects={summariesToProjects(projectSummaries)}
                  currentProjectId={currentProjectId}

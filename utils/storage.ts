@@ -493,14 +493,14 @@ export async function saveImage(base64Data: string): Promise<string> {
   const imageId = generateImageId();
 
   try {
-    await set(`${IMAGE_PREFIX}${imageId}`, base64Data);
+  await set(`${IMAGE_PREFIX}${imageId}`, base64Data);
     // 验证保存是否成功
     const verifyData = await get<string>(`${IMAGE_PREFIX}${imageId}`);
     if (!verifyData) {
       throw new Error('Image save verification failed');
     }
     console.log(`Saved new image: ${imageId} (${dataSizeMB.toFixed(2)}MB)`);
-    return imageId;
+  return imageId;
   } catch (error) {
     console.error('Failed to save image:', error);
     throw error;
@@ -1352,19 +1352,19 @@ function ensureNoteVariant(note: Note): Note {
 // 转换 Note 的图片从 Base64 到图片 ID（用于迁移）
 async function migrateNoteImages(note: Note): Promise<Note> {
   const migratedNote = ensureNoteVariant({ ...note });
-
+  
   // 迁移 images 数组
   if (note.images && note.images.length > 0) {
     const imageIds: string[] = [];
     for (const imageData of note.images) {
       try {
-        const existingId = extractImageId(imageData);
-        if (existingId) {
-          imageIds.push(existingId);
-        } else {
-          // 是 Base64，需要保存并获取 ID
-          const imageId = await saveImage(imageData);
-          imageIds.push(imageId);
+      const existingId = extractImageId(imageData);
+      if (existingId) {
+        imageIds.push(existingId);
+      } else {
+        // 是 Base64，需要保存并获取 ID
+        const imageId = await saveImage(imageData);
+        imageIds.push(imageId);
         }
       } catch (error) {
         console.error(`Failed to migrate image for note ${note.id}:`, error);
@@ -1374,17 +1374,17 @@ async function migrateNoteImages(note: Note): Promise<Note> {
     }
     migratedNote.images = imageIds;
   }
-
+  
   // 迁移 sketch
   if (note.sketch) {
     try {
-      const existingId = extractImageId(note.sketch);
-      if (existingId) {
-        migratedNote.sketch = existingId;
-      } else {
-        // 是 Base64，需要保存并获取 ID
-        const sketchId = await saveSketch(note.sketch);
-        migratedNote.sketch = sketchId;
+    const existingId = extractImageId(note.sketch);
+    if (existingId) {
+      migratedNote.sketch = existingId;
+    } else {
+      // 是 Base64，需要保存并获取 ID
+      const sketchId = await saveSketch(note.sketch);
+      migratedNote.sketch = sketchId;
       }
     } catch (error) {
       console.error(`Failed to migrate sketch for note ${note.id}:`, error);
@@ -1392,14 +1392,14 @@ async function migrateNoteImages(note: Note): Promise<Note> {
       migratedNote.sketch = undefined;
     }
   }
-
+  
   return migratedNote;
 }
 
 // 加载 Note 的图片（将图片 ID 转换为 Base64）
 export async function loadNoteImages(note: Note): Promise<Note> {
   const loadedNote = { ...note };
-
+  
   // 加载 images 数组 - 保持原始的图片ID数组不变，只返回成功加载的图片数据
   if (note.images && note.images.length > 0) {
     const loadedImages: string[] = [];
@@ -1423,7 +1423,7 @@ export async function loadNoteImages(note: Note): Promise<Note> {
 
     loadedNote.images = loadedImages;
   }
-
+  
   // 加载 sketch - 保持原始的sketch ID不变
   if (note.sketch) {
     const existingId = extractImageId(note.sketch);
@@ -1438,7 +1438,7 @@ export async function loadNoteImages(note: Note): Promise<Note> {
     }
     // 如果已经是 Base64，保持不变
   }
-
+  
   return loadedNote;
 }
 
@@ -1560,13 +1560,13 @@ export async function loadProjectSummaries(): Promise<ProjectSummary[]> {
 
   for (const projectId of projectIds) {
     try {
-      const project = await loadProject(projectId, false);
-      if (project) {
+  const project = await loadProject(projectId, false);
+  if (project) {
         // 计算项目统计信息
         let hasImages = false;
         let hasSketches = false;
 
-        for (const note of project.notes) {
+    for (const note of project.notes) {
           if (note.images && note.images.length > 0) {
             hasImages = true;
           }
@@ -1589,8 +1589,8 @@ export async function loadProjectSummaries(): Promise<ProjectSummary[]> {
       }
     } catch (error) {
       console.error(`Failed to load project summary for ${projectId}:`, error);
-    }
-  }
+          }
+        }
 
   return summaries;
 }
@@ -1602,13 +1602,13 @@ export async function loadAllProjects(loadImages: boolean = false): Promise<Proj
     projectList.map(id => loadProject(id, loadImages))
   );
   return projects.filter((p): p is Project => p !== null);
-}
-
+    }
+    
 // 删除项目
 export async function deleteProject(projectId: string): Promise<void> {
   // 首先删除项目数据和更新列表（快速操作）
   await del(`${PROJECT_PREFIX}${projectId}`);
-
+  
   const projectList = await loadProjectList();
   const updatedList = projectList.filter(id => id !== projectId);
   await set(PROJECT_LIST_KEY, updatedList);

@@ -72,7 +72,7 @@ const MenuDropdown: React.FC<{
         <Download size={16} /> Export Full Project (JSON)
       </button>
       <div className="h-px bg-gray-100 my-1" />
-      <button
+      <button 
         onClick={() => { onCompressImages(project); onClose(); }}
         className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
       >
@@ -124,11 +124,11 @@ interface ProjectManagerProps {
   onMapStyleChange?: (styleId: string) => void;
 }
 
-export const ProjectManager: React.FC<ProjectManagerProps> = ({
-  projects,
-  currentProjectId,
-  onCreateProject,
-  onSelectProject,
+export const ProjectManager: React.FC<ProjectManagerProps> = ({ 
+  projects, 
+  currentProjectId, 
+  onCreateProject, 
+  onSelectProject, 
   onDeleteProject,
   onUpdateProject,
   syncStatus,
@@ -1163,7 +1163,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                   <>
                     <div className="fixed inset-0 z-[2020] bg-black/20 pointer-events-auto" onClick={() => setOpenMenuId(null)} />
                     {isSidebar ? (
-                      <MenuDropdown
+                      <MenuDropdown 
                         project={p}
                         onRename={handleRename}
                         onExportData={handleExportData}
