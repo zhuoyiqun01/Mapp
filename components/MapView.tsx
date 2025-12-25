@@ -867,18 +867,29 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
     // If show all is enabled, show all notes
     if (showAllFrames) {
+      console.log('Frame filtering: Show All enabled, showing all notes');
       return notes;
     }
 
-    return notes.filter(note => {
-      // If note has no frame associations, show it
+    const filtered = notes.filter(note => {
+      // If note has no frame associations, hide it when Show All is disabled
       if (!note.groupIds || note.groupIds.length === 0) {
-        return true;
+        return false; // Hide notes without frame associations when filtering is active
       }
 
       // Show note if any of its associated frames are visible (OR logic)
-      return note.groupIds.some(frameId => frameLayerVisibility[frameId] !== false);
+      const shouldShow = note.groupIds.some(frameId => frameLayerVisibility[frameId] !== false);
+      return shouldShow;
     });
+
+    console.log('Frame filtering:', {
+      showAllFrames,
+      totalNotes: notes.length,
+      filteredNotes: filtered.length,
+      frameVisibility: frameLayerVisibility
+    });
+
+    return filtered;
   }, [notes, project.frames, frameLayerVisibility, showAllFrames]);
   
   // Image import related state
