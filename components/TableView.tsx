@@ -561,26 +561,25 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
             No compact note data
           </div>
         )}
-      </div>
-      
-      {/* Note Editor */}
-      {editorNoteId && (
-        <NoteEditor
-          initialNote={project.notes.find(n => n.id === editorNoteId)}
-          isOpen={true}
-          onClose={() => setEditorNoteId(null)}
-          onSave={(updatedNote) => {
-            if (editorNoteId) {
-              const existingNote = project.notes.find(n => n.id === editorNoteId);
-              if (existingNote) {
-                onUpdateNote({ ...existingNote, ...updatedNote });
+
+        {/* Note Editor */}
+        {editorNoteId && (
+          <NoteEditor
+            initialNote={project.notes.find(n => n.id === editorNoteId)}
+            isOpen={true}
+            onClose={() => setEditorNoteId(null)}
+            onSave={(updatedNote) => {
+              if (editorNoteId) {
+                const existingNote = project.notes.find(n => n.id === editorNoteId);
+                if (existingNote) {
+                  onUpdateNote({ ...existingNote, ...updatedNote });
+                }
               }
-            }
-            setEditorNoteId(null);
-          }}
-          onSwitchToBoardView={onSwitchToBoardView}
-        />
-      )}
+              setEditorNoteId(null);
+            }}
+            onSwitchToBoardView={onSwitchToBoardView}
+          />
+        )}
       </div>
     </div>
   );
