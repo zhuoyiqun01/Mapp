@@ -2817,7 +2817,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 mapStyle={mapStyle}
                 onMapStyleChange={(style) => setLocalMapStyle(style)}
                 mapNotes={getFilteredNotes}
-                frames={frames}
+                frames={project.frames || []}
                 frameLayerVisibility={frameLayerVisibility}
                 setFrameLayerVisibility={setFrameLayerVisibility}
                 themeColor={themeColor}
