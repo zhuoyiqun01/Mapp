@@ -887,19 +887,6 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
     );
 }
 
-const MapZoomController = ({min, max, themeColor}: {min: number, max: number, themeColor: string}) => {
-    const map = useMap();
-    const [zoom, setZoom] = useState(map.getZoom());
-    useMapEvents({
-        zoomend: () => setZoom(map.getZoom()),
-        zoom: () => setZoom(map.getZoom()) // Also listen to zoom event for smoother updates
-    });
-    return (
-      <ZoomSlider value={zoom} min={min} max={max} onChange={(val) => {
-        map.setZoom(val);
-      }} themeColor={themeColor} />
-    );
-};
 
 // Ensure map is properly centered after initialization (only once)
 const MapCenterHandler = ({ center, zoom }: { center: [number, number], zoom: number }) => {
