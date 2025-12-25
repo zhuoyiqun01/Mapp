@@ -2723,7 +2723,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         ))}
 
         {isMapMode && (
-          <>
             <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none items-start">
                 {/* First Row: Main Controls */}
                 <MapControls
@@ -3124,7 +3123,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
            />
         </div>
       </MapContainer>
-    </>
   )}
       
       {isEditorOpen && (
