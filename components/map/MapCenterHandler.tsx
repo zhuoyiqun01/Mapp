@@ -9,6 +9,7 @@ interface MapCenterHandlerProps {
 export const MapCenterHandler: React.FC<MapCenterHandlerProps> = ({ center, zoom }) => {
   const map = useMap();
   const hasCenteredRef = useRef(false);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     // 只在首次初始化时执行一次
@@ -22,7 +23,7 @@ export const MapCenterHandler: React.FC<MapCenterHandlerProps> = ({ center, zoom
       try {
         map.invalidateSize();
         // 使用 setTimeout 确保在下一个事件循环中执行，此时容器尺寸应该已经正确
-        setTimeout(() => {
+        timeoutRef.current = setTimeout(() => {
           if (!hasCenteredRef.current && map) {
             try {
               map.invalidateSize();
@@ -41,9 +42,9 @@ export const MapCenterHandler: React.FC<MapCenterHandlerProps> = ({ center, zoom
 
     return () => {
       // 清理定时器以防组件卸载时仍在执行
-      const timeouts = setTimeout(() => {}, 0);
-      for (let i = 0; i <= timeouts; i++) {
-        clearTimeout(i);
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
       }
     };
   }, []); // 空依赖数组，只在组件挂载时执行一次
