@@ -23,6 +23,13 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
       {notes
         .filter(note => note.variant === 'standard' && note.text?.trim())
         .map(note => {
+          // Calculate text width (approximate)
+          const text = note.text?.trim() || '';
+          const fontSize = Math.max(10, pinSize / 3);
+          const approxCharWidth = fontSize * 0.6; // Approximate character width
+          const padding = 12; // 6px * 2 for horizontal padding
+          const textWidth = Math.min(text.length * approxCharWidth + padding, 120);
+
           const icon = new DivIcon({
             html: `
               <div style="
@@ -30,7 +37,7 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
                 color: white;
                 padding: 2px 6px;
                 border-radius: 4px;
-                font-size: ${Math.max(10, pinSize / 3)}px;
+                font-size: ${fontSize}px;
                 font-weight: 500;
                 white-space: nowrap;
                 max-width: 120px;
@@ -39,13 +46,16 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
                 border: 2px solid white;
                 box-shadow: 0 2px 4px rgba(0,0,0,0.2);
                 pointer-events: none;
+                display: inline-block;
+                width: fit-content;
+                min-width: 20px;
               ">
-                ${note.text?.trim()}
+                ${text}
               </div>
             `,
             className: 'custom-text-label',
-            iconSize: [0, 0],
-            iconAnchor: [0, -pinSize / 2 - 5]
+            iconSize: [textWidth + 16, 24], // Width based on text + padding, height fixed
+            iconAnchor: [textWidth / 2 + 8, 12] // Center horizontally, position above marker
           });
 
           return (
