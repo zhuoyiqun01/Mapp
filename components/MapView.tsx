@@ -795,7 +795,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
         </div>
 
         {/* Frame Layer Button - Reference BoardView approach */}
-        {isMapMode && frames && frames.length > 0 && (
+        {isMapMode && project.frames && project.frames.length > 0 && (
             <div
                 className="fixed top-2 sm:top-4 right-2 sm:right-4 z-[500] pointer-events-auto flex items-center"
                 style={{ height: '40px' }}
