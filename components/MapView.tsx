@@ -3122,10 +3122,10 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
              themeColor={themeColor}
            />
         </div>
-      </MapContainer>
   )}
-      
-      {isEditorOpen && (
+    </MapContainer>
+
+    {isEditorOpen && (
         <NoteEditor 
             isOpen={isEditorOpen}
             onClose={closeEditor}
