@@ -121,7 +121,7 @@ const CustomHorizontalSlider: React.FC<{
     </div>
   );
 };
-import { Search, Locate, Loader2, X, Check, Satellite, Plus, Image as ImageIcon, FileJson, Type } from 'lucide-react';
+import { Search, Locate, Loader2, X, Check, Satellite, Plus, Image as ImageIcon, FileJson, Type, Layers } from 'lucide-react';
 import exifr from 'exifr';
 import { NoteEditor } from './NoteEditor';
 import { generateId, fileToBase64 } from '../utils';
@@ -378,12 +378,15 @@ const SearchBarContainer = ({ children }: { children: React.ReactNode }) => {
     return <div ref={containerRef}>{children}</div>;
 };
 
-const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange, mapNotes, themeColor = THEME_COLOR, showTextLabels, setShowTextLabels, pinSize, setPinSize, clusterThreshold, setClusterThreshold }: {
+const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange, mapNotes, frames, frameLayerVisibility, setFrameLayerVisibility, themeColor = THEME_COLOR, showTextLabels, setShowTextLabels, pinSize, setPinSize, clusterThreshold, setClusterThreshold }: {
     onImportPhotos: () => void;
     onImportData: () => void;
     mapStyle: 'standard' | 'satellite';
     onMapStyleChange: (style: 'standard' | 'satellite') => void;
     mapNotes: Note[];
+    frames: Frame[];
+    frameLayerVisibility: Record<string, boolean>;
+    setFrameLayerVisibility: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
     themeColor?: string;
     showTextLabels: boolean;
     setShowTextLabels: (show: boolean) => void;
@@ -396,8 +399,10 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
     const [showImportMenu, setShowImportMenu] = useState(false);
     const [showLocateMenu, setShowLocateMenu] = useState(false);
     const [showLocationError, setShowLocationError] = useState(false);
+    const [showFrameLayerPanel, setShowFrameLayerPanel] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
     const locateMenuRef = useRef<HTMLDivElement>(null);
+    const frameLayerRef = useRef<HTMLDivElement>(null);
     
     const requestLocationPermission = (): Promise<GeolocationPosition> => {
         return new Promise((resolve, reject) => {
@@ -560,6 +565,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
         }
     };
     
+
     // Close menus when clicking outside
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -569,12 +575,15 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
             if (locateMenuRef.current && !locateMenuRef.current.contains(event.target as Node)) {
                 setShowLocateMenu(false);
             }
+            if (frameLayerRef.current && !frameLayerRef.current.contains(event.target as Node)) {
+                setShowFrameLayerPanel(false);
+            }
         };
-        if (showImportMenu || showLocateMenu) {
+        if (showImportMenu || showLocateMenu || showFrameLayerPanel) {
             document.addEventListener('mousedown', handleClickOutside);
             return () => document.removeEventListener('mousedown', handleClickOutside);
         }
-    }, [showImportMenu, showLocateMenu]);
+    }, [showImportMenu, showLocateMenu, showFrameLayerPanel]);
     
     const controlsRef = useRef<HTMLDivElement>(null);
     
@@ -955,7 +964,94 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                     </div>
                 )}
             </div>
-            
+
+            {/* Frame Layer Button */}
+            {frames.length > 0 && (
+                <div className="relative" ref={frameLayerRef}>
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setShowFrameLayerPanel(!showFrameLayerPanel);
+                        }}
+                        onPointerDown={(e) => {
+                            e.stopPropagation();
+                            e.currentTarget.style.backgroundColor = themeColor;
+                        }}
+                        onPointerUp={(e) => {
+                            e.stopPropagation();
+                            if (!showFrameLayerPanel) {
+                                e.currentTarget.style.backgroundColor = '';
+                            }
+                        }}
+                        onPointerMove={(e) => e.stopPropagation()}
+                        onMouseEnter={(e) => {
+                            if (!showFrameLayerPanel) {
+                                e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
+                            }
+                        }}
+                        onMouseLeave={(e) => {
+                            if (!showFrameLayerPanel) {
+                                e.currentTarget.style.backgroundColor = '';
+                            }
+                        }}
+                        className={`p-2 sm:p-3 rounded-xl shadow-lg transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${
+                            showFrameLayerPanel
+                                ? 'text-white'
+                                : 'bg-white text-gray-700'
+                        }`}
+                        style={showFrameLayerPanel ? { backgroundColor: themeColor } : undefined}
+                        title="Frame Layers"
+                    >
+                        <Layers size={18} className="sm:w-5 sm:h-5" />
+                    </button>
+                    {showFrameLayerPanel && (
+                        <div
+                            className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-[2000]"
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <div className="px-3 py-2 text-xs font-bold text-gray-500 uppercase tracking-wide">Frame Layers</div>
+                            <div className="h-px bg-gray-100 mb-1" />
+                            {frames.map((frame) => (
+                                <div key={frame.id} className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
+                                    <div className="flex items-center gap-2">
+                                        <div
+                                            className="w-3 h-3 rounded border border-gray-300"
+                                            style={{ backgroundColor: frame.color }}
+                                        />
+                                        <span className="text-sm text-gray-700 truncate" title={frame.title}>
+                                            {frame.title}
+                                        </span>
+                                    </div>
+                                    <input
+                                        type="checkbox"
+                                        checked={frameLayerVisibility[frame.id] ?? true}
+                                        onChange={(e) => {
+                                            e.stopPropagation();
+                                            setFrameLayerVisibility(prev => ({
+                                                ...prev,
+                                                [frame.id]: !prev[frame.id]
+                                            }));
+                                        }}
+                                        onPointerDown={(e) => e.stopPropagation()}
+                                        onClick={(e) => e.stopPropagation()}
+                                        className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
+                                            frameLayerVisibility[frame.id] ?? true
+                                                ? ''
+                                                : 'bg-transparent'
+                                        }`}
+                                        style={{
+                                            backgroundColor: (frameLayerVisibility[frame.id] ?? true) ? themeColor : 'transparent',
+                                            borderColor: themeColor
+                                        }}
+                                    />
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* Location Error Dialog */}
             {showLocationError && (
                 <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-black bg-opacity-50">
@@ -1083,11 +1179,46 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   
   const [imageDimensions, setImageDimensions] = useState<[number, number] | null>(null);
   const [minImageZoom, setMinImageZoom] = useState(-20);
-  
+
   // Marker clustering related state
   const [clusteredMarkers, setClusteredMarkers] = useState<Array<{ notes: Note[], position: [number, number] }>>([]);
   const [currentNoteIndex, setCurrentNoteIndex] = useState(0);
   const [currentClusterNotes, setCurrentClusterNotes] = useState<Note[]>([]);
+
+  // Frame layer visibility state
+  const [frameLayerVisibility, setFrameLayerVisibility] = useState<Record<string, boolean>>({});
+
+  // Initialize frame layer visibility when project frames change
+  useEffect(() => {
+    if (project.frames) {
+      const newVisibility: Record<string, boolean> = {};
+      project.frames.forEach(frame => {
+        if (!(frame.id in frameLayerVisibility)) {
+          newVisibility[frame.id] = true; // Default to visible
+        }
+      });
+      if (Object.keys(newVisibility).length > 0) {
+        setFrameLayerVisibility(prev => ({ ...prev, ...newVisibility }));
+      }
+    }
+  }, [project.frames, frameLayerVisibility]);
+
+  // Filter notes based on frame layer visibility
+  const getFilteredNotes = useMemo(() => {
+    if (!project.frames || project.frames.length === 0) {
+      return notes; // No frames, show all notes
+    }
+
+    return notes.filter(note => {
+      // If note has no frame associations, show it
+      if (!note.groupIds || note.groupIds.length === 0) {
+        return true;
+      }
+
+      // Show note if any of its associated frames are visible
+      return note.groupIds.some(frameId => frameLayerVisibility[frameId] !== false);
+    });
+  }, [notes, project.frames, frameLayerVisibility]);
   
   // Image import related state
   const [importPreview, setImportPreview] = useState<Array<{
@@ -2829,7 +2960,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         
         {isMapMode && (showTextLabels ? (
           // Text labels mode: show all markers individually without clustering
-          mapNotes.map(note => (
+          getFilteredNotes.map(note => (
             <Marker
               key={note.id}
               position={[note.coords.lat, note.coords.lng]}
@@ -2886,7 +3017,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           })
         ) : (
           // Show single markers (non-map mode or when no clustering)
-          mapNotes.map(note => (
+          getFilteredNotes.map(note => (
             <Marker 
               key={note.id} 
               position={[note.coords.lat, note.coords.lng]}
@@ -2950,12 +3081,15 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         {isMapMode && (
           <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none items-start">
               {/* First Row: Main Controls */}
-              <MapControls 
-                onImportPhotos={() => fileInputRef.current?.click()} 
+              <MapControls
+                onImportPhotos={() => fileInputRef.current?.click()}
                 onImportData={() => dataImportInputRef.current?.click()}
                 mapStyle={mapStyle}
                 onMapStyleChange={(style) => setLocalMapStyle(style)}
-                mapNotes={mapNotes}
+                mapNotes={getFilteredNotes}
+                frames={frames}
+                frameLayerVisibility={frameLayerVisibility}
+                setFrameLayerVisibility={setFrameLayerVisibility}
                 themeColor={themeColor}
                 showTextLabels={showTextLabels}
                 setShowTextLabels={setShowTextLabels}
