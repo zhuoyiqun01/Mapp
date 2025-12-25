@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { ChevronLeft, Grid, List, Image as ImageIcon, MapPin, X } from 'lucide-react';
+import { Grid, List, Image as ImageIcon, MapPin, X } from 'lucide-react';
 import { Note, Project, Frame } from '../types';
 
 interface GalleryViewProps {
@@ -79,13 +79,6 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <button
-            onClick={onSwitchToBoardView}
-            className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
-            title="返回Board视图"
-          >
-            <ChevronLeft size={20} />
-          </button>
           <h1 className="text-xl font-semibold text-gray-900">Gallery</h1>
         </div>
 
@@ -94,9 +87,10 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
             onClick={() => setViewMode('grid')}
             className={`p-2 rounded-lg transition-colors ${
               viewMode === 'grid'
-                ? 'bg-blue-100 text-blue-600'
+                ? 'text-white'
                 : 'hover:bg-gray-100 text-gray-600'
             }`}
+            style={viewMode === 'grid' ? { backgroundColor: themeColor } : undefined}
             title="网格视图"
           >
             <Grid size={18} />
@@ -105,9 +99,10 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
             onClick={() => setViewMode('list')}
             className={`p-2 rounded-lg transition-colors ${
               viewMode === 'list'
-                ? 'bg-blue-100 text-blue-600'
+                ? 'text-white'
                 : 'hover:bg-gray-100 text-gray-600'
             }`}
+            style={viewMode === 'list' ? { backgroundColor: themeColor } : undefined}
             title="列表视图"
           >
             <List size={18} />
@@ -122,9 +117,10 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
             onClick={() => setSelectedFrame(null)}
             className={`px-3 py-1 rounded-full text-sm transition-colors ${
               selectedFrame === null
-                ? 'bg-blue-100 text-blue-700'
+                ? 'text-white'
                 : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
             }`}
+            style={selectedFrame === null ? { backgroundColor: themeColor } : undefined}
           >
             全部
           </button>
@@ -134,9 +130,10 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
               onClick={() => setSelectedFrame(frame.id)}
               className={`px-3 py-1 rounded-full text-sm transition-colors ${
                 selectedFrame === frame.id
-                  ? 'bg-blue-100 text-blue-700'
+                  ? 'text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
+              style={selectedFrame === frame.id ? { backgroundColor: themeColor } : undefined}
             >
               {frame.title}
             </button>
@@ -147,95 +144,69 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
       {/* Gallery Content */}
       <div className="flex-1 overflow-auto p-4">
         {viewMode === 'grid' ? (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-            {Array.from(galleryData.entries()).map(([frameId, items]) => {
-              if (selectedFrame !== null && frameId !== selectedFrame) return null;
+          <div className="grid grid-cols-2 gap-4">
+            {Array.from(galleryData.entries()).flatMap(([frameId, items]) => {
+              if (selectedFrame !== null && frameId !== selectedFrame) return [];
 
-              const frame = frameId ? project.frames?.find(f => f.id === frameId) : null;
-
-              return (
-                <div key={frameId || 'no-frame'} className="space-y-3">
-                  {frame && (
-                    <h3 className="text-lg font-medium text-gray-900 px-2">
-                      {frame.title}
-                    </h3>
-                  )}
-                  {!frame && selectedFrame === null && (
-                    <h3 className="text-lg font-medium text-gray-900 px-2">
-                      未分组
-                    </h3>
-                  )}
-
-                  <div className="grid grid-cols-2 gap-2">
-                    {items.map((item) => (
-                      <div
-                        key={item.note.id}
-                        className="relative group cursor-pointer"
-                        onClick={() => handleImageClick(item)}
-                      >
-                        <div className="aspect-square bg-gray-200 rounded-lg overflow-hidden">
-                          <img
-                            src={getImageUrl(item.note)}
-                            alt={item.note.text || 'Note image'}
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-                            loading="lazy"
-                          />
-                        </div>
-                        <div className="absolute top-1 right-1 bg-black bg-opacity-50 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <MapPin size={12} className="text-white" />
-                        </div>
-                      </div>
-                    ))}
+              return items.map((item) => (
+                <div
+                  key={item.note.id}
+                  className="relative group cursor-pointer"
+                  onClick={() => handleImageClick(item)}
+                >
+                  <div className="aspect-square bg-gray-200 rounded-lg overflow-hidden">
+                    <img
+                      src={getImageUrl(item.note)}
+                      alt={item.note.text || 'Note image'}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                      loading="lazy"
+                    />
                   </div>
+                  <div className="absolute top-1 right-1 bg-black bg-opacity-50 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <MapPin size={12} className="text-white" />
+                  </div>
+                  {/* Frame indicator */}
+                  {item.frame && (
+                    <div className="absolute bottom-1 left-1 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded">
+                      {item.frame.title}
+                    </div>
+                  )}
                 </div>
-              );
+              ));
             })}
           </div>
         ) : (
-          <div className="space-y-6">
-            {Array.from(galleryData.entries()).map(([frameId, items]) => {
-              if (selectedFrame !== null && frameId !== selectedFrame) return null;
+          <div className="grid grid-cols-2 gap-4">
+            {Array.from(galleryData.entries()).flatMap(([frameId, items]) => {
+              if (selectedFrame !== null && frameId !== selectedFrame) return [];
 
-              const frame = frameId ? project.frames?.find(f => f.id === frameId) : null;
-
-              return (
-                <div key={frameId || 'no-frame'} className="space-y-3">
-                  {frame && (
-                    <h3 className="text-lg font-medium text-gray-900">
-                      {frame.title}
-                    </h3>
-                  )}
-                  {!frame && selectedFrame === null && (
-                    <h3 className="text-lg font-medium text-gray-900">
-                      未分组
-                    </h3>
-                  )}
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                    {items.map((item) => (
-                      <div
-                        key={item.note.id}
-                        className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
-                        onClick={() => handleImageClick(item)}
-                      >
-                        <div className="aspect-video bg-gray-200">
-                          <img
-                            src={getImageUrl(item.note)}
-                            alt={item.note.text || 'Note image'}
-                            className="w-full h-full object-cover"
-                            loading="lazy"
-                          />
-                        </div>
-                        <div className="p-3">
-                          <p className="text-sm text-gray-700 line-clamp-2">
-                            {item.note.text || '无描述'}
-                          </p>
-                        </div>
+              return items.map((item) => (
+                <div
+                  key={item.note.id}
+                  className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
+                  onClick={() => handleImageClick(item)}
+                >
+                  <div className="aspect-video bg-gray-200 relative">
+                    <img
+                      src={getImageUrl(item.note)}
+                      alt={item.note.text || 'Note image'}
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                    {/* Frame indicator */}
+                    {item.frame && (
+                      <div className="absolute bottom-1 left-1 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded">
+                        {item.frame.title}
                       </div>
-                    ))}
+                    )}
+                  </div>
+                  <div className="p-3">
+                    <p className="text-sm text-gray-700 line-clamp-2">
+                      {item.note.text || '无描述'}
+                    </p>
                   </div>
                 </div>
-              );
+              ));
             })}
           </div>
         )}
@@ -260,7 +231,8 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => handleLocateOnMap(selectedImage.note.coords)}
-                  className="flex items-center gap-1 px-3 py-1 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm"
+                  className="flex items-center gap-1 px-3 py-1 text-white rounded-lg hover:opacity-90 transition-colors text-sm"
+                  style={{ backgroundColor: themeColor }}
                 >
                   <MapPin size={14} />
                   定位到地图
