@@ -3115,6 +3115,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           </div>
         )}
 
+        </div>
+
         <div className="fixed bottom-20 sm:bottom-24 left-2 sm:left-4 z-[500]">
            <MapZoomController
              min={isMapMode ? 13 : minImageZoom}
