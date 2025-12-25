@@ -3014,7 +3014,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         </div>
 
         {/* Frame Layer Button - Inside MapContainer */}
-        {isMapMode && ( // 临时强制显示用于调试
+        {isMapMode && project.frames && project.frames.length > 0 && (
           <div
             className="fixed top-2 sm:top-4 right-2 sm:right-4 z-[500] pointer-events-auto flex items-center"
             style={{ height: '40px' }}

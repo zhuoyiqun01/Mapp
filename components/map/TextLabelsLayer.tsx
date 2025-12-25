@@ -33,8 +33,8 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
           const icon = new DivIcon({
             html: `
               <div style="
-                background: ${themeColor};
-                color: white;
+                background: white;
+                color: ${themeColor};
                 padding: 2px 6px;
                 border-radius: 4px;
                 font-size: ${fontSize}px;
@@ -43,7 +43,7 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
                 max-width: 120px;
                 overflow: hidden;
                 text-overflow: ellipsis;
-                border: 2px solid white;
+                border: 2px solid ${themeColor};
                 box-shadow: 0 2px 4px rgba(0,0,0,0.2);
                 pointer-events: none;
                 display: inline-block;
