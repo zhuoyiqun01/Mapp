@@ -254,38 +254,42 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
   };
 
   return (
-    <div className="w-full h-full bg-gray-50 overflow-auto p-6">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-6 flex justify-between items-center">
-          <h2 className="text-3xl font-black text-gray-800">Data Table</h2>
-          
-          {/* Table level toggle */}
-          <div className="flex gap-1 bg-gray-200 rounded-lg p-0.5">
-            <button
-              onClick={() => setTableLevel('Primary')}
-              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
-                tableLevel === 'Primary'
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              Primary ({standardNotes.length})
-            </button>
-            <button
-              onClick={() => setTableLevel('Secondary')}
-              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
-                tableLevel === 'Secondary'
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              Secondary ({compactNotes.length})
-            </button>
-          </div>
+    <div className="h-full bg-gray-50 flex flex-col">
+      {/* Header */}
+      <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <h1 className="text-xl font-semibold text-gray-900">Table</h1>
         </div>
 
-        {/* Groups */}
+        {/* Table level toggle */}
+        <div className="flex gap-1 bg-gray-200 rounded-lg p-0.5">
+          <button
+            onClick={() => setTableLevel('Primary')}
+            className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+              tableLevel === 'Primary'
+                ? 'text-white shadow-sm'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+            style={tableLevel === 'Primary' ? { backgroundColor: THEME_COLOR } : undefined}
+          >
+            Primary ({standardNotes.length})
+          </button>
+          <button
+            onClick={() => setTableLevel('Secondary')}
+            className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+              tableLevel === 'Secondary'
+                ? 'text-white shadow-sm'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+            style={tableLevel === 'Secondary' ? { backgroundColor: THEME_COLOR } : undefined}
+          >
+            Secondary ({compactNotes.length})
+          </button>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-auto p-4">
         {tableLevel === 'Primary' ? (
           // Primary table: standard notes
           groupedNotes.map((group) => (
@@ -577,6 +581,7 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
           onSwitchToBoardView={onSwitchToBoardView}
         />
       )}
+      </div>
     </div>
   );
 };
