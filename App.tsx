@@ -4,6 +4,7 @@ import { Map as MapIcon, Grid, Menu, Loader2, Table2, Cloud, CloudOff, CheckCirc
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapView } from './components/MapView';
 import { BoardView } from './components/BoardView';
+import { GalleryView } from './components/GalleryView';
 import { TableView } from './components/TableView';
 import { ProjectManager } from './components/ProjectManager';
 import { Note, ViewMode, Project } from './types';
@@ -1247,6 +1248,32 @@ export default function App() {
             mapViewFileInputRef={mapViewFileInputRef}
             themeColor={themeColor}
           />
+        ) : viewMode === 'gallery' ? (
+          <GalleryView
+            project={activeProject}
+            onSwitchToMapView={(coords?: { lat: number; lng: number }) => {
+              // Close editor first to ensure UI state is correct
+              setIsEditorOpen(false);
+              // Switch view first, then set navigation coordinates after a short delay
+              // This ensures MapView is mounted and ready to receive navigation
+              setViewMode('map');
+              // Set navigation coordinates after MapView has mounted
+              if (coords) {
+                setTimeout(() => {
+                  setNavigateToMapCoords(coords);
+                }, 100);
+              }
+            }}
+            onSwitchToBoardView={() => {
+              // Close editor first to ensure UI state is correct
+              setIsEditorOpen(false);
+              // Use requestAnimationFrame to ensure state updates are batched
+              requestAnimationFrame(() => {
+                setViewMode('board');
+              });
+            }}
+            themeColor={themeColor}
+          />
         ) : (
           <TableView 
             project={activeProject}
@@ -1296,8 +1323,8 @@ export default function App() {
             disabled={isImportDialogOpen}
             className={`
               flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
-              ${viewMode === 'board' 
-                ? 'text-white shadow-md scale-105' 
+              ${viewMode === 'board'
+                ? 'text-white shadow-md scale-105'
                 : 'hover:bg-gray-100 text-gray-500'}
               ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
             `}
@@ -1307,12 +1334,27 @@ export default function App() {
             Board
           </button>
           <button
+            onClick={() => !isImportDialogOpen && setViewMode('gallery')}
+            disabled={isImportDialogOpen}
+            className={`
+              flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
+              ${viewMode === 'gallery'
+                ? 'text-white shadow-md scale-105'
+                : 'hover:bg-gray-100 text-gray-500'}
+              ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
+            `}
+            style={viewMode === 'gallery' ? { backgroundColor: themeColor } : undefined}
+          >
+            <ImageIcon size={20} />
+            Gallery
+          </button>
+          <button
             onClick={() => !isImportDialogOpen && setViewMode('table')}
             disabled={isImportDialogOpen}
             className={`
               flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
-              ${viewMode === 'table' 
-                ? 'text-white shadow-md scale-105' 
+              ${viewMode === 'table'
+                ? 'text-white shadow-md scale-105'
                 : 'hover:bg-gray-100 text-gray-500'}
               ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
             `}

@@ -76,4 +76,4 @@ export interface Project {
   storageVersion?: number; // Storage format version
 }
 
-export type ViewMode = 'map' | 'board' | 'table';
+export type ViewMode = 'map' | 'board' | 'table' | 'gallery';
