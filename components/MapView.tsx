@@ -890,39 +890,6 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
 
 
 // Component to track map position changes and notify parent
-const MapPositionTracker = ({ onPositionChange }: { onPositionChange?: (center: [number, number], zoom: number) => void }) => {
-    const map = useMap();
-
-    useEffect(() => {
-        if (!map || !onPositionChange) return;
-
-        // Track if this is the initial position (to avoid saving initial default position)
-        let isInitialPosition = true;
-        const initialTimeout = setTimeout(() => {
-          isInitialPosition = false;
-        }, 2000); // After 2 seconds, consider it a user-initiated change
-
-        const handleMoveEnd = () => {
-            const center = map.getCenter();
-            const zoom = map.getZoom();
-            // Only save if not initial position (to avoid overwriting cache with default)
-            if (!isInitialPosition) {
-              onPositionChange([center.lat, center.lng], zoom);
-            }
-        };
-
-        map.on('moveend', handleMoveEnd);
-        map.on('zoomend', handleMoveEnd);
-
-        return () => {
-            clearTimeout(initialTimeout);
-            map.off('moveend', handleMoveEnd);
-            map.off('zoomend', handleMoveEnd);
-        };
-    }, [map, onPositionChange]);
-
-    return null;
-};
 
 
 export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, projectId, onNavigateComplete, onPositionChange, onSwitchToBoardView, themeColor = THEME_COLOR, mapStyleId = 'carto-light-nolabels' }) => {
