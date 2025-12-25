@@ -826,6 +826,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
   // Frame layer visibility state
   const [frameLayerVisibility, setFrameLayerVisibility] = useState<Record<string, boolean>>({});
+  const [showAllFrames, setShowAllFrames] = useState(true); // Default to show all
   const [showFrameLayerPanel, setShowFrameLayerPanel] = useState(false);
   const frameLayerRef = useRef<HTMLDivElement>(null);
 
@@ -864,16 +865,21 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       return notes; // No frames, show all notes
     }
 
+    // If show all is enabled, show all notes
+    if (showAllFrames) {
+      return notes;
+    }
+
     return notes.filter(note => {
       // If note has no frame associations, show it
       if (!note.groupIds || note.groupIds.length === 0) {
         return true;
       }
 
-      // Show note if any of its associated frames are visible
+      // Show note if any of its associated frames are visible (OR logic)
       return note.groupIds.some(frameId => frameLayerVisibility[frameId] !== false);
     });
-  }, [notes, project.frames, frameLayerVisibility]);
+  }, [notes, project.frames, frameLayerVisibility, showAllFrames]);
   
   // Image import related state
   const [importPreview, setImportPreview] = useState<Array<{
@@ -3017,7 +3023,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       </MapContainer>
 
       {/* Frame Layer Button - Outside MapContainer, like BoardView */}
-      {isMapMode && ( // 临时强制显示用于调试
+      {isMapMode && project.frames && project.frames.length > 0 && (
         <div
           className="fixed top-2 sm:top-4 right-2 sm:right-4 z-[500] pointer-events-auto flex items-center"
           style={{ height: '40px' }}
@@ -3065,7 +3071,38 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               >
                 <div className="px-3 py-2 text-xs font-bold text-gray-500 uppercase tracking-wide">Frame Layers</div>
                 <div className="h-px bg-gray-100 mb-1" />
-                {project.frames.map((frame) => (
+
+                {/* Show All Option */}
+                <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-700 font-medium">Show All</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={showAllFrames}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      setShowAllFrames(!showAllFrames);
+                    }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
+                      showAllFrames
+                        ? ''
+                        : 'bg-transparent'
+                    }`}
+                    style={{
+                      backgroundColor: showAllFrames ? themeColor : 'transparent',
+                      borderColor: themeColor
+                    }}
+                  />
+                </div>
+
+                {/* Frame Options - only show when Show All is disabled */}
+                {!showAllFrames && (
+                  <>
+                    <div className="h-px bg-gray-100 my-1" />
+                    {project.frames.map((frame) => (
                   <div key={frame.id} className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
                     <div className="flex items-center gap-2">
                       <div
@@ -3100,6 +3137,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                     />
                   </div>
                 ))}
+                  </>
+                )}
               </div>
             )}
           </div>
