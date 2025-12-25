@@ -51,7 +51,7 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
           return (
             <Marker
               key={`text-${note.id}`}
-              position={[note.lat, note.lng]}
+              position={[note.coords.lat, note.coords.lng]}
               icon={icon}
               interactive={false}
             />
