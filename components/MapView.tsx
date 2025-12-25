@@ -771,7 +771,8 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
             </div>
 
             {/* Frame Layer Button */}
-            {frames.length > 0 && (
+            {true && ( // 临时强制显示用于调试
+
                 <div className="relative" ref={frameLayerRef}>
                     <button
                         onClick={(e) => {
