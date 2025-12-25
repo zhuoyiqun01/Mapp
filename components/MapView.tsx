@@ -770,124 +770,6 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                 )}
             </div>
 
-            {/* Frame Layer Button */}
-            {frames.length > 0 && (
-
-                <div className="relative" ref={frameLayerRef}>
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            setShowFrameLayerPanel(!showFrameLayerPanel);
-                        }}
-                        onPointerDown={(e) => {
-                            e.stopPropagation();
-                            e.currentTarget.style.backgroundColor = themeColor;
-                        }}
-                        onPointerUp={(e) => {
-                            e.stopPropagation();
-                            if (!showFrameLayerPanel) {
-                                e.currentTarget.style.backgroundColor = '';
-                            }
-                        }}
-                        onPointerMove={(e) => e.stopPropagation()}
-                        onMouseEnter={(e) => {
-                            if (!showFrameLayerPanel) {
-                                e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
-                            }
-                        }}
-                        onMouseLeave={(e) => {
-                            if (!showFrameLayerPanel) {
-                                e.currentTarget.style.backgroundColor = '';
-                            }
-                        }}
-                        className={`p-2 sm:p-3 rounded-xl shadow-lg transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${
-                            showFrameLayerPanel
-                                ? 'text-white'
-                                : 'bg-white text-gray-700'
-                        }`}
-                        style={showFrameLayerPanel ? { backgroundColor: themeColor } : undefined}
-                        title="Frame Layers"
-                    >
-                        <Layers size={18} className="sm:w-5 sm:h-5" />
-                    </button>
-                    {showFrameLayerPanel && (
-                        <div
-                            className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-[2000]"
-                            onPointerDown={(e) => e.stopPropagation()}
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            <div className="px-3 py-2 text-xs font-bold text-gray-500 uppercase tracking-wide">Frame Layers</div>
-                            <div className="h-px bg-gray-100 mb-1" />
-                            {/* Default Layer - for notes without frames */}
-                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
-                                <div className="flex items-center gap-2">
-                                    <div className="w-3 h-3 rounded border border-gray-300 flex items-center justify-center text-xs text-gray-400">
-                                        •
-                                    </div>
-                                    <span className="text-sm text-gray-700">Default</span>
-                                </div>
-                                <input
-                                    type="checkbox"
-                                    checked={frameLayerVisibility['default'] ?? true}
-                                    onChange={(e) => {
-                                        e.stopPropagation();
-                                        setFrameLayerVisibility(prev => ({
-                                            ...prev,
-                                            'default': !prev['default']
-                                        }));
-                                    }}
-                                    onPointerDown={(e) => e.stopPropagation()}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
-                                        frameLayerVisibility['default'] ?? true
-                                            ? ''
-                                            : 'bg-transparent'
-                                    }`}
-                                    style={{
-                                        backgroundColor: (frameLayerVisibility['default'] ?? true) ? themeColor : 'transparent',
-                                        borderColor: themeColor
-                                    }}
-                                />
-                            </div>
-                            {frames.map((frame) => (
-                                <div key={frame.id} className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
-                                    <div className="flex items-center gap-2">
-                                        <div
-                                            className="w-3 h-3 rounded border border-gray-300"
-                                            style={{ backgroundColor: frame.color }}
-                                        />
-                                        <span className="text-sm text-gray-700 truncate" title={frame.title}>
-                                            {frame.title}
-                                        </span>
-                                    </div>
-                                    <input
-                                        type="checkbox"
-                                        checked={frameLayerVisibility[frame.id] ?? true}
-                                        onChange={(e) => {
-                                            e.stopPropagation();
-                                            setFrameLayerVisibility(prev => ({
-                                                ...prev,
-                                                [frame.id]: !prev[frame.id]
-                                            }));
-                                        }}
-                                        onPointerDown={(e) => e.stopPropagation()}
-                                        onClick={(e) => e.stopPropagation()}
-                                        className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
-                                            frameLayerVisibility[frame.id] ?? true
-                                                ? ''
-                                                : 'bg-transparent'
-                                        }`}
-                                        style={{
-                                            backgroundColor: (frameLayerVisibility[frame.id] ?? true) ? themeColor : 'transparent',
-                                            borderColor: themeColor
-                                        }}
-                                    />
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            )}
 
             {/* Location Error Dialog */}
             {showLocationError && (
@@ -2841,27 +2723,149 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         ))}
 
         {isMapMode && (
-          <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none items-end">
-              {/* First Row: Main Controls */}
-              <MapControls
-                onImportPhotos={() => fileInputRef.current?.click()}
-                onImportData={() => dataImportInputRef.current?.click()}
-                mapStyle={mapStyle}
-                onMapStyleChange={(style) => setLocalMapStyle(style)}
-                mapNotes={getFilteredNotes}
-                frames={project.frames || []}
-                frameLayerVisibility={frameLayerVisibility}
-                setFrameLayerVisibility={setFrameLayerVisibility}
-                themeColor={themeColor}
-                showTextLabels={showTextLabels}
-                setShowTextLabels={setShowTextLabels}
-                pinSize={pinSize}
-                setPinSize={setPinSize}
-                clusterThreshold={clusterThreshold}
-                setClusterThreshold={setClusterThreshold}
-              />
+          <>
+            <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none items-start">
+                {/* First Row: Main Controls */}
+                <MapControls
+                  onImportPhotos={() => fileInputRef.current?.click()}
+                  onImportData={() => dataImportInputRef.current?.click()}
+                  mapStyle={mapStyle}
+                  onMapStyleChange={(style) => setLocalMapStyle(style)}
+                  mapNotes={getFilteredNotes}
+                  frames={project.frames || []}
+                  frameLayerVisibility={frameLayerVisibility}
+                  setFrameLayerVisibility={setFrameLayerVisibility}
+                  themeColor={themeColor}
+                  showTextLabels={showTextLabels}
+                  setShowTextLabels={setShowTextLabels}
+                  pinSize={pinSize}
+                  setPinSize={setPinSize}
+                  clusterThreshold={clusterThreshold}
+                  setClusterThreshold={setClusterThreshold}
+                />
 
-              {/* Second Row: Sliders */}
+            {/* 图层按钮：右侧单独容器 */}
+            {(project.frames && project.frames.length > 0) && (
+              <div
+                className="fixed top-2 sm:top-4 right-2 sm:right-4 z-[500] pointer-events-auto flex items-center"
+                style={{ height: '40px' }}
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                <div className="relative" ref={frameLayerRef}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowFrameLayerPanel(!showFrameLayerPanel);
+                    }}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      e.currentTarget.style.backgroundColor = themeColor;
+                    }}
+                    onPointerUp={(e) => {
+                      e.stopPropagation();
+                      if (!showFrameLayerPanel) {
+                        e.currentTarget.style.backgroundColor = '';
+                      }
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!showFrameLayerPanel) {
+                        e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!showFrameLayerPanel) {
+                        e.currentTarget.style.backgroundColor = '';
+                      }
+                    }}
+                    className={`bg-white p-2 sm:p-3 rounded-xl shadow-lg transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${
+                      showFrameLayerPanel ? 'text-white' : 'text-gray-700'
+                    }`}
+                    style={{ backgroundColor: showFrameLayerPanel ? themeColor : undefined }}
+                    title="Frame Layers"
+                  >
+                    <Layers size={18} className="sm:w-5 sm:h-5" />
+                  </button>
+                  {showFrameLayerPanel && (
+                    <div
+                      className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-[2000]"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="px-3 py-2 text-xs font-bold text-gray-500 uppercase tracking-wide">Frame Layers</div>
+                      <div className="h-px bg-gray-100 mb-1" />
+                      {/* Default Layer - for notes without frames */}
+                      <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded border border-gray-300 flex items-center justify-center text-xs text-gray-400">
+                            •
+                          </div>
+                          <span className="text-sm text-gray-700">Default</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={frameLayerVisibility['default'] ?? true}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            setFrameLayerVisibility(prev => ({
+                              ...prev,
+                              'default': !prev['default']
+                            }));
+                          }}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => e.stopPropagation()}
+                          className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
+                            frameLayerVisibility['default'] ?? true
+                              ? ''
+                              : 'bg-transparent'
+                          }`}
+                          style={{
+                            backgroundColor: (frameLayerVisibility['default'] ?? true) ? themeColor : 'transparent',
+                            borderColor: themeColor
+                          }}
+                        />
+                      </div>
+                      {(project.frames || []).map((frame) => (
+                        <div key={frame.id} className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="w-3 h-3 rounded border border-gray-300"
+                              style={{ backgroundColor: frame.color }}
+                            />
+                            <span className="text-sm text-gray-700 truncate" title={frame.title}>
+                              {frame.title}
+                            </span>
+                          </div>
+                          <input
+                            type="checkbox"
+                            checked={frameLayerVisibility[frame.id] ?? true}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              setFrameLayerVisibility(prev => ({
+                                ...prev,
+                                [frame.id]: !prev[frame.id]
+                              }));
+                            }}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => e.stopPropagation()}
+                            className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
+                              frameLayerVisibility[frame.id] ?? true
+                                ? ''
+                                : 'bg-transparent'
+                            }`}
+                            style={{
+                              backgroundColor: (frameLayerVisibility[frame.id] ?? true) ? themeColor : 'transparent',
+                              borderColor: themeColor
+                            }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Second Row: Sliders */}
               <div className="flex gap-1.5 sm:gap-2 pointer-events-auto"
                 onPointerDown={(e) => {
                   // Don't stop propagation for slider interactions
