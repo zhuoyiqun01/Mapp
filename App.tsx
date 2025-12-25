@@ -1303,16 +1303,16 @@ export default function App() {
             onClick={() => !isImportDialogOpen && setViewMode('map')}
             disabled={isImportDialogOpen}
             className={`
-              flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
-              ${viewMode === 'map' 
-                ? 'text-white shadow-md scale-105' 
+              flex items-center gap-2 ${viewMode === 'map' ? 'px-4' : 'px-3'} py-2 rounded-xl transition-all font-bold text-sm
+              ${viewMode === 'map'
+                ? 'text-white shadow-md scale-105'
                 : 'hover:bg-gray-100 text-gray-500'}
               ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
             `}
             style={viewMode === 'map' ? { backgroundColor: themeColor } : undefined}
           >
             <MapIcon size={20} />
-            Mapping
+            {viewMode === 'map' && 'Mapping'}
           </button>
           <button
             onClick={() => {
@@ -1322,7 +1322,7 @@ export default function App() {
             }}
             disabled={isImportDialogOpen}
             className={`
-              flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
+              flex items-center gap-2 ${viewMode === 'board' ? 'px-4' : 'px-3'} py-2 rounded-xl transition-all font-bold text-sm
               ${viewMode === 'board'
                 ? 'text-white shadow-md scale-105'
                 : 'hover:bg-gray-100 text-gray-500'}
@@ -1331,13 +1331,13 @@ export default function App() {
             style={viewMode === 'board' ? { backgroundColor: themeColor } : undefined}
           >
             <Grid size={20} />
-            Board
+            {viewMode === 'board' && 'Board'}
           </button>
           <button
             onClick={() => !isImportDialogOpen && setViewMode('gallery')}
             disabled={isImportDialogOpen}
             className={`
-              flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
+              flex items-center gap-2 ${viewMode === 'gallery' ? 'px-4' : 'px-3'} py-2 rounded-xl transition-all font-bold text-sm
               ${viewMode === 'gallery'
                 ? 'text-white shadow-md scale-105'
                 : 'hover:bg-gray-100 text-gray-500'}
@@ -1346,13 +1346,13 @@ export default function App() {
             style={viewMode === 'gallery' ? { backgroundColor: themeColor } : undefined}
           >
             <ImageIcon size={20} />
-            Gallery
+            {viewMode === 'gallery' && 'Gallery'}
           </button>
           <button
             onClick={() => !isImportDialogOpen && setViewMode('table')}
             disabled={isImportDialogOpen}
             className={`
-              flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm
+              flex items-center gap-2 ${viewMode === 'table' ? 'px-4' : 'px-3'} py-2 rounded-xl transition-all font-bold text-sm
               ${viewMode === 'table'
                 ? 'text-white shadow-md scale-105'
                 : 'hover:bg-gray-100 text-gray-500'}
@@ -1361,7 +1361,7 @@ export default function App() {
             style={viewMode === 'table' ? { backgroundColor: themeColor } : undefined}
           >
             <Table2 size={20} />
-            Table
+            {viewMode === 'table' && 'Table'}
           </button>
         </div>
       )}
