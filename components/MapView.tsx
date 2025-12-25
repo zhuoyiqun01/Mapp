@@ -11,6 +11,7 @@ import { TextLabelsLayer } from './map/TextLabelsLayer';
 import { MapCenterHandler } from './map/MapCenterHandler';
 import { MapPositionTracker } from './map/MapPositionTracker';
 import { MapZoomController } from './map/MapZoomController';
+import { SettingsPanel } from './SettingsPanel';
 
 // Custom Horizontal Range Slider component - similar to ZoomSlider but horizontal
 const CustomHorizontalSlider: React.FC<{
@@ -121,7 +122,7 @@ const CustomHorizontalSlider: React.FC<{
     </div>
   );
 };
-import { Search, Locate, Loader2, X, Check, Satellite, Plus, Image as ImageIcon, FileJson, Type, Layers } from 'lucide-react';
+import { Search, Locate, Loader2, X, Check, Satellite, Plus, Image as ImageIcon, FileJson, Type, Layers, Settings } from 'lucide-react';
 import exifr from 'exifr';
 import { NoteEditor } from './NoteEditor';
 import { generateId, fileToBase64 } from '../utils';
@@ -183,7 +184,7 @@ const SearchBarContainer = ({ children }: { children: React.ReactNode }) => {
     return <div ref={containerRef}>{children}</div>;
 };
 
-const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange, mapNotes, frames, frameLayerVisibility, setFrameLayerVisibility, themeColor = THEME_COLOR, showTextLabels, setShowTextLabels, pinSize, setPinSize, clusterThreshold, setClusterThreshold }: {
+const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange, mapNotes, frames, frameLayerVisibility, setFrameLayerVisibility, themeColor = THEME_COLOR, showTextLabels, setShowTextLabels, pinSize, setPinSize, clusterThreshold, setClusterThreshold, onOpenSettings }: {
     onImportPhotos: () => void;
     onImportData: () => void;
     mapStyle: 'standard' | 'satellite';
@@ -199,6 +200,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
     setPinSize: (size: number) => void;
     clusterThreshold: number;
     setClusterThreshold: (threshold: number) => void;
+    onOpenSettings: () => void;
 }) => {
     const map = useMap();
     const [showImportMenu, setShowImportMenu] = useState(false);
@@ -765,6 +767,31 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                 )}
             </div>
 
+            <button
+                onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenSettings();
+                }}
+                onPointerDown={(e) => {
+                    e.stopPropagation();
+                    e.currentTarget.style.backgroundColor = themeColor;
+                }}
+                onPointerUp={(e) => {
+                    e.stopPropagation();
+                    e.currentTarget.style.backgroundColor = '';
+                }}
+                onPointerMove={(e) => e.stopPropagation()}
+                onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
+                }}
+                onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '';
+                }}
+                className="bg-white p-2 sm:p-3 rounded-xl shadow-lg text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
+                title="Settings"
+            >
+                <Settings size={18} className="sm:w-5 sm:h-5" />
+            </button>
 
             {/* Location Error Dialog */}
             {showLocationError && (
@@ -1048,6 +1075,9 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
     // Cluster threshold control
     const [clusterThreshold, setClusterThreshold] = useState(40); // Distance threshold for clustering
+
+  // Settings panel
+  const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   
   // Current marker index being viewed
 
@@ -2759,10 +2789,11 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 setPinSize={setPinSize}
                 clusterThreshold={clusterThreshold}
                 setClusterThreshold={setClusterThreshold}
+                onOpenSettings={() => setShowSettingsPanel(true)}
               />
 
-              {/* Second Row: Sliders */}
-              <div className="flex gap-1.5 sm:gap-2 pointer-events-auto"
+              {/* Second Row: Sliders (hidden on small screens, available in settings) */}
+              <div className="hidden sm:flex gap-1.5 sm:gap-2 pointer-events-auto"
                 onPointerDown={(e) => {
                   // Don't stop propagation for slider interactions
                   const target = e.target as Element;
@@ -3270,6 +3301,27 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           </div>
         </div>
       )}
+
+      {/* Settings Panel */}
+      <SettingsPanel
+        isOpen={showSettingsPanel}
+        onClose={() => setShowSettingsPanel(false)}
+        themeColor={themeColor}
+        onThemeColorChange={(color) => {
+          // This will be handled by parent component (App.tsx)
+          // For now, just close the panel
+          setShowSettingsPanel(false);
+        }}
+        currentMapStyle={mapStyleId || 'carto-light-nolabels'}
+        onMapStyleChange={(styleId) => {
+          setMapStyleId(styleId);
+          set('mapp-map-style', styleId);
+        }}
+        pinSize={pinSize}
+        onPinSizeChange={setPinSize}
+        clusterThreshold={clusterThreshold}
+        onClusterThresholdChange={setClusterThreshold}
+      />
     </div>
   );
 };

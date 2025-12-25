@@ -7,7 +7,6 @@ import { loadProject, loadNoteImages, loadBackgroundImage, saveProject, loadAllP
 import { getLastSyncTime, type SyncStatus } from '../utils/sync';
 import { DEFAULT_THEME_COLOR } from '../constants';
 import { ThemeColorPicker } from './ThemeColorPicker';
-import { SettingsPanel } from './SettingsPanel';
 
 // Menu dropdown component that adjusts position to avoid going off-screen
 const MenuDropdown: React.FC<{
@@ -173,7 +172,6 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   const importFileInputRef = React.useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [showThemeColorPicker, setShowThemeColorPicker] = useState(false);
-  const [showSettingsPanel, setShowSettingsPanel] = useState(false);
 
   const handleCreate = () => {
     if (!newProjectName.trim()) return;
@@ -951,16 +949,6 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
             <Home size={24} />
           </button>
           <div className="absolute top-4 right-4 z-[2000] flex items-center gap-2">
-            <button 
-              onClick={() => setShowSettingsPanel(true)}
-              className="w-10 h-10 p-2 rounded-xl text-white transition-colors flex items-center justify-center"
-              style={{ backgroundColor: themeColor }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = themeColorDark}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
-              title="设置"
-            >
-              <Settings size={20} />
-            </button>
             {activeProject && syncStatus === 'idle' && getLastSyncTime() && (
               <div
                 className="flex items-center justify-center w-10 h-10 rounded-xl text-white transition-colors cursor-help"
@@ -1375,17 +1363,6 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         />
       )}
 
-      {/* Settings Panel */}
-      {onThemeColorChange && onMapStyleChange && (
-        <SettingsPanel
-          isOpen={showSettingsPanel}
-          onClose={() => setShowSettingsPanel(false)}
-          themeColor={themeColor}
-          onThemeColorChange={onThemeColorChange}
-          currentMapStyle={currentMapStyle}
-          onMapStyleChange={onMapStyleChange}
-        />
-      )}
     </div>
   );
 };
