@@ -3352,6 +3352,39 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         clusterThreshold={clusterThreshold}
         onClusterThresholdChange={setClusterThreshold}
       />
+
+      {/* Import Menu - shown when new upload button is clicked */}
+      {showImportMenu && (
+        <div className="fixed inset-0 z-[6000] flex items-center justify-center">
+          <div
+            className="fixed inset-0 bg-black bg-opacity-50"
+            onClick={() => setShowImportMenu && setShowImportMenu(false)}
+          />
+          <div className="relative z-[6001] bg-white rounded-xl shadow-xl border border-gray-100 py-2 w-48 mx-4">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                fileInputRef.current?.click();
+                setShowImportMenu && setShowImportMenu(false);
+              }}
+              className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+            >
+              <ImageIcon size={16} /> Import from Photos
+            </button>
+            <div className="h-px bg-gray-100 my-1" />
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                dataImportInputRef.current?.click();
+                setShowImportMenu && setShowImportMenu(false);
+              }}
+              className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+            >
+              <FileJson size={16} /> Import from Data
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
