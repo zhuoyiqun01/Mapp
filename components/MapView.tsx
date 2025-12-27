@@ -370,7 +370,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
         }
     };
     
-
+    
     // Close menus when clicking outside
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -792,7 +792,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
             >
                 <Settings size={18} className="sm:w-5 sm:h-5" />
             </button>
-
+            
             {/* Location Error Dialog */}
             {showLocationError && (
                 <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-black bg-opacity-50">
@@ -836,20 +836,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const [editingNote, setEditingNote] = useState<Partial<Note> | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [deviceHeading, setDeviceHeading] = useState<number | null>(null);
   const [hasLocationPermission, setHasLocationPermission] = useState(false);
-
-  // Helper function to convert hex color to RGB
-  const hexToRgb = (hex: string): string => {
-    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    if (result) {
-      const r = parseInt(result[1], 16);
-      const g = parseInt(result[2], 16);
-      const b = parseInt(result[3], 16);
-      return `${r}, ${g}, ${b}`;
-    }
-    return '255, 255, 255'; // fallback to white
-  };
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -859,7 +846,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   
   const [imageDimensions, setImageDimensions] = useState<[number, number] | null>(null);
   const [minImageZoom, setMinImageZoom] = useState(-20);
-
+  
   // Marker clustering related state
   const [clusteredMarkers, setClusteredMarkers] = useState<Array<{ notes: Note[], position: [number, number] }>>([]);
   const [currentNoteIndex, setCurrentNoteIndex] = useState(0);
@@ -1193,27 +1180,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
     checkLocationPermissionAndGetLocation();
 
-    // Set up device orientation listener for heading
-    const handleDeviceOrientation = (event: DeviceOrientationEvent) => {
-      // Use webkitCompassHeading if available (iOS), otherwise calculate from alpha
-      let heading = event.webkitCompassHeading || event.alpha;
-
-      if (heading !== null && heading !== undefined) {
-        // Convert to 0-360 range and adjust for magnetic declination if needed
-        heading = Math.round(heading);
-        setDeviceHeading(heading);
-      }
-    };
-
-    // Add orientation listener
-    if ('DeviceOrientationEvent' in window) {
-      window.addEventListener('deviceorientation', handleDeviceOrientation, true);
-    }
-
     return () => {
-      if ('DeviceOrientationEvent' in window) {
-        window.removeEventListener('deviceorientation', handleDeviceOrientation, true);
-      }
       // Clear location watch
       if (locationWatchId !== null) {
         navigator.geolocation.clearWatch(locationWatchId);
@@ -1344,7 +1311,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       setEditingNote(null);
 
       // Get the latest note data from the notes array to ensure we have the most recent changes
-      const latestNote = notes.find(n => n.id === note.id);
+    const latestNote = notes.find(n => n.id === note.id);
       if (latestNote) {
         noteToEdit = latestNote;
         console.log('Marker clicked:', note.id, 'using latest data from notes array');
@@ -2752,43 +2719,15 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               className: 'user-location-marker',
               html: `<div style="
                 position: relative;
-                width: 48px;
-                height: 48px;
-              ">
-                <!-- Center dot -->
-                <div style="
-                  position: absolute;
-                  top: 22px;
-                  left: 22px;
-                  width: 4px;
-                  height: 4px;
-                  background-color: ${themeColor};
-                  border: 2px solid white;
-                  border-radius: 50%;
-                  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-                "></div>
-
-                <!-- Direction cone (60 degree semi-transparent sector) -->
-                <div style="
-                  position: absolute;
-                  top: 0;
-                  left: 0;
-                  width: 48px;
-                  height: 48px;
-                  border-radius: 50%;
-                  background: conic-gradient(
-                    from ${((deviceHeading || 0) - 30) % 360}deg,
-                    transparent 0deg,
-                    rgba(${hexToRgb(themeColor)}, 0.3) 0deg,
-                    rgba(${hexToRgb(themeColor)}, 0.3) 60deg,
-                    transparent 60deg
-                  );
-                  transform: rotate(${deviceHeading || 0}deg);
-                  transition: transform 0.3s ease;
-                "></div>
-              </div>`,
-              iconSize: [48, 48],
-              iconAnchor: [24, 24]
+                width: 24px;
+                height: 24px;
+                background-color: ${themeColor};
+                border: 3px solid white;
+                border-radius: 50%;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+              "></div>`,
+              iconSize: [24, 24],
+              iconAnchor: [12, 12]
             })}
             zIndexOffset={1000} // Always on top
           />
@@ -2818,8 +2757,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               // Single marker, display directly
               const note = cluster.notes[0];
               return (
-          <Marker
-            key={note.id}
+          <Marker 
+            key={note.id} 
             position={[note.coords.lat, note.coords.lng]}
                   icon={createCustomIcon(note, undefined, showTextLabels, pinSize)}
                   zIndexOffset={note.isFavorite ? 100 : -100}
@@ -2835,7 +2774,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             } else {
               // Multiple markers, show cluster
               return (
-                <Marker
+                <Marker 
                   key={`cluster-${index}`}
                   position={cluster.position}
                   icon={createCustomIcon(cluster.notes[0], cluster.notes.length, showTextLabels, pinSize)}
@@ -2854,8 +2793,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         ) : (
           // Show single markers (non-map mode or when no clustering)
           getFilteredNotes.map(note => (
-            <Marker
-              key={note.id}
+            <Marker 
+              key={note.id} 
               position={[note.coords.lat, note.coords.lng]}
               icon={createCustomIcon(note, undefined, showTextLabels, pinSize)}
               zIndexOffset={note.isFavorite ? 100 : -100}
@@ -2917,8 +2856,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         {isMapMode && (
           <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none items-start">
               {/* First Row: Main Controls */}
-              <MapControls
-                onImportPhotos={() => fileInputRef.current?.click()}
+              <MapControls 
+                onImportPhotos={() => fileInputRef.current?.click()} 
                 onImportData={() => dataImportInputRef.current?.click()}
                 mapStyle={mapStyle}
                 onMapStyleChange={(style) => setLocalMapStyle(style)}
@@ -3188,9 +3127,9 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         )}
 
         <div className="fixed bottom-20 sm:bottom-24 left-2 sm:left-4 z-[500]">
-           <MapZoomController
-             min={isMapMode ? 13 : minImageZoom}
-             max={isMapMode ? 19 : 4}
+           <MapZoomController 
+             min={isMapMode ? 13 : minImageZoom} 
+             max={isMapMode ? 19 : 4} 
              themeColor={themeColor}
            />
         </div>
@@ -3319,7 +3258,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           </div>
         </div>
       )}
-
+      
       {isEditorOpen && (
         <NoteEditor 
             isOpen={isEditorOpen}
