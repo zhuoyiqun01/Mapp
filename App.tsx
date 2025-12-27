@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Map as MapIcon, Grid, Menu, Loader2, Table2, Cloud, CloudOff, CheckCircle2, AlertCircle, RefreshCw, Image as ImageIcon } from 'lucide-react';
+import { Map as MapIcon, Grid, Menu, Loader2, Table2, Cloud, CloudOff, CheckCircle2, AlertCircle, RefreshCw, Image as ImageIcon, Plus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapView } from './components/MapView';
 import { BoardView } from './components/BoardView';
@@ -1297,6 +1297,20 @@ export default function App() {
           />
         )}
       </div>
+
+      {/* Upload Button - only show in mapping view */}
+      {viewMode === 'map' && !isEditorOpen && !isBoardEditMode && activeProject && (
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-4 fade-in">
+          <button
+            onClick={() => mapViewFileInputRef.current?.click()}
+            className="w-20 h-20 sm:w-24 sm:h-24 rounded-full shadow-xl border-4 border-white flex items-center justify-center transition-all hover:scale-105 active:scale-95"
+            style={{ backgroundColor: themeColor }}
+            title="Upload Photos"
+          >
+            <Plus size={32} className="text-white" />
+          </button>
+        </div>
+      )}
 
       {!isEditorOpen && !isBoardEditMode && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-white/90 backdrop-blur-md p-1.5 rounded-2xl shadow-xl border border-white/50 flex gap-1 animate-in slide-in-from-bottom-4 fade-in">
