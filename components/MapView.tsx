@@ -150,6 +150,8 @@ interface MapViewProps {
   onSwitchToBoardView?: (coords?: { x: number; y: number }, mapInstance?: L.Map) => void;
   themeColor?: string;
   mapStyleId?: string;
+  showImportMenu?: boolean;
+  setShowImportMenu?: (show: boolean) => void;
 }
 
 // MapLongPressHandler moved to components/map/MapLongPressHandler.tsx
@@ -184,7 +186,7 @@ const SearchBarContainer = ({ children }: { children: React.ReactNode }) => {
     return <div ref={containerRef}>{children}</div>;
 };
 
-const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange, mapNotes, frames, frameLayerVisibility, setFrameLayerVisibility, themeColor = THEME_COLOR, showTextLabels, setShowTextLabels, pinSize, setPinSize, clusterThreshold, setClusterThreshold, onOpenSettings }: {
+const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange, mapNotes, frames, frameLayerVisibility, setFrameLayerVisibility, themeColor = THEME_COLOR, showTextLabels, setShowTextLabels, pinSize, setPinSize, clusterThreshold, setClusterThreshold, onOpenSettings, showImportMenu, setShowImportMenu }: {
     onImportPhotos: () => void;
     onImportData: () => void;
     mapStyle: 'standard' | 'satellite';
@@ -201,12 +203,17 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
     clusterThreshold: number;
     setClusterThreshold: (threshold: number) => void;
     onOpenSettings: () => void;
+    showImportMenu?: boolean;
+    setShowImportMenu?: (show: boolean) => void;
 }) => {
     const map = useMap();
-    const [showImportMenu, setShowImportMenu] = useState(false);
+    const [internalShowImportMenu, setInternalShowImportMenu] = useState(false);
     const [showLocateMenu, setShowLocateMenu] = useState(false);
+
+    // Use external state if provided, otherwise use internal state
+    const currentShowImportMenu = showImportMenu !== undefined ? showImportMenu : internalShowImportMenu;
+    const currentSetShowImportMenu = setShowImportMenu || setInternalShowImportMenu;
     const [showLocationError, setShowLocationError] = useState(false);
-    const menuRef = useRef<HTMLDivElement>(null);
     const locateMenuRef = useRef<HTMLDivElement>(null);
     
     const requestLocationPermission = (): Promise<GeolocationPosition> => {
@@ -374,18 +381,15 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
     // Close menus when clicking outside
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
-            if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-                setShowImportMenu(false);
-            }
             if (locateMenuRef.current && !locateMenuRef.current.contains(event.target as Node)) {
                 setShowLocateMenu(false);
             }
         };
-        if (showImportMenu || showLocateMenu) {
+        if (showLocateMenu) {
             document.addEventListener('mousedown', handleClickOutside);
             return () => document.removeEventListener('mousedown', handleClickOutside);
         }
-    }, [showImportMenu, showLocateMenu]);
+    }, [showLocateMenu]);
     
     const controlsRef = useRef<HTMLDivElement>(null);
     
@@ -646,126 +650,6 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
             >
                 <Type size={18} className="sm:w-5 sm:h-5" />
             </button>
-            <div className="relative" ref={menuRef}>
-                <button 
-                    onClick={(e) => { 
-                        e.stopPropagation(); 
-                        setShowImportMenu(!showImportMenu);
-                    }}
-                    onPointerDown={(e) => {
-                        e.stopPropagation();
-                        e.currentTarget.style.backgroundColor = themeColor;
-                    }}
-                    onPointerUp={(e) => {
-                        e.stopPropagation();
-                        if (!showImportMenu) {
-                            e.currentTarget.style.backgroundColor = '';
-                        }
-                    }}
-                    onPointerMove={(e) => e.stopPropagation()}
-                    onMouseEnter={(e) => {
-                        if (!showImportMenu) {
-                            e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
-                        }
-                    }}
-                    onMouseLeave={(e) => {
-                        if (!showImportMenu) {
-                            e.currentTarget.style.backgroundColor = '';
-                        }
-                    }}
-                    className="bg-white p-2 sm:p-3 rounded-xl shadow-lg text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
-                    title="Import"
-                >
-                    <svg width="18" height="18" className="sm:w-5 sm:h-5" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" fill="none"/>
-                        <path d="M8 11V5M5 8l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                </button>
-                {showImportMenu && (
-                    <div 
-                        className="absolute left-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-[2000]"
-                        onPointerDown={(e) => {
-                            e.stopPropagation();
-                        }}
-                        onPointerMove={(e) => {
-                            e.stopPropagation();
-                        }}
-                        onPointerUp={(e) => {
-                            e.stopPropagation();
-                        }}
-                        onMouseDown={(e) => {
-                            e.stopPropagation();
-                        }}
-                        onMouseMove={(e) => {
-                            e.stopPropagation();
-                        }}
-                        onMouseUp={(e) => {
-                            e.stopPropagation();
-                        }}
-                        onTouchStart={(e) => {
-                            e.stopPropagation();
-                        }}
-                        onTouchMove={(e) => {
-                            e.stopPropagation();
-                        }}
-                        onTouchEnd={(e) => {
-                            e.stopPropagation();
-                        }}
-                    >
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onImportPhotos();
-                                setShowImportMenu(false);
-                            }}
-                            onPointerDown={(e) => e.stopPropagation()}
-                            onPointerMove={(e) => e.stopPropagation()}
-                            onPointerUp={(e) => e.stopPropagation()}
-                            className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
-                        >
-                            <ImageIcon size={16} /> Import from Photos
-                        </button>
-                        <div className="h-px bg-gray-100 my-1" />
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onImportData();
-                                setShowImportMenu(false);
-                            }}
-                            onPointerDown={(e) => {
-                                e.stopPropagation();
-                            }}
-                            onPointerMove={(e) => {
-                                e.stopPropagation();
-                            }}
-                            onPointerUp={(e) => {
-                                e.stopPropagation();
-                            }}
-                            onMouseDown={(e) => {
-                                e.stopPropagation();
-                            }}
-                            onMouseMove={(e) => {
-                                e.stopPropagation();
-                            }}
-                            onMouseUp={(e) => {
-                                e.stopPropagation();
-                            }}
-                            onTouchStart={(e) => {
-                                e.stopPropagation();
-                            }}
-                            onTouchMove={(e) => {
-                                e.stopPropagation();
-                            }}
-                            onTouchEnd={(e) => {
-                                e.stopPropagation();
-                            }}
-                            className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
-                        >
-                            <FileJson size={16} /> Import from Data
-                        </button>
-                    </div>
-                )}
-            </div>
 
             <button
                 onClick={(e) => {
@@ -828,7 +712,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
 // Component to track map position changes and notify parent
 
 
-export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, projectId, onNavigateComplete, onPositionChange, onSwitchToBoardView, themeColor = THEME_COLOR, mapStyleId = 'carto-light-nolabels' }) => {
+export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, projectId, onNavigateComplete, onPositionChange, onSwitchToBoardView, themeColor = THEME_COLOR, mapStyleId = 'carto-light-nolabels', showImportMenu, setShowImportMenu }) => {
   if (!project) {
     return null;
   }
@@ -2917,8 +2801,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         {isMapMode && (
           <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none items-start">
               {/* First Row: Main Controls */}
-              <MapControls 
-                onImportPhotos={() => fileInputRef.current?.click()} 
+              <MapControls
+                onImportPhotos={() => fileInputRef.current?.click()}
                 onImportData={() => dataImportInputRef.current?.click()}
                 mapStyle={mapStyle}
                 onMapStyleChange={(style) => setLocalMapStyle(style)}
@@ -2934,6 +2818,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 clusterThreshold={clusterThreshold}
                 setClusterThreshold={setClusterThreshold}
                 onOpenSettings={() => setShowSettingsPanel(true)}
+                showImportMenu={showImportMenu}
+                setShowImportMenu={setShowImportMenu}
               />
 
               {/* Second Row: Sliders (hidden on small screens, available in settings) */}

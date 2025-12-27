@@ -50,6 +50,7 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const mapViewFileInputRef = useRef<HTMLInputElement | null>(null);
   const [sidebarButtonY, setSidebarButtonY] = useState(96); // 初始值，将在 useEffect 中更新为屏幕中间
+  const [showMapImportMenu, setShowMapImportMenu] = useState(false);
   const sidebarButtonDragRef = useRef({ isDragging: false, startY: 0, startButtonY: 0 });
   
   // Set initial sidebar button position to vertical center
@@ -1180,6 +1181,8 @@ export default function App() {
             }}
             themeColor={themeColor}
             mapStyleId={mapStyle}
+            showImportMenu={showMapImportMenu}
+            setShowImportMenu={setShowMapImportMenu}
           />
         ) : viewMode === 'board' ? (
           <BoardView 
@@ -1302,8 +1305,8 @@ export default function App() {
       {viewMode === 'map' && !isEditorOpen && !isBoardEditMode && activeProject && (
         <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-4 fade-in">
           <button
-            onClick={() => mapViewFileInputRef.current?.click()}
-            className="w-20 h-20 sm:w-24 sm:h-24 rounded-full shadow-xl border-4 border-white flex items-center justify-center transition-all hover:scale-105 active:scale-95"
+            onClick={() => setShowMapImportMenu(!showMapImportMenu)}
+            className="w-12 h-12 sm:w-24 sm:h-24 rounded-full shadow-xl border-1 border-white flex items-center justify-center transition-all hover:scale-105 active:scale-95"
             style={{ backgroundColor: themeColor }}
             title="Upload Photos"
           >
