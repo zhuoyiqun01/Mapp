@@ -838,6 +838,18 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [deviceHeading, setDeviceHeading] = useState<number | null>(null);
   const [hasLocationPermission, setHasLocationPermission] = useState(false);
+
+  // Helper function to convert hex color to RGB
+  const hexToRgb = (hex: string): string => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    if (result) {
+      const r = parseInt(result[1], 16);
+      const g = parseInt(result[2], 16);
+      const b = parseInt(result[3], 16);
+      return `${r}, ${g}, ${b}`;
+    }
+    return '255, 255, 255'; // fallback to white
+  };
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -2740,30 +2752,43 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               className: 'user-location-marker',
               html: `<div style="
                 position: relative;
-                width: 24px;
-                height: 24px;
-                background-color: ${themeColor};
-                border: 3px solid white;
-                border-radius: 50%;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-                transform: rotate(${deviceHeading || 0}deg);
-                transition: transform 0.3s ease;
+                width: 48px;
+                height: 48px;
               ">
+                <!-- Center dot -->
                 <div style="
                   position: absolute;
-                  top: -8px;
-                  left: 50%;
-                  transform: translateX(-50%);
-                  width: 0;
-                  height: 0;
-                  border-left: 4px solid transparent;
-                  border-right: 4px solid transparent;
-                  border-bottom: 8px solid ${themeColor};
-                  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));
+                  top: 22px;
+                  left: 22px;
+                  width: 4px;
+                  height: 4px;
+                  background-color: ${themeColor};
+                  border: 2px solid white;
+                  border-radius: 50%;
+                  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+                "></div>
+
+                <!-- Direction cone (60 degree semi-transparent sector) -->
+                <div style="
+                  position: absolute;
+                  top: 0;
+                  left: 0;
+                  width: 48px;
+                  height: 48px;
+                  border-radius: 50%;
+                  background: conic-gradient(
+                    from ${((deviceHeading || 0) - 30) % 360}deg,
+                    transparent 0deg,
+                    rgba(${hexToRgb(themeColor)}, 0.3) 0deg,
+                    rgba(${hexToRgb(themeColor)}, 0.3) 60deg,
+                    transparent 60deg
+                  );
+                  transform: rotate(${deviceHeading || 0}deg);
+                  transition: transform 0.3s ease;
                 "></div>
               </div>`,
-              iconSize: [24, 24],
-              iconAnchor: [12, 12]
+              iconSize: [48, 48],
+              iconAnchor: [24, 24]
             })}
             zIndexOffset={1000} // Always on top
           />
