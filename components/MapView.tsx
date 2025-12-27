@@ -613,33 +613,33 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
             >
                 <Satellite size={18} className="sm:w-5 sm:h-5" />
             </button>
-            <button
-                onClick={(e) => {
-                    e.stopPropagation();
+                <button 
+                    onClick={(e) => { 
+                        e.stopPropagation(); 
                     setShowTextLabels(!showTextLabels);
-                }}
-                onPointerDown={(e) => {
-                    e.stopPropagation();
-                    e.currentTarget.style.backgroundColor = themeColor;
-                }}
-                onPointerUp={(e) => {
-                    e.stopPropagation();
+                    }}
+                    onPointerDown={(e) => {
+                        e.stopPropagation();
+                        e.currentTarget.style.backgroundColor = themeColor;
+                    }}
+                    onPointerUp={(e) => {
+                        e.stopPropagation();
                     // Note: showTextLabels will be updated after this event, so we check the current value
                     if (!showTextLabels) {
-                        e.currentTarget.style.backgroundColor = '';
-                    }
-                }}
-                onPointerMove={(e) => e.stopPropagation()}
-                onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = '';
+                        }
+                    }}
+                    onPointerMove={(e) => e.stopPropagation()}
+                    onMouseEnter={(e) => {
                     if (!showTextLabels) {
-                        e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
-                    }
-                }}
-                onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
+                        }
+                    }}
+                    onMouseLeave={(e) => {
                     if (!showTextLabels) {
-                        e.currentTarget.style.backgroundColor = '';
-                    }
-                }}
+                            e.currentTarget.style.backgroundColor = '';
+                        }
+                    }}
                 className={`p-2 sm:p-3 rounded-xl shadow-lg transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${
                     showTextLabels
                         ? 'text-white'
@@ -649,19 +649,19 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                 title={showTextLabels ? 'Hide Text Labels' : 'Show Text Labels'}
             >
                 <Type size={18} className="sm:w-5 sm:h-5" />
-            </button>
+                </button>
 
-            <button
-                onClick={(e) => {
-                    e.stopPropagation();
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
                     onOpenSettings();
-                }}
-                onPointerDown={(e) => {
-                    e.stopPropagation();
+                            }}
+                            onPointerDown={(e) => {
+                                e.stopPropagation();
                     e.currentTarget.style.backgroundColor = themeColor;
-                }}
-                onPointerUp={(e) => {
-                    e.stopPropagation();
+                            }}
+                            onPointerUp={(e) => {
+                                e.stopPropagation();
                     e.currentTarget.style.backgroundColor = '';
                 }}
                 onPointerMove={(e) => e.stopPropagation()}
@@ -675,7 +675,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                 title="Settings"
             >
                 <Settings size={18} className="sm:w-5 sm:h-5" />
-            </button>
+                        </button>
             
             {/* Location Error Dialog */}
             {showLocationError && (
@@ -733,6 +733,76 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       return `${r}, ${g}, ${b}`;
     }
     return '255, 255, 255'; // fallback to white
+  };
+
+  // Get current browser location for live fallback
+  const getCurrentBrowserLocation = (): Promise<{ lat: number; lng: number }> => {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error('Geolocation is not supported'));
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          resolve({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          });
+        },
+        (error) => {
+          console.warn('Failed to get current browser location:', error);
+          reject(error);
+        },
+        {
+          timeout: 10000,
+          maximumAge: 30000,
+          enableHighAccuracy: true
+        }
+      );
+    });
+  };
+
+  // Check if photo was taken recently (within last 30 minutes)
+  const isPhotoTakenRecently = (exifData: any): boolean => {
+    if (!exifData) return false;
+
+    // Try different date fields that might contain photo creation time
+    const dateFields = ['DateTimeOriginal', 'DateTime', 'CreateDate', 'ModifyDate'];
+    let photoDate: Date | null = null;
+
+    for (const field of dateFields) {
+      if (exifData[field]) {
+        try {
+          // EXIF dates are usually in "YYYY:MM:DD HH:MM:SS" format
+          const dateStr = exifData[field].toString();
+          if (dateStr.includes(':')) {
+            // Convert EXIF format to ISO format
+            const isoDate = dateStr.replace(/^(\d{4}):(\d{2}):(\d{2}) /, '$1-$2-$3 ');
+            photoDate = new Date(isoDate);
+          } else {
+            photoDate = new Date(dateStr);
+          }
+
+          if (!isNaN(photoDate.getTime())) {
+            break;
+          }
+        } catch (e) {
+          continue;
+        }
+      }
+    }
+
+    if (!photoDate || isNaN(photoDate.getTime())) {
+      // If no valid date found, assume it's recent if file is recent
+      return true; // Conservative approach - assume recent if we can't determine
+    }
+
+    const now = Date.now();
+    const photoTime = photoDate.getTime();
+    const thirtyMinutesInMs = 30 * 60 * 1000;
+
+    return (now - photoTime) <= thirtyMinutesInMs;
   };
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -1678,14 +1748,33 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           } else {
             console.warn('No EXIF data found at all');
           }
-          previews.push({
-            file: processedFile,
-            imageUrl: URL.createObjectURL(processedFile),
-            lat: 0,
-            lng: 0,
-            error: 'Missing location data'
-          });
-          continue;
+
+          // Live location fallback: if photo has no GPS but was taken recently,
+          // assume user is uploading "live" photos and get current browser location
+          if ((lat === null || lng === null || lat === 0 || lng === 0) && isPhotoTakenRecently(exifData)) {
+            try {
+              console.log('Attempting live location fallback for:', processedFile.name);
+              const currentLocation = await getCurrentBrowserLocation();
+              lat = currentLocation.lat;
+              lng = currentLocation.lng;
+              console.log('Live location fallback successful:', { lat, lng });
+            } catch (locationError) {
+              console.warn('Live location fallback failed:', locationError);
+              // Continue with lat/lng = 0 (will show error)
+            }
+          }
+
+          // If still no valid location data, show error
+          if (lat === null || lng === null || lat === 0 || lng === 0 || isNaN(lat) || isNaN(lng)) {
+            previews.push({
+              file: processedFile,
+              imageUrl: URL.createObjectURL(processedFile),
+              lat: 0,
+              lng: 0,
+              error: 'Missing location data'
+            });
+            continue;
+          }
         }
         
         // Calculate image fingerprint
@@ -2801,8 +2890,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         {isMapMode && (
           <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none items-start">
               {/* First Row: Main Controls */}
-              <MapControls
-                onImportPhotos={() => fileInputRef.current?.click()}
+              <MapControls 
+                onImportPhotos={() => fileInputRef.current?.click()} 
                 onImportData={() => dataImportInputRef.current?.click()}
                 mapStyle={mapStyle}
                 onMapStyleChange={(style) => setLocalMapStyle(style)}
@@ -3226,7 +3315,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,.heic,.heif"
         multiple
         style={{ display: 'none' }}
         onChange={(e) => handleImageImport(e.target.files)}

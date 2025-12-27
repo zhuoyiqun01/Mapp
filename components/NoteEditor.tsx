@@ -960,7 +960,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                       {/* Upload button - always visible */}
                       <label className="w-20 h-20 bg-white/60 hover:bg-white shadow-sm rounded-2xl flex items-center justify-center cursor-pointer transition-colors relative flex-shrink-0" style={{ border: 'none' }}>
                           <Camera size={24} className="text-gray-500"/>
-                          <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { setShowEmojiPicker(false); handleImageUpload(e); }} />
+                          <input type="file" accept="image/*,.heic,.heif" multiple className="hidden" onChange={(e) => { setShowEmojiPicker(false); handleImageUpload(e); }} />
                       </label>
                       <button 
                         onClick={() => { setShowEmojiPicker(false); setIsSketching(true); }}
