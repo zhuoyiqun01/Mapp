@@ -836,6 +836,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const [editingNote, setEditingNote] = useState<Partial<Note> | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [deviceHeading, setDeviceHeading] = useState<number | null>(null);
+  const [hasLocationPermission, setHasLocationPermission] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -1125,25 +1127,87 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     return { center: defaultCenter, zoom: 16 };
   }, [isMapMode, projectId, mapNotes, currentLocation, defaultCenter]);
 
-  // Get current location on mount (only once)
+  // Get current location and device orientation
   useEffect(() => {
-    if (!isMapMode || currentLocation) return;
-    
-    if ('geolocation' in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setCurrentLocation({
-            lat: position.coords.latitude,
-            lng: position.coords.longitude
-          });
-        },
-        () => {
-          // Location permission denied or error - ignore
-        },
-        { timeout: 5000, maximumAge: 60000 }
-      );
+    if (!isMapMode) return;
+
+    let locationWatchId: number | null = null;
+
+    // Check location permission and set up location tracking
+    const checkLocationPermissionAndGetLocation = async () => {
+      if ('permissions' in navigator) {
+        try {
+          const permission = await navigator.permissions.query({ name: 'geolocation' as PermissionName });
+          setHasLocationPermission(permission.state === 'granted');
+
+          if (permission.state === 'granted') {
+            // Get initial position
+            navigator.geolocation.getCurrentPosition(
+              (position) => {
+                setCurrentLocation({
+                  lat: position.coords.latitude,
+                  lng: position.coords.longitude
+                });
+              },
+              (error) => {
+                console.log('Location access denied or failed:', error);
+              },
+              { timeout: 5000, maximumAge: 60000, enableHighAccuracy: true }
+            );
+
+            // Set up continuous position watching
+            locationWatchId = navigator.geolocation.watchPosition(
+              (position) => {
+                setCurrentLocation({
+                  lat: position.coords.latitude,
+                  lng: position.coords.longitude
+                });
+              },
+              (error) => {
+                console.log('Location watch failed:', error);
+              },
+              {
+                timeout: 10000,
+                maximumAge: 30000,
+                enableHighAccuracy: true
+              }
+            );
+          }
+        } catch (error) {
+          console.log('Permission check failed:', error);
+        }
+      }
+    };
+
+    checkLocationPermissionAndGetLocation();
+
+    // Set up device orientation listener for heading
+    const handleDeviceOrientation = (event: DeviceOrientationEvent) => {
+      // Use webkitCompassHeading if available (iOS), otherwise calculate from alpha
+      let heading = event.webkitCompassHeading || event.alpha;
+
+      if (heading !== null && heading !== undefined) {
+        // Convert to 0-360 range and adjust for magnetic declination if needed
+        heading = Math.round(heading);
+        setDeviceHeading(heading);
+      }
+    };
+
+    // Add orientation listener
+    if ('DeviceOrientationEvent' in window) {
+      window.addEventListener('deviceorientation', handleDeviceOrientation, true);
     }
-  }, [isMapMode, currentLocation]);
+
+    return () => {
+      if ('DeviceOrientationEvent' in window) {
+        window.removeEventListener('deviceorientation', handleDeviceOrientation, true);
+      }
+      // Clear location watch
+      if (locationWatchId !== null) {
+        navigator.geolocation.clearWatch(locationWatchId);
+      }
+    };
+  }, [isMapMode]);
 
   // Load Image Dimensions and persistence
   useEffect(() => {
@@ -2665,6 +2729,43 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             showTextLabels={showTextLabels}
             pinSize={pinSize}
             themeColor={themeColor}
+          />
+        )}
+
+        {/* User Location Indicator - only show if location permission is granted */}
+        {isMapMode && hasLocationPermission && currentLocation && (
+          <Marker
+            position={[currentLocation.lat, currentLocation.lng]}
+            icon={L.divIcon({
+              className: 'user-location-marker',
+              html: `<div style="
+                position: relative;
+                width: 24px;
+                height: 24px;
+                background-color: ${themeColor};
+                border: 3px solid white;
+                border-radius: 50%;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+                transform: rotate(${deviceHeading || 0}deg);
+                transition: transform 0.3s ease;
+              ">
+                <div style="
+                  position: absolute;
+                  top: -8px;
+                  left: 50%;
+                  transform: translateX(-50%);
+                  width: 0;
+                  height: 0;
+                  border-left: 4px solid transparent;
+                  border-right: 4px solid transparent;
+                  border-bottom: 8px solid ${themeColor};
+                  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));
+                "></div>
+              </div>`,
+              iconSize: [24, 24],
+              iconAnchor: [12, 12]
+            })}
+            zIndexOffset={1000} // Always on top
           />
         )}
         
