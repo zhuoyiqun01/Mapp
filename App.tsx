@@ -1306,11 +1306,11 @@ export default function App() {
         <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-4 fade-in">
           <button
             onClick={() => setShowMapImportMenu(!showMapImportMenu)}
-            className="w-12 h-12 sm:w-24 sm:h-24 rounded-full shadow-xl border-1 border-white flex items-center justify-center transition-all hover:scale-105 active:scale-95"
+            className="w-12 h-12 rounded-full shadow-xl border-1 border-white flex items-center justify-center transition-all hover:scale-105 active:scale-95"
             style={{ backgroundColor: themeColor }}
             title="Upload Photos"
           >
-            <Plus size={32} className="text-white" />
+            <Plus size={24} className="text-white" />
           </button>
         </div>
       )}
