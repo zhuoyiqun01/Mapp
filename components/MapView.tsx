@@ -836,7 +836,20 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const [editingNote, setEditingNote] = useState<Partial<Note> | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [deviceHeading, setDeviceHeading] = useState<number | null>(null);
   const [hasLocationPermission, setHasLocationPermission] = useState(false);
+
+  // Helper function to convert hex color to RGB
+  const hexToRgb = (hex: string): string => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    if (result) {
+      const r = parseInt(result[1], 16);
+      const g = parseInt(result[2], 16);
+      const b = parseInt(result[3], 16);
+      return `${r}, ${g}, ${b}`;
+    }
+    return '255, 255, 255'; // fallback to white
+  };
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -1180,7 +1193,27 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
     checkLocationPermissionAndGetLocation();
 
+    // Set up device orientation listener for heading
+    const handleDeviceOrientation = (event: DeviceOrientationEvent) => {
+      // Use webkitCompassHeading if available (iOS), otherwise calculate from alpha
+      let heading = (event as any).webkitCompassHeading || event.alpha;
+
+      if (heading !== null && heading !== undefined) {
+        // Convert to 0-360 range and adjust for magnetic declination if needed
+        heading = Math.round(heading);
+        setDeviceHeading(heading);
+      }
+    };
+
+    // Add orientation listener
+    if ('DeviceOrientationEvent' in window) {
+      window.addEventListener('deviceorientation', handleDeviceOrientation, true);
+    }
+
     return () => {
+      if ('DeviceOrientationEvent' in window) {
+        window.removeEventListener('deviceorientation', handleDeviceOrientation, true);
+      }
       // Clear location watch
       if (locationWatchId !== null) {
         navigator.geolocation.clearWatch(locationWatchId);
@@ -2719,15 +2752,43 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               className: 'user-location-marker',
               html: `<div style="
                 position: relative;
-                width: 24px;
-                height: 24px;
-                background-color: ${themeColor};
-                border: 3px solid white;
-                border-radius: 50%;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-              "></div>`,
-              iconSize: [24, 24],
-              iconAnchor: [12, 12]
+                width: 48px;
+                height: 48px;
+              ">
+                <!-- Semi-transparent direction sector (48px radius, 60 degrees) -->
+                <div style="
+                  position: absolute;
+                  top: 0;
+                  left: 0;
+                  width: 48px;
+                  height: 48px;
+                  border-radius: 50%;
+                  background: conic-gradient(
+                    from ${((deviceHeading || 0) - 30) % 360}deg,
+                    transparent 0deg,
+                    rgba(${hexToRgb(themeColor)}, 0.3) 0deg,
+                    rgba(${hexToRgb(themeColor)}, 0.3) 60deg,
+                    transparent 60deg
+                  );
+                  transform: rotate(${deviceHeading || 0}deg);
+                  transition: transform 0.3s ease;
+                "></div>
+
+                <!-- Center dot (12px radius) -->
+                <div style="
+                  position: absolute;
+                  top: 18px;
+                  left: 18px;
+                  width: 12px;
+                  height: 12px;
+                  background-color: ${themeColor};
+                  border: 2px solid white;
+                  border-radius: 50%;
+                  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+                "></div>
+              </div>`,
+              iconSize: [48, 48],
+              iconAnchor: [24, 24]
             })}
             zIndexOffset={1000} // Always on top
           />
