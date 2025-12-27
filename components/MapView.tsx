@@ -1257,12 +1257,29 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       e.originalEvent?.stopImmediatePropagation();
     }
 
-    // Always get the latest note data from the notes array to ensure we have the most recent changes
-    const latestNote = notes.find(n => n.id === note.id);
-    console.log('Marker clicked:', note.id, 'using latest data:', !!latestNote);
+    // If we're opening the same note that was just closed, preserve the editing state
+    let noteToEdit = note;
+    if (editingNote && editingNote.id === note.id) {
+      // Use the preserved editing state which has the most recent changes
+      noteToEdit = editingNote as Note;
+      console.log('Marker clicked:', note.id, 'using preserved editing data (most recent)');
+    } else {
+      // Clear previous editing state when opening a different note
+      setEditingNote(null);
+
+      // Get the latest note data from the notes array to ensure we have the most recent changes
+      const latestNote = notes.find(n => n.id === note.id);
+      if (latestNote) {
+        noteToEdit = latestNote;
+        console.log('Marker clicked:', note.id, 'using latest data from notes array');
+      } else {
+        console.log('Marker clicked:', note.id, 'using provided note data');
+      }
+    }
+
     setCurrentClusterNotes([]);
     setCurrentNoteIndex(0);
-    setEditingNote(latestNote || note);
+    setEditingNote(noteToEdit);
     setIsEditorOpen(true);
     onToggleEditor(true);
   };
@@ -1364,7 +1381,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const closeEditor = () => {
       setIsEditorOpen(false);
       onToggleEditor(false);
-      setEditingNote(null);
+      // Keep editingNote state to preserve recent changes for potential re-opening
+      // Only clear it when opening a different note
       setCurrentClusterNotes([]);
       setCurrentNoteIndex(0);
   };
