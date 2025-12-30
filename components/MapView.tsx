@@ -1149,17 +1149,27 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   // Navigation coordinates contain cached position from previous session
   // Calculate initial map position like BoardView's calculateInitialTransform
   const getInitialMapPosition = useCallback(() => {
-    if (!projectId) return { center: defaultCenter, zoom: 16 };
+    console.log('[MapView] getInitialMapPosition called, projectId:', projectId);
+
+    if (!projectId) {
+      console.log('[MapView] No projectId, using default');
+      return { center: defaultCenter, zoom: 16 };
+    }
 
     // Check cache first (like BoardView does)
     const cached = getViewPositionCache(projectId, 'map');
+    console.log('[MapView] Cache check result:', cached);
+
     if (cached?.center && cached.zoom &&
         Array.isArray(cached.center) && cached.center.length === 2 &&
         typeof cached.center[0] === 'number' && typeof cached.center[1] === 'number' &&
         typeof cached.zoom === 'number' &&
         !isNaN(cached.center[0]) && !isNaN(cached.center[1]) && !isNaN(cached.zoom)) {
+      console.log('[MapView] Using cached position:', cached);
       return { center: cached.center, zoom: cached.zoom };
     }
+
+    console.log('[MapView] Cache invalid, using fallback');
 
     // Fallback like BoardView's fit calculation
     if (mapNotes.length > 0) {
