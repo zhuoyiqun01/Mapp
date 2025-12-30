@@ -1149,17 +1149,29 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   // Get cached position, last pin position, current location, or default
   // Navigation coordinates take highest priority, then cached position to avoid jumping
   const initialMapPosition = useMemo(() => {
+    console.log('Calculating initialMapPosition:', {
+      isMapMode,
+      projectId,
+      navigateToCoords: !!navigateToCoords,
+      mapNotesCount: mapNotes.length,
+      currentLocation: !!currentLocation,
+      defaultCenter
+    });
+
     if (!isMapMode || !projectId) {
+      console.log('Skipping initialMapPosition: isMapMode or projectId is falsy');
       return null;
     }
 
     // 1. Navigation coordinates (highest priority - handled by MapContainer center prop)
     if (navigateToCoords) {
+      console.log('Using navigation coordinates:', navigateToCoords);
       return { center: [navigateToCoords.lat, navigateToCoords.lng] as [number, number], zoom: 19 };
     }
 
     // 2. Always check cache first - this prevents jumping by ensuring MapContainer starts at cached position
     const cached = getViewPositionCache(projectId, 'map');
+    console.log('Cache check result:', { projectId, cached });
     if (cached?.center && cached.zoom) {
       console.log('Using cached position for initial map setup:', cached);
       return { center: cached.center, zoom: cached.zoom };
@@ -1168,6 +1180,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     // 3. Use last pin position
     if (mapNotes.length > 0) {
       const lastNote = mapNotes[mapNotes.length - 1];
+      console.log('Using last pin position:', lastNote.coords);
       return {
         center: [lastNote.coords.lat, lastNote.coords.lng] as [number, number],
         zoom: 16
@@ -1176,10 +1189,12 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
     // 4. Use current location (if available)
     if (currentLocation) {
+      console.log('Using current location:', currentLocation);
       return { center: [currentLocation.lat, currentLocation.lng] as [number, number], zoom: 16 };
     }
 
     // 5. Use default
+    console.log('Using default center:', defaultCenter);
     return { center: defaultCenter, zoom: 16 };
   }, [isMapMode, projectId, navigateToCoords, mapNotes, currentLocation, defaultCenter]);
 
