@@ -1278,18 +1278,42 @@ export default function App() {
                 timestamp: new Date().toISOString()
               });
 
-              // Only set navigation coords if we have explicit coords (for navigation to specific location)
-              // Don't set coords for cache restoration - let MapContainer handle that directly
-              if (coords) {
-                console.log('[Navigation] 从Board使用明确的导航坐标:', coords);
+              let navigationCoords = coords;
+              let navigationZoom = 19; // Default navigation zoom
+
+              if (!navigationCoords && currentProjectId) {
+                // Read cached position - this IS the navigation target
+                const cached = getViewPositionCache(currentProjectId, 'map');
+                console.log('[Navigation] 从Board读取缓存位置:', {
+                  projectId: currentProjectId,
+                  cached,
+                  hasValidCache: !!(cached?.center && cached.zoom)
+                });
+
+                if (cached?.center && cached.zoom) {
+                  navigationCoords = { lat: cached.center[0], lng: cached.center[1] };
+                  navigationZoom = cached.zoom; // Use cached zoom for navigation
+                  console.log('[Navigation] 从Board使用缓存位置作为导航坐标:', {
+                    coords: navigationCoords,
+                    zoom: navigationZoom,
+                    originalCache: cached
+                  });
+                } else {
+                  console.log('[Navigation] 从Board无有效缓存，将使用保底位置');
+                }
+              } else if (navigationCoords) {
+                console.log('[Navigation] 从Board使用明确的导航坐标:', navigationCoords);
+              }
+
+              // Set navigation coordinates BEFORE view switch to ensure MapView has correct coords on mount
+              if (navigationCoords) {
                 setNavigateToMapCoords({
-                  lat: coords.lat,
-                  lng: coords.lng,
-                  zoom: 19 // Use navigation zoom for explicit navigation
+                  lat: navigationCoords.lat,
+                  lng: navigationCoords.lng,
+                  zoom: navigationZoom
                 });
               } else {
-                console.log('[Navigation] 从Board无明确导航坐标，将让Map直接使用缓存位置');
-                setNavigateToMapCoords(null); // Clear any previous navigation coords
+                setNavigateToMapCoords(null);
               }
 
               // Switch view after coordinates are set
@@ -1323,18 +1347,42 @@ export default function App() {
                 timestamp: new Date().toISOString()
               });
 
-              // Only set navigation coords if we have explicit coords (for navigation to specific location)
-              // Don't set coords for cache restoration - let MapContainer handle that directly
-              if (coords) {
-                console.log('[Navigation] 从Gallery使用明确的导航坐标:', coords);
+              let navigationCoords = coords;
+              let navigationZoom = 19; // Default navigation zoom
+
+              if (!navigationCoords && currentProjectId) {
+                // Read cached position - this IS the navigation target
+                const cached = getViewPositionCache(currentProjectId, 'map');
+                console.log('[Navigation] 从Gallery读取缓存位置:', {
+                  projectId: currentProjectId,
+                  cached,
+                  hasValidCache: !!(cached?.center && cached.zoom)
+                });
+
+                if (cached?.center && cached.zoom) {
+                  navigationCoords = { lat: cached.center[0], lng: cached.center[1] };
+                  navigationZoom = cached.zoom; // Use cached zoom for navigation
+                  console.log('[Navigation] 从Gallery使用缓存位置作为导航坐标:', {
+                    coords: navigationCoords,
+                    zoom: navigationZoom,
+                    originalCache: cached
+                  });
+                } else {
+                  console.log('[Navigation] 从Gallery无有效缓存，将使用保底位置');
+                }
+              } else if (navigationCoords) {
+                console.log('[Navigation] 从Gallery使用明确的导航坐标:', navigationCoords);
+              }
+
+              // Set navigation coordinates BEFORE view switch to ensure MapView has correct coords on mount
+              if (navigationCoords) {
                 setNavigateToMapCoords({
-                  lat: coords.lat,
-                  lng: coords.lng,
-                  zoom: 19 // Use navigation zoom for explicit navigation
+                  lat: navigationCoords.lat,
+                  lng: navigationCoords.lng,
+                  zoom: navigationZoom
                 });
               } else {
-                console.log('[Navigation] 从Gallery无明确导航坐标，将让Map直接使用缓存位置');
-                setNavigateToMapCoords(null); // Clear any previous navigation coords
+                setNavigateToMapCoords(null);
               }
 
               // Switch view after coordinates are set
