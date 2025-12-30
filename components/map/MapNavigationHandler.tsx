@@ -10,11 +10,11 @@ export const MapNavigationHandler: React.FC<MapNavigationHandlerProps> = ({ coor
   const map = useMap();
 
   useEffect(() => {
-    console.log('[MapNavigationHandler] Received coords:', coords);
+    // Only process non-null coordinates
     if (coords && map) {
+      console.log('[MapNavigationHandler] Navigating to:', coords);
       try {
         const zoom = coords.zoom ?? 19;
-        console.log('[MapNavigationHandler] Setting view to:', { lat: coords.lat, lng: coords.lng, zoom });
         map.setView([coords.lat, coords.lng], zoom, {
           animate: true,
           duration: 1
@@ -34,7 +34,7 @@ export const MapNavigationHandler: React.FC<MapNavigationHandlerProps> = ({ coor
         console.warn('MapNavigationHandler: Failed to set view:', error);
       }
     }
-  }, [coords, map, onComplete]);
+  }, [coords?.lat, coords?.lng, coords?.zoom, map, onComplete]);
 
   return null;
 };
