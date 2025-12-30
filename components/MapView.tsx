@@ -4,9 +4,9 @@ import { MapContainer, TileLayer, Marker, ImageOverlay, useMap, useMapEvents } f
 import L from 'leaflet';
 import { Note, Coordinates, Project } from '../types';
 import { MAP_TILE_URL, MAP_TILE_URL_FALLBACK, MAP_SATELLITE_URL, MAP_ATTRIBUTION, THEME_COLOR, THEME_COLOR_DARK, MAP_STYLE_OPTIONS } from '../constants';
-import { useMapPosition } from '../hooks/useMapPosition';
-import { useGeolocation } from '../hooks/useGeolocation';
-import { useImageImport } from '../hooks/useImageImport';
+import { useMapPosition } from '@/components/hooks/useMapPosition';
+import { useGeolocation } from '@/components/hooks/useGeolocation';
+import { useImageImport } from '@/components/hooks/useImageImport';
 import { MapLongPressHandler } from './map/MapLongPressHandler';
 import { MapNavigationHandler } from './map/MapNavigationHandler';
 import { TextLabelsLayer } from './map/TextLabelsLayer';
