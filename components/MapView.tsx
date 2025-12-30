@@ -6,6 +6,7 @@ import { Note, Coordinates, Project } from '../types';
 import { MAP_TILE_URL, MAP_TILE_URL_FALLBACK, MAP_SATELLITE_URL, MAP_ATTRIBUTION, THEME_COLOR, THEME_COLOR_DARK, MAP_STYLE_OPTIONS } from '../constants';
 import { useMapPosition } from '../hooks/useMapPosition';
 import { useGeolocation } from '../hooks/useGeolocation';
+import { useImageImport } from '../hooks/useImageImport';
 import { MapLongPressHandler } from './map/MapLongPressHandler';
 import { MapNavigationHandler } from './map/MapNavigationHandler';
 import { TextLabelsLayer } from './map/TextLabelsLayer';
@@ -824,19 +825,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     });
   }, [notes, project.frames, frameLayerVisibility, showAllFrames]);
   
-  // Image import related state
-  const [importPreview, setImportPreview] = useState<Array<{
-    file: File;
-    imageUrl: string;
-    lat: number;
-    lng: number;
-    error?: string;
-    isDuplicate?: boolean;
-    imageFingerprint?: string;
-  }>>([]);
-  const [showImportDialog, setShowImportDialog] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const dataImportInputRef = useRef<HTMLInputElement>(null);
   
   // Image fingerprint: GPS coordinates + 3 sampled pixels (top-left, bottom-left, bottom-right)
   // Format: lat_lng_topLeftPixel_bottomLeftPixel_bottomRightPixel
@@ -1030,6 +1018,24 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     mapNotes,
     currentLocation,
     defaultCenter
+  });
+
+  // Image import management hook
+  const {
+    importPreview,
+    showImportDialog,
+    fileInputRef,
+    dataImportInputRef,
+    handleImageImport,
+    handleConfirmImport,
+    handleCancelImport
+  } = useImageImport({
+    project,
+    notes,
+    onAddNote,
+    onUpdateProject,
+    onImportDialogChange,
+    mapInstance
   });
 
   // Get current location and device orientation
