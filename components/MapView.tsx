@@ -15,6 +15,7 @@ import { TextLabelsLayer } from './map/TextLabelsLayer';
 import { MapPositionTracker } from './map/MapPositionTracker';
 import { MapCenterHandler } from './map/MapCenterHandler';
 import { MapZoomController } from './map/MapZoomController';
+import { MapControls } from './map/MapControls';
 import { MapMarkers } from './map/MapMarkers';
 import { CustomHorizontalSlider } from './map/CustomHorizontalSlider';
 import { SearchBarContainer } from './map/SearchBarContainer';
