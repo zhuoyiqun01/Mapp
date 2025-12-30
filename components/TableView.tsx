@@ -256,38 +256,38 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
 
   return (
     <div className="h-full bg-gray-50 flex flex-col">
-      {/* Header */}
+        {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-semibold text-gray-900">Table</h1>
         </div>
-
-        {/* Table level toggle */}
+          
+          {/* Table level toggle */}
         <div className="flex gap-1 rounded-lg p-0.5">
-          <button
-            onClick={() => setTableLevel('Primary')}
-            className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
-              tableLevel === 'Primary'
+            <button
+              onClick={() => setTableLevel('Primary')}
+              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+                tableLevel === 'Primary'
                 ? 'text-white shadow-sm'
-                : 'text-gray-600 hover:text-gray-900'
-            }`}
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
             style={tableLevel === 'Primary' ? { backgroundColor: themeColor } : undefined}
-          >
-            Primary ({standardNotes.length})
-          </button>
-          <button
-            onClick={() => setTableLevel('Secondary')}
-            className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
-              tableLevel === 'Secondary'
+            >
+              Primary ({standardNotes.length})
+            </button>
+            <button
+              onClick={() => setTableLevel('Secondary')}
+              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+                tableLevel === 'Secondary'
                 ? 'text-white shadow-sm'
-                : 'text-gray-600 hover:text-gray-900'
-            }`}
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
             style={tableLevel === 'Secondary' ? { backgroundColor: themeColor } : undefined}
-          >
-            Secondary ({compactNotes.length})
-          </button>
+            >
+              Secondary ({compactNotes.length})
+            </button>
+          </div>
         </div>
-      </div>
 
       {/* Content */}
       <div className="flex-1 overflow-auto p-4">
@@ -562,25 +562,25 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
             No compact note data
           </div>
         )}
-
-        {/* Note Editor */}
-        {editorNoteId && (
-          <NoteEditor
-            initialNote={project.notes.find(n => n.id === editorNoteId)}
-            isOpen={true}
-            onClose={() => setEditorNoteId(null)}
-            onSave={(updatedNote) => {
-              if (editorNoteId) {
-                const existingNote = project.notes.find(n => n.id === editorNoteId);
-                if (existingNote) {
-                  onUpdateNote({ ...existingNote, ...updatedNote });
-                }
+      
+      {/* Note Editor */}
+      {editorNoteId && (
+        <NoteEditor
+          initialNote={project.notes.find(n => n.id === editorNoteId)}
+          isOpen={true}
+          onClose={() => setEditorNoteId(null)}
+          onSave={(updatedNote) => {
+            if (editorNoteId) {
+              const existingNote = project.notes.find(n => n.id === editorNoteId);
+              if (existingNote) {
+                onUpdateNote({ ...existingNote, ...updatedNote });
               }
-              setEditorNoteId(null);
-            }}
-            onSwitchToBoardView={onSwitchToBoardView}
-          />
-        )}
+            }
+            setEditorNoteId(null);
+          }}
+          onSwitchToBoardView={onSwitchToBoardView}
+        />
+      )}
       </div>
     </div>
   );

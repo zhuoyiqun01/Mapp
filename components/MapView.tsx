@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, ImageOverlay, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { Note, Coordinates, Project } from '../types';
@@ -39,7 +39,7 @@ const CustomHorizontalSlider: React.FC<{
       // Disable map dragging while slider is being dragged
       if (mapInstance) {
         mapInstance.dragging.disable();
-      }
+    }
       return () => {
         document.removeEventListener('mouseup', handleGlobalMouseUp);
         // Re-enable map dragging
@@ -76,7 +76,7 @@ const CustomHorizontalSlider: React.FC<{
     if (!trackRef.current) return;
 
     const rect = trackRef.current.getBoundingClientRect();
-    const relativeX = clientX - rect.left;
+        const relativeX = clientX - rect.left;
     let percent = relativeX / rect.width;
     percent = Math.max(0, Math.min(1, percent));
 
@@ -125,7 +125,7 @@ const CustomHorizontalSlider: React.FC<{
 import { Search, Locate, Loader2, X, Check, Satellite, Plus, Image as ImageIcon, FileJson, Type, Layers, Settings } from 'lucide-react';
 import exifr from 'exifr';
 import { NoteEditor } from './NoteEditor';
-import { generateId, fileToBase64, exportToJpegCentered } from '../utils';
+import { generateId, fileToBase64 } from '../utils';
 import { loadImage } from '../utils/storage';
 import { ZoomSlider } from './ZoomSlider';
 
@@ -152,8 +152,8 @@ interface MapViewProps {
   mapStyleId?: string;
   showImportMenu?: boolean;
   setShowImportMenu?: (show: boolean) => void;
-}
-
+          }
+          
 // MapLongPressHandler moved to components/map/MapLongPressHandler.tsx
 
 
@@ -663,17 +663,17 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                             onPointerUp={(e) => {
                                 e.stopPropagation();
                     e.currentTarget.style.backgroundColor = '';
-                }}
+                            }}
                 onPointerMove={(e) => e.stopPropagation()}
                 onMouseEnter={(e) => {
                     e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
                 }}
                 onMouseLeave={(e) => {
                     e.currentTarget.style.backgroundColor = '';
-                }}
+                            }}
                 className="bg-white p-2 sm:p-3 rounded-xl shadow-lg text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
                 title="Settings"
-            >
+                        >
                 <Settings size={18} className="sm:w-5 sm:h-5" />
                         </button>
             
@@ -712,8 +712,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
 // Component to track map position changes and notify parent
 
 
-const MapViewComponent = forwardRef<any, MapViewProps>(function(props, ref) {
-  const { project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, projectId, onNavigateComplete, onPositionChange, onSwitchToBoardView, themeColor = THEME_COLOR, mapStyleId = 'carto-light-nolabels', showImportMenu, setShowImportMenu } = props;
+export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, projectId, onNavigateComplete, onPositionChange, onSwitchToBoardView, themeColor = THEME_COLOR, mapStyleId = 'carto-light-nolabels', showImportMenu, setShowImportMenu }) => {
   if (!project) {
     return null;
   }
@@ -1025,103 +1024,6 @@ const MapViewComponent = forwardRef<any, MapViewProps>(function(props, ref) {
     // 已经是 Base64 数据
     return imageRef;
   };
-
-  // 获取用于导出的图片数据（确保返回有效的base64或占位符）
-  const getImageDataForExport = async (imageRef: string): Promise<string> => {
-    if (!imageRef) return '';
-    // 如果是存储的图片 ID，先从 IndexedDB 取出 Base64
-    if (imageRef.startsWith('img-')) {
-      try {
-        const loaded = await loadImage(imageRef);
-        if (loaded) return loaded;
-      } catch (err) {
-        console.warn('Failed to load stored image for export:', err);
-        // 返回透明占位符而不是失败
-        return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
-      }
-    }
-    // 检查是否为有效的base64数据URL
-    if (imageRef.startsWith('data:image/')) {
-      return imageRef;
-    }
-    // 如果不是有效格式，返回占位符
-    console.warn('Invalid image format for export:', imageRef);
-    return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
-  };
-
-  // 预处理地图数据用于导出（将图片ID转换为base64）
-  const prepareMapDataForExport = async (notes: Note[]): Promise<Note[]> => {
-    const processedNotes = await Promise.all(
-      notes.map(async (note) => {
-        const processedNote = { ...note };
-
-        // 处理 images 数组
-        if (processedNote.images && processedNote.images.length > 0) {
-          processedNote.images = await Promise.all(
-            processedNote.images.map(async (imageRef) => {
-              return await getImageDataForExport(imageRef);
-            })
-          );
-        }
-
-        // 处理 sketch
-        if (processedNote.sketch) {
-          processedNote.sketch = await getImageDataForExport(processedNote.sketch);
-        }
-
-        return processedNote;
-      })
-    );
-
-    return processedNotes;
-  };
-
-  // 导出地图视图的专用函数
-  const exportMapView = async () => {
-    if (!activeProject) {
-      alert("Please open a project first");
-      return;
-    }
-
-    try {
-      // 临时存储原始notes
-      const originalNotes = [...notes];
-
-      // 预处理图片数据
-      console.log('Preparing map data for export...');
-      const processedNotes = await prepareMapDataForExport(notes);
-
-      // 临时更新地图上的markers
-      setNotes(processedNotes);
-
-      // 等待React重新渲染
-      await new Promise(resolve => requestAnimationFrame(resolve));
-      await new Promise(resolve => setTimeout(resolve, 100)); // 额外等待确保渲染完成
-
-      // 导出
-      const elementId = 'map-view-container';
-      const fileName = `${activeProject.name}-map`;
-
-      await exportToJpegCentered(elementId, fileName, {
-        onAfterExport: async () => {
-          // 恢复原始数据
-          setNotes(originalNotes);
-        }
-      });
-
-    } catch (error) {
-      console.error('Map export failed:', error);
-      alert('导出地图失败');
-
-      // 确保恢复原始数据
-      setNotes(originalNotes || []);
-    }
-  };
-
-  // 暴露方法给父组件
-  useImperativeHandle(ref, () => ({
-    exportMapView
-  }), [exportMapView]);
   
   // Drag and drop state
   const [isDragging, setIsDragging] = useState(false);
@@ -1864,14 +1766,14 @@ const MapViewComponent = forwardRef<any, MapViewProps>(function(props, ref) {
 
           // If still no valid location data, show error
           if (lat === null || lng === null || lat === 0 || lng === 0 || isNaN(lat) || isNaN(lng)) {
-            previews.push({
-              file: processedFile,
-              imageUrl: URL.createObjectURL(processedFile),
-              lat: 0,
-              lng: 0,
-              error: 'Missing location data'
-            });
-            continue;
+          previews.push({
+            file: processedFile,
+            imageUrl: URL.createObjectURL(processedFile),
+            lat: 0,
+            lng: 0,
+            error: 'Missing location data'
+          });
+          continue;
           }
         }
         
@@ -2218,7 +2120,7 @@ const MapViewComponent = forwardRef<any, MapViewProps>(function(props, ref) {
           border: 2px solid ${themeColor};
         ">
           <span style="
-            color: ${themeColor};
+            color: black;
             font-size: ${12 * scale}px;
             font-weight: bold;
             line-height: 1;
@@ -3575,5 +3477,3 @@ const MapViewComponent = forwardRef<any, MapViewProps>(function(props, ref) {
     </div>
   );
 };
-
-export const MapView = forwardRef<any, MapViewProps>(MapViewComponent);

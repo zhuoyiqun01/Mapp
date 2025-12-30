@@ -842,7 +842,7 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
 
   // Apply initial transform when container is ready
   useEffect(() => {
-    if (!containerRef.current) return;
+            if (!containerRef.current) return;
     const initial = calculateInitialTransform();
     // Only set if different to avoid unnecessary updates
     setTransform(prev => {

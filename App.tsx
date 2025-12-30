@@ -49,7 +49,6 @@ export default function App() {
   const [isBoardEditMode, setIsBoardEditMode] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const mapViewFileInputRef = useRef<HTMLInputElement | null>(null);
-  const mapViewRef = useRef<any>(null);
   const [sidebarButtonY, setSidebarButtonY] = useState(96); // 初始值，将在 useEffect 中更新为屏幕中间
   const [showMapImportMenu, setShowMapImportMenu] = useState(false);
   const sidebarButtonDragRef = useRef({ isDragging: false, startY: 0, startButtonY: 0 });
@@ -344,13 +343,6 @@ export default function App() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
-
-  // Map export function
-  const handleExportMap = async () => {
-    if (mapViewRef.current && mapViewRef.current.exportMapView) {
-      await mapViewRef.current.exportMapView();
-    }
-  };
 
   // Theme Color State - start with default, will be updated from IndexedDB
   const [themeColor, setThemeColor] = useState<string>('#FFDD00'); // Default yellow
@@ -1058,7 +1050,6 @@ export default function App() {
                   viewMode={viewMode}
                   activeProject={activeProject}
                   onExportCSV={handleExportCSV}
-                  onExportMap={handleExportMap}
                   syncStatus={syncStatus}
                   themeColor={themeColor}
                   onThemeColorChange={handleThemeColorChange}
@@ -1157,8 +1148,7 @@ export default function App() {
         )}
 
         {viewMode === 'map' ? (
-          <MapView
-            ref={mapViewRef}
+          <MapView 
             project={activeProject}
             onAddNote={addNote}
             onUpdateNote={updateNote}
@@ -1288,7 +1278,7 @@ export default function App() {
             themeColor={themeColor}
           />
         ) : (
-          <TableView
+          <TableView 
             project={activeProject}
             onUpdateNote={updateNote}
             onUpdateFrames={(frames) => {
@@ -1332,8 +1322,8 @@ export default function App() {
             disabled={isImportDialogOpen}
             className={`
               flex items-center gap-2 ${viewMode === 'map' ? 'px-4' : 'px-3'} py-2 rounded-xl transition-all font-bold text-sm
-              ${viewMode === 'map'
-                ? 'text-white shadow-md scale-105'
+              ${viewMode === 'map' 
+                ? 'text-white shadow-md scale-105' 
                 : 'hover:bg-gray-100 text-gray-500'}
               ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
             `}
@@ -1351,8 +1341,8 @@ export default function App() {
             disabled={isImportDialogOpen}
             className={`
               flex items-center gap-2 ${viewMode === 'board' ? 'px-4' : 'px-3'} py-2 rounded-xl transition-all font-bold text-sm
-              ${viewMode === 'board'
-                ? 'text-white shadow-md scale-105'
+              ${viewMode === 'board' 
+                ? 'text-white shadow-md scale-105' 
                 : 'hover:bg-gray-100 text-gray-500'}
               ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
             `}
@@ -1381,8 +1371,8 @@ export default function App() {
             disabled={isImportDialogOpen}
             className={`
               flex items-center gap-2 ${viewMode === 'table' ? 'px-4' : 'px-3'} py-2 rounded-xl transition-all font-bold text-sm
-              ${viewMode === 'table'
-                ? 'text-white shadow-md scale-105'
+              ${viewMode === 'table' 
+                ? 'text-white shadow-md scale-105' 
                 : 'hover:bg-gray-100 text-gray-500'}
               ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
             `}

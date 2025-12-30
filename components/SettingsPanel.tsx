@@ -48,21 +48,21 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       {/* Settings Card */}
       <div className="fixed top-1/2 left-4 right-4 z-[5001] max-w-sm sm:max-w-md transform -translate-y-1/2">
         <div className="bg-white rounded-xl shadow-2xl overflow-hidden">
-          {/* Header */}
+        {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
               <Settings size={20} className="text-gray-700" />
               <h2 className="text-xl font-semibold text-gray-900">Settings</h2>
-            </div>
-            <button
-              onClick={onClose}
-              className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
-            >
-              <X size={20} className="text-gray-600" />
-            </button>
           </div>
+          <button
+            onClick={onClose}
+              className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+              <X size={20} className="text-gray-600" />
+          </button>
+        </div>
 
-          {/* Content */}
+        {/* Content */}
           <div className="max-h-[70vh] overflow-y-auto px-4 py-4">
           {/* Theme Color Section */}
           <div className="mb-6">
@@ -71,7 +71,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               <h3 className="text-base font-bold text-gray-700">Theme Color</h3>
             </div>
             <div className="flex items-center gap-3">
-              <div
+              <div 
                 className="w-12 h-12 rounded-lg shadow-md border-2 border-gray-200 cursor-pointer transition-transform hover:scale-105"
                 style={{ backgroundColor: themeColor }}
                 onClick={() => setShowThemeColorPicker(true)}
@@ -108,8 +108,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 >
                   {style.preview && style.preview.startsWith('http') && !failedImages.has(style.id) ? (
                     <div className="w-full h-20 rounded-lg mb-2 shadow-sm overflow-hidden bg-gray-100">
-                      <img
-                        src={style.preview}
+                      <img 
+                        src={style.preview} 
                         alt={style.name}
                         className="w-full h-full object-cover"
                         onError={() => {
@@ -194,12 +194,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       {/* Theme Color Picker Modal */}
       {showThemeColorPicker && (
         <div className="fixed inset-0 z-[5100]">
-          <ThemeColorPicker
-            isOpen={showThemeColorPicker}
-            onClose={() => setShowThemeColorPicker(false)}
-            currentColor={themeColor}
-            onColorChange={onThemeColorChange}
-          />
+        <ThemeColorPicker
+          isOpen={showThemeColorPicker}
+          onClose={() => setShowThemeColorPicker(false)}
+          currentColor={themeColor}
+          onColorChange={onThemeColorChange}
+        />
         </div>
       )}
     </>
