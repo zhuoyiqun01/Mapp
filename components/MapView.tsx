@@ -2830,13 +2830,9 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         <MapLongPressHandler onLongPress={handleLongPress} />
         
         {isMapMode && (
-          <MapCenterHandler 
-            center={
-              mapNotes.length > 0 
-                ? [mapNotes[mapNotes.length - 1].coords.lat, mapNotes[mapNotes.length - 1].coords.lng]
-                : defaultCenter
-            } 
-            zoom={16} 
+          <MapCenterHandler
+            center={initialMapPosition?.center || defaultCenter}
+            zoom={initialMapPosition?.zoom ?? 16}
           />
         )}
         
