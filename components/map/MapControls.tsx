@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useMap } from 'react-leaflet';
 import { Note, Frame } from '../types';
-import { THEME_COLOR } from '../constants';
+import { THEME_COLOR } from '../../constants';
 import { Search, Locate, Loader2, X, Check, Satellite, Plus, Image as ImageIcon, FileJson, Type, Layers, Settings } from 'lucide-react';
 
 interface MapControlsProps {
@@ -396,4 +396,5 @@ export const MapControls: React.FC<MapControlsProps> = ({
     </div>
   );
 };
+
 
