@@ -1186,7 +1186,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
     // 2.3 保底坐标
     return { center: defaultCenter, zoom: 16 };
-  }, [isMapMode, projectId, navigateToCoords, mapNotes, currentLocation, defaultCenter]);
+  }, [projectId]); // Only depend on projectId to avoid unnecessary recalculations
 
 
   // Real-time map position saving (similar to board's transform saving)
