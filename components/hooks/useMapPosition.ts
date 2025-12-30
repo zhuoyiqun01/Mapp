@@ -23,19 +23,11 @@ export const useMapPosition = ({
   // Calculate initial map position with priority order
   const initialMapPosition = useMemo(() => {
     if (!isMapMode || !projectId) {
-      console.log('[useMapPosition] Skipping initial position - isMapMode:', isMapMode, 'projectId:', projectId);
       return null;
     }
 
-    console.log('[useMapPosition] Calculating initial position:', {
-      navigateToCoords,
-      projectId,
-      isMapMode
-    });
-
     // 1. Navigation coordinates (highest priority - handled by MapContainer center prop)
     if (navigateToCoords) {
-      console.log('[useMapPosition] Using navigation coordinates:', navigateToCoords);
       return {
         center: [navigateToCoords.lat, navigateToCoords.lng] as [number, number],
         zoom: navigateToCoords.zoom ?? 19
@@ -44,9 +36,7 @@ export const useMapPosition = ({
 
     // 2. Check cached position (saved when leaving mapping view)
     const cached = getViewPositionCache(projectId, 'map');
-    console.log('[useMapPosition] Checking cached position:', { cached, hasValidCache: !!(cached?.center && cached.zoom) });
     if (cached?.center && cached.zoom) {
-      console.log('[useMapPosition] Using cached position for initial setup:', cached);
       return { center: cached.center, zoom: cached.zoom };
     }
 
