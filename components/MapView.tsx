@@ -1146,19 +1146,31 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     [notes]
   );
 
-  // Get cached position, last pin position, current location, or default
-  const initialMapPosition = useMemo(() => {
+  // Determine the final map position with complete priority logic
+  const determineFinalMapPosition = useCallback(() => {
     if (!isMapMode || !projectId) {
-      return null;
+      return { center: defaultCenter, zoom: 16 };
     }
 
-    // 1. Check cache first
-    const cached = getViewPositionCache(projectId, 'map');
-    if (cached?.center && cached.zoom) {
-      return { center: cached.center, zoom: cached.zoom };
+    // Priority order: navigateToCoords > cache > last pin > current location > default
+
+    // 1. Navigate coordinates (highest priority - from other views)
+    if (navigateToCoords) {
+      return {
+        center: [navigateToCoords.lat, navigateToCoords.lng] as [number, number],
+        zoom: 19 // Higher zoom for navigation
+      };
     }
 
-    // 2. Use last pin position
+    // 2. Cached position (only if not restored before)
+    if (!hasRestoredFromCache) {
+      const cached = getViewPositionCache(projectId, 'map');
+      if (cached?.center && cached.zoom) {
+        return { center: cached.center, zoom: cached.zoom };
+      }
+    }
+
+    // 3. Last pin position
     if (mapNotes.length > 0) {
       const lastNote = mapNotes[mapNotes.length - 1];
       return {
@@ -1167,14 +1179,20 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       };
     }
 
-    // 3. Use current location (if available)
+    // 4. Current location (if available)
     if (currentLocation) {
       return { center: [currentLocation.lat, currentLocation.lng] as [number, number], zoom: 16 };
     }
 
-    // 4. Use default
+    // 5. Default position (lowest priority)
     return { center: defaultCenter, zoom: 16 };
-  }, [isMapMode, projectId, mapNotes, currentLocation, defaultCenter]);
+  }, [isMapMode, projectId, navigateToCoords, hasRestoredFromCache, mapNotes, currentLocation, defaultCenter]);
+
+  // Temporary initial position for MapContainer (will be overridden in whenReady)
+  const tempInitialPosition = useMemo(() => ({
+    center: defaultCenter as [number, number],
+    zoom: 16
+  }), []);
 
   // Reset cache restoration flag when project changes
   useEffect(() => {
@@ -2697,16 +2715,10 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           </div>
         </div>
       )}
-      <MapContainer 
+      <MapContainer
         key={`${project.id}-${projectId || 'no-project'}`}
-        center={
-          isMapMode 
-            ? (navigateToCoords 
-                ? [navigateToCoords.lat, navigateToCoords.lng]
-                : (initialMapPosition?.center || defaultCenter))
-            : [0, 0]
-        } 
-        zoom={isMapMode ? (navigateToCoords ? 19 : (initialMapPosition?.zoom ?? 16)) : -8}
+        center={isMapMode ? tempInitialPosition.center : [0, 0]}
+        zoom={isMapMode ? tempInitialPosition.zoom : -8}
         minZoom={isMapMode ? 6 : -20} 
         maxZoom={isMapMode ? 19 : 2}
         zoomSnap={0.1}  // Enable fractional zoom levels
@@ -2725,29 +2737,32 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             mapInitRef.current.add(map);
             
             map.whenReady(() => {
-              // Only restore from cache on first entry to prevent jumping when returning to map view
-              // This ensures cache takes priority over initial MapContainer props only once
-              if (!navigateToCoords && projectId && isMapMode && !hasRestoredFromCache) {
-                const cached = getViewPositionCache(projectId, 'map');
-                if (cached?.center && cached.zoom) {
-                  // Use a small delay to ensure map is fully ready
-                  setTimeout(() => {
-                    console.log('Restoring map position from cache:', cached);
-                    map.setView(cached.center, cached.zoom, { animate: false });
-                    setHasRestoredFromCache(true);
+              // Determine and set the final map position based on complete priority logic
+              const finalPosition = determineFinalMapPosition();
 
-                    // Prevent MapPositionTracker from immediately overriding the restored position
-                    setPausePositionTracking(true);
-                    setTimeout(() => {
-                      setPausePositionTracking(false);
-                      console.log('Cache restoration stabilization period ended');
-                    }, 2000);
-                  }, 100); // Slightly longer delay for stability
-                } else {
-                  // Mark as restored even if no cache exists to prevent future attempts
-                  setHasRestoredFromCache(true);
+              // Use a small delay to ensure map is fully ready
+              setTimeout(() => {
+                console.log('Setting final map position:', finalPosition);
+                map.setView(finalPosition.center, finalPosition.zoom, { animate: false });
+
+                // Mark as restored if we used cached position (but not navigation coords)
+                if (!navigateToCoords) {
+                  const cached = getViewPositionCache(projectId, 'map');
+                  if (cached?.center && cached.zoom &&
+                      cached.center[0] === finalPosition.center[0] &&
+                      cached.center[1] === finalPosition.center[1] &&
+                      cached.zoom === finalPosition.zoom) {
+                    setHasRestoredFromCache(true);
+                  }
                 }
-              }
+
+                // Prevent MapPositionTracker from immediately overriding during stabilization
+                setPausePositionTracking(true);
+                setTimeout(() => {
+                  setPausePositionTracking(false);
+                  console.log('Map position stabilization period ended');
+                }, 2000);
+              }, 100); // Slightly longer delay for stability
               
               // Helper function to safely invalidate size and update view
               const safeInvalidateAndUpdate = () => {
