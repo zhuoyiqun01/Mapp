@@ -10,25 +10,21 @@ import { ProjectManager } from './components/ProjectManager';
 import { Note, ViewMode, Project } from './types';
 import { get, set } from 'idb-keyval';
 import { MAP_STYLE_OPTIONS } from './constants';
-import { 
-  syncProjectsToCloud, 
-  loadProjectsFromCloud, 
-  mergeProjects, 
+import { useProjectState } from './components/hooks/useProjectState';
+import { useViewState } from './components/hooks/useViewState';
+import { useAppState } from './components/hooks/useAppState';
+import {
+  syncProjectsToCloud,
+  loadProjectsFromCloud,
+  mergeProjects,
   shouldSync,
   getLastSyncTime,
-  type SyncStatus 
+  type SyncStatus
 } from './utils/sync';
 import {
   migrateFromOldFormat,
-  loadAllProjects,
-  loadProjectSummaries,
-  saveProject,
-  deleteProject as deleteProjectStorage,
-  loadProject,
   deleteImage,
   deleteSketch,
-  getViewPositionCache,
-  setViewPositionCache,
   clearViewPositionCache,
   checkStorageUsage,
   checkStorageDetails,
@@ -39,115 +35,65 @@ import {
   attemptImageRecovery,
   loadNoteImages,
   findOrphanedData,
-  cleanupOrphanedMedia,
-  ProjectSummary
+  cleanupOrphanedMedia
 } from './utils/storage';
 
 export default function App() {
-  const [viewMode, setViewMode] = useState<ViewMode>('map');
-  const [isEditorOpen, setIsEditorOpen] = useState(false);
-  const [isBoardEditMode, setIsBoardEditMode] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const mapViewFileInputRef = useRef<HTMLInputElement | null>(null);
-  const [sidebarButtonY, setSidebarButtonY] = useState(96); // 初始值，将在 useEffect 中更新为屏幕中间
-  const [showMapImportMenu, setShowMapImportMenu] = useState(false);
-  const sidebarButtonDragRef = useRef({ isDragging: false, startY: 0, startButtonY: 0 });
-  
-  // Set initial sidebar button position to vertical center
-  useEffect(() => {
-    // Calculate center position: (window height - button height) / 2
-    // Button height is approximately 50px (padding + icon size)
-    const centerY = (window.innerHeight - 50) / 2;
-    setSidebarButtonY(centerY);
-  }, []);
-  
-  // Navigation state for cross-view positioning
-  const [navigateToMapCoords, setNavigateToMapCoords] = useState<{ lat: number; lng: number; zoom?: number } | null>(null);
-  const [navigateToBoardCoords, setNavigateToBoardCoords] = useState<{ x: number; y: number } | null>(null);
-  
-  // Project State
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [projectSummaries, setProjectSummaries] = useState<ProjectSummary[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isLoadingProject, setIsLoadingProject] = useState(false);
-  const [loadingProgress, setLoadingProgress] = useState(0);
-  const [isDeletingProject, setIsDeletingProject] = useState(false);
-  const [isRunningCleanup, setIsRunningCleanup] = useState(false);
-  const [showCleanupMenu, setShowCleanupMenu] = useState(false);
-  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
-  
-  // Save map position to cache when switching away from map view
-  const saveMapPositionBeforeSwitch = useCallback((mapInstance: any) => {
-    if (currentProjectId && mapInstance) {
-      try {
-        const center = mapInstance.getCenter();
-        const zoom = mapInstance.getZoom();
-        if (center && typeof center.lat === 'number' && typeof center.lng === 'number') {
-          setViewPositionCache(currentProjectId, 'map', { center: [center.lat, center.lng], zoom });
-        }
-      } catch (err) {
-        console.warn('[App] Failed to get map position:', err);
-      }
-    }
-  }, [currentProjectId]);
+  // Use custom hooks for state management
+  const projectState = useProjectState();
+  const viewState = useViewState();
+  const appState = useAppState();
 
-  // Save board position to cache when switching away from board view
-  const saveBoardPositionBeforeSwitch = useCallback((x: number, y: number, scale: number) => {
-    if (currentProjectId) {
-      setViewPositionCache(currentProjectId, 'board', { x, y, scale });
-    }
-  }, [currentProjectId]);
+  // Extract commonly used values for easier access
+  const {
+    projects,
+    projectSummaries,
+    activeProject,
+    currentProjectId,
+    isLoading,
+    isLoadingProject,
+    loadingProgress,
+    isDeletingProject
+  } = projectState;
+
+  const {
+    viewMode,
+    isEditorOpen,
+    isBoardEditMode,
+    navigateToMapCoords,
+    navigateToBoardCoords,
+    setViewMode,
+    setIsEditorOpen,
+    setIsBoardEditMode,
+    navigateToMap,
+    navigateToBoard,
+    clearMapNavigation,
+    clearBoardNavigation,
+    saveMapPosition,
+    saveBoardPosition
+  } = viewState;
+
+  const {
+    themeColor,
+    setThemeColor,
+    isSidebarOpen,
+    setIsSidebarOpen,
+    sidebarButtonY,
+    setSidebarButtonY,
+    showMapImportMenu,
+    setShowMapImportMenu,
+    mapViewFileInputRef,
+    isRunningCleanup,
+    setIsRunningCleanup,
+    showCleanupMenu,
+    setShowCleanupMenu,
+    sidebarButtonDragRef
+  } = appState;
+  
 
 
-  // Stable callback for board transform changes - save to cache
-  const handleBoardTransformChange = useCallback((x: number, y: number, scale: number) => {
-    if (currentProjectId) {
-      setViewPositionCache(currentProjectId, 'board', { x, y, scale });
-    }
-  }, [currentProjectId]);
 
   // Load complete project data with progress
-  const loadCompleteProject = useCallback(async (projectId: string): Promise<Project | null> => {
-    setIsLoadingProject(true);
-    setLoadingProgress(0);
-
-    try {
-      // Step 1: Load project without images (10%)
-      setLoadingProgress(10);
-      const project = await loadProject(projectId, false);
-      if (!project) return null;
-
-      // Step 2: Load images for each note (remaining 90%)
-      if (project.notes.length > 0) {
-        const totalNotes = project.notes.length;
-        let loadedNotes = 0;
-
-        // Load images in batches to show progress
-        const batchSize = 5;
-        for (let i = 0; i < totalNotes; i += batchSize) {
-          const batch = project.notes.slice(i, i + batchSize);
-          await Promise.all(
-            batch.map(async (note, index) => {
-              const loadedNote = await loadNoteImages(note);
-              // Update the note in the project
-              project.notes[i + index] = loadedNote;
-            })
-          );
-
-          loadedNotes += batch.length;
-          const progress = 10 + (loadedNotes / totalNotes) * 90;
-          setLoadingProgress(Math.min(100, Math.round(progress)));
-        }
-      } else {
-        setLoadingProgress(100);
-      }
-
-      return project;
-    } finally {
-      setIsLoadingProject(false);
-      setLoadingProgress(0);
-    }
-  }, []);
 
   // Cleanup orphaned data (images and sketches not referenced by any project)
   const handleCleanupOrphanedData = useCallback(async (forceDeleteDuplicates: boolean = false) => {
@@ -310,44 +256,12 @@ export default function App() {
       clearViewPositionCache(currentProjectId);
     }
 
-    // 检查并记录所有缓存的导航位置
-    const checkAllCachedPositions = () => {
-      const allKeys = Object.keys(sessionStorage).filter(key => key.includes('mapp-view-pos'));
-      console.log('[Navigation] 当前sessionStorage中的所有位置缓存:', allKeys);
-
-      allKeys.forEach(key => {
-        try {
-          const data = sessionStorage.getItem(key);
-          console.log(`[Navigation] ${key}:`, JSON.parse(data || '{}'));
-        } catch (e) {
-          console.warn(`[Navigation] 解析缓存失败 ${key}:`, e);
-        }
-      });
-    };
-
-    checkAllCachedPositions();
-
-    setCurrentProjectId(id);
     setIsSidebarOpen(false);
-    setNavigateToMapCoords(null); // Clear navigation intent on project switch
-    setNavigateToBoardCoords(null); // Clear navigation intent on project switch
+    clearMapNavigation();
+    clearBoardNavigation();
 
-    // Load complete project data
-    const completeProject = await loadCompleteProject(id);
-    if (completeProject) {
-      // Update the project in the projects array
-      setProjects(prev => {
-        const existingIndex = prev.findIndex(p => p.id === id);
-        if (existingIndex >= 0) {
-          const updated = [...prev];
-          updated[existingIndex] = completeProject;
-          return updated;
-        } else {
-          return [...prev, completeProject];
-        }
-      });
-    }
-  }, [currentProjectId, loadCompleteProject]);
+    await projectState.selectProject(id);
+  }, [currentProjectId, projectState, clearMapNavigation, clearBoardNavigation]);
 
   // Cloud Sync State
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
@@ -1176,47 +1090,20 @@ export default function App() {
             navigateToCoords={navigateToMapCoords}
             projectId={currentProjectId || ''}
             onNavigateComplete={() => {
-              setNavigateToMapCoords(null);
+              clearMapNavigation();
             }}
             onSwitchToBoardView={(coords, mapInstance) => {
               // PRIORITY 1: Save current map position BEFORE any other operations
               if (mapInstance && currentProjectId) {
-                try {
-                  const center = mapInstance.getCenter();
-                  const zoom = mapInstance.getZoom();
-                  if (center && typeof center.lat === 'number' && typeof center.lng === 'number') {
-                    console.log('[Navigation] 保存地图位置 - 离开mapping:', {
-                      projectId: currentProjectId,
-                      center: [center.lat, center.lng],
-                      zoom,
-                      timestamp: new Date().toISOString()
-                    });
-                    setViewPositionCache(currentProjectId, 'map', {
-                      center: [center.lat, center.lng],
-                      zoom
-                    });
-                    // 验证保存结果
-                    const saved = getViewPositionCache(currentProjectId, 'map');
-                    console.log('[Navigation] 验证保存结果:', saved);
-                  } else {
-                    console.warn('[Navigation] 地图位置数据无效:', { center, zoom });
-                  }
-                } catch (err) {
-                  console.warn('[App] Failed to save map position before switching to board:', err);
-                }
-              } else {
-                console.warn('[Navigation] 保存失败 - 缺少必要数据:', {
-                  hasMapInstance: !!mapInstance,
-                  projectId: currentProjectId
-                });
+                saveMapPosition(currentProjectId, mapInstance);
               }
 
               // PRIORITY 2: Close editor and prepare navigation
               setIsEditorOpen(false);
 
-              // PRIORITY 3: Set navigation coordinates and switch view (synchronous for immediate effect)
+              // PRIORITY 3: Set navigation coordinates and switch view
               if (coords) {
-                setNavigateToBoardCoords(coords);
+                navigateToBoard(coords);
               }
               setViewMode('board');
             }}
@@ -1264,61 +1151,33 @@ export default function App() {
             navigateToCoords={navigateToBoardCoords}
             projectId={currentProjectId || ''}
             onNavigateComplete={() => {
-              setNavigateToBoardCoords(null);
+              clearBoardNavigation();
             }}
-            onTransformChange={handleBoardTransformChange}
-            onSwitchToMapView={(coords?: { lat: number; lng: number }) => {
+            onTransformChange={(x: number, y: number, scale: number) => {
+              if (currentProjectId) {
+                saveBoardPosition(currentProjectId, x, y, scale);
+              }
+            }}
+            onSwitchToMapView={(coords?: { lat: number; lng: number; zoom?: number }) => {
               // Close editor first to ensure UI state is correct
               setIsEditorOpen(false);
 
-              // Prepare navigation coordinates BEFORE switching view to avoid timing issues
-              console.log('[Navigation] 准备导航坐标 - 从Board进入mapping:', {
-                explicitCoords: coords,
-                projectId: currentProjectId,
-                timestamp: new Date().toISOString()
-              });
-
+              // Prepare navigation coordinates
               let navigationCoords = coords;
-              let navigationZoom = 19; // Default navigation zoom
               if (!navigationCoords && currentProjectId) {
                 // Read cached position from previous map session
                 const cached = getViewPositionCache(currentProjectId, 'map');
-                console.log('[Navigation] 从Board读取缓存位置:', {
-                  projectId: currentProjectId,
-                  cached,
-                  hasValidCache: !!(cached?.center && cached.zoom)
-                });
-
                 if (cached?.center && cached.zoom) {
-                  navigationCoords = { lat: cached.center[0], lng: cached.center[1] };
-                  navigationZoom = cached.zoom; // Use cached zoom instead of navigation zoom
-                  console.log('[Navigation] 从Board使用缓存位置作为导航坐标:', {
-                    coords: navigationCoords,
-                    zoom: navigationZoom,
-                    originalCache: cached
-                  });
-                } else {
-                  console.log('[Navigation] 从Board无有效缓存，将使用保底位置');
+                  navigationCoords = {
+                    lat: cached.center[0],
+                    lng: cached.center[1],
+                    zoom: cached.zoom
+                  };
                 }
-              } else if (navigationCoords) {
-                console.log('[Navigation] 从Board使用明确的导航坐标:', navigationCoords);
               }
 
-              // Set navigation coordinates BEFORE view switch to ensure MapView has correct coords on mount
-              if (navigationCoords) {
-                const navCoords = {
-                  lat: navigationCoords.lat,
-                  lng: navigationCoords.lng,
-                  zoom: navigationZoom
-                };
-                console.log('[Navigation] 从Board设置navigateToMapCoords:', navCoords);
-                setNavigateToMapCoords(navCoords);
-              } else {
-                console.log('[Navigation] 从Board无导航坐标，设置navigateToMapCoords为null');
-                setNavigateToMapCoords(null);
-              }
-
-              // Switch view after coordinates are set
+              // Set navigation coordinates and switch view
+              navigateToMap(navigationCoords || undefined);
               setViewMode('map');
 
               // Trigger MapView's file input after a short delay
@@ -1338,64 +1197,32 @@ export default function App() {
         ) : viewMode === 'gallery' ? (
           <GalleryView
             project={activeProject}
-            onSwitchToMapView={(coords?: { lat: number; lng: number }) => {
+            onSwitchToMapView={(coords?: { lat: number; lng: number; zoom?: number }) => {
               // Close editor first to ensure UI state is correct
               setIsEditorOpen(false);
 
-              // Prepare navigation coordinates BEFORE switching view to avoid timing issues
-              console.log('[Navigation] 准备导航坐标 - 从Gallery进入mapping:', {
-                explicitCoords: coords,
-                projectId: currentProjectId,
-                timestamp: new Date().toISOString()
-              });
-
+              // Prepare navigation coordinates
               let navigationCoords = coords;
               if (!navigationCoords && currentProjectId) {
                 // Read cached position from previous map session
                 const cached = getViewPositionCache(currentProjectId, 'map');
-                console.log('[Navigation] 从Gallery读取缓存位置:', {
-                  projectId: currentProjectId,
-                  cached,
-                  hasValidCache: !!(cached?.center && cached.zoom)
-                });
-
                 if (cached?.center && cached.zoom) {
-                  navigationCoords = { lat: cached.center[0], lng: cached.center[1] };
-                  console.log('[Navigation] 从Gallery使用缓存位置作为导航坐标:', {
-                    coords: navigationCoords,
-                    originalCache: cached
-                  });
-                } else {
-                  console.log('[Navigation] 从Gallery无有效缓存，将使用保底位置');
+                  navigationCoords = {
+                    lat: cached.center[0],
+                    lng: cached.center[1],
+                    zoom: cached.zoom
+                  };
                 }
-              } else if (navigationCoords) {
-                console.log('[Navigation] 从Gallery使用明确的导航坐标:', navigationCoords);
               }
 
-              // Set navigation coordinates BEFORE view switch to ensure MapView has correct coords on mount
-              if (navigationCoords) {
-                const navCoords = {
-                  lat: navigationCoords.lat,
-                  lng: navigationCoords.lng,
-                  zoom: navigationZoom
-                };
-                console.log('[Navigation] 从Gallery设置navigateToMapCoords:', navCoords);
-                setNavigateToMapCoords(navCoords);
-              } else {
-                console.log('[Navigation] 从Gallery无导航坐标，设置navigateToMapCoords为null');
-                setNavigateToMapCoords(null);
-              }
-
-              // Switch view after coordinates are set
+              // Set navigation coordinates and switch view
+              navigateToMap(navigationCoords || undefined);
               setViewMode('map');
             }}
             onSwitchToBoardView={() => {
               // Close editor first to ensure UI state is correct
               setIsEditorOpen(false);
-              // Use requestAnimationFrame to ensure state updates are batched
-              requestAnimationFrame(() => {
-                setViewMode('board');
-              });
+              setViewMode('board');
             }}
             themeColor={themeColor}
           />
@@ -1414,7 +1241,7 @@ export default function App() {
             }}
             onSwitchToBoardView={(coords?: { x: number; y: number }) => {
               if (coords) {
-                setNavigateToBoardCoords(coords);
+                navigateToBoard(coords);
               }
               setViewMode('board');
             }}
