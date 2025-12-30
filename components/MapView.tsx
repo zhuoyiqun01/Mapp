@@ -1158,7 +1158,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
     // Check cache first (like BoardView does)
     const cached = getViewPositionCache(projectId, 'map');
-    console.log('[MapView] Cache check result:', cached);
+    console.log('[MapView] Cache check result:', cached, 'center values:', cached?.center);
 
     if (cached?.center && cached.zoom &&
         Array.isArray(cached.center) && cached.center.length === 2 &&
@@ -1185,7 +1185,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     }
 
     return { center: defaultCenter, zoom: 16 };
-  }, [projectId, mapNotes, currentLocation, defaultCenter]);
+  }, [projectId]); // Like BoardView, only depend on essential data
 
   const initialMapPosition = useMemo(() => getInitialMapPosition(), [getInitialMapPosition]); // Only depend on projectId to avoid unnecessary recalculations
 
@@ -2716,7 +2716,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         </div>
       )}
       <MapContainer
-        key={`${project.id}-${projectId || 'no-project'}`}
+        key={projectId || 'no-project'}
         center={
           isMapMode
             ? (initialMapPosition?.center || defaultCenter)
