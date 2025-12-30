@@ -1155,10 +1155,15 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     // 1. Check cached position first (like BoardView does)
     if (projectId) {
       const cached = getViewPositionCache(projectId, 'map');
+      console.log('[MapView] Checking cache for projectId:', projectId, 'cached:', cached);
       if (cached?.center && cached.zoom) {
         console.log('[MapView] Using cached position for initial setup:', cached);
         return { center: cached.center, zoom: cached.zoom };
+      } else {
+        console.log('[MapView] No valid cache found, will use fallback');
       }
+    } else {
+      console.log('[MapView] No projectId, skipping cache check');
     }
 
     // 2. Navigation coordinates (only for explicit navigation like Gallery to Frame)
