@@ -1161,7 +1161,23 @@ export default function App() {
             onNavigateComplete={() => {
               setNavigateToMapCoords(null);
             }}
-            onSwitchToBoardView={(coords) => {
+            onSwitchToBoardView={(coords, mapInstance) => {
+              // Save current map position before switching to board view
+              if (mapInstance && currentProjectId) {
+                try {
+                  const center = mapInstance.getCenter();
+                  const zoom = mapInstance.getZoom();
+                  if (center && typeof center.lat === 'number' && typeof center.lng === 'number') {
+                    setViewPositionCache(currentProjectId, 'map', {
+                      center: [center.lat, center.lng],
+                      zoom
+                    });
+                  }
+                } catch (err) {
+                  console.warn('[App] Failed to save map position before switching to board:', err);
+                }
+              }
+
               // Close editor first to ensure UI state is correct
               setIsEditorOpen(false);
               // Use requestAnimationFrame to ensure state updates are batched
@@ -1229,13 +1245,6 @@ export default function App() {
               if (coords) {
                 setTimeout(() => {
                   setNavigateToMapCoords(coords);
-                  // Save navigation position to cache for future use
-                  if (currentProjectId) {
-                    setViewPositionCache(currentProjectId, 'map', {
-                      center: [coords.lat, coords.lng],
-                      zoom: 16 // Default zoom for navigation
-                    });
-                  }
                 }, 100);
               }
               // Trigger MapView's file input after a short delay
@@ -1265,13 +1274,6 @@ export default function App() {
               if (coords) {
                 setTimeout(() => {
                   setNavigateToMapCoords(coords);
-                  // Save navigation position to cache for future use
-                  if (currentProjectId) {
-                    setViewPositionCache(currentProjectId, 'map', {
-                      center: [coords.lat, coords.lng],
-                      zoom: 16 // Default zoom for navigation
-                    });
-                  }
                 }, 100);
               }
             }}

@@ -1154,13 +1154,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       return { center: [navigateToCoords.lat, navigateToCoords.lng] as [number, number], zoom: 19 };
     }
 
-    // 2. Check cache - position saved when navigating from other views
-    const cached = getViewPositionCache(projectId, 'map');
-    if (cached?.center && cached.zoom) {
-      return { center: cached.center, zoom: cached.zoom };
-    }
-
-    // 3. Fallback: use last pin position or default
+    // 2. 保底位置 (zoom: 16)
+    // 2.1 最后pin坐标
     if (mapNotes.length > 0) {
       const lastNote = mapNotes[mapNotes.length - 1];
       return {
@@ -1169,8 +1164,14 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       };
     }
 
+    // 2.2 实际坐标(当前位置)
+    if (currentLocation) {
+      return { center: [currentLocation.lat, currentLocation.lng] as [number, number], zoom: 16 };
+    }
+
+    // 2.3 保底坐标
     return { center: defaultCenter, zoom: 16 };
-  }, [isMapMode, projectId, navigateToCoords, mapNotes, defaultCenter]);
+  }, [isMapMode, projectId, navigateToCoords, mapNotes, currentLocation, defaultCenter]);
 
 
   // Get current location and device orientation
