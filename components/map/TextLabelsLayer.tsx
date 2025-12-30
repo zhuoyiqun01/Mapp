@@ -66,7 +66,7 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
               position={[note.coords.lat, note.coords.lng]}
               icon={icon}
               interactive={false}
-              zIndexOffset={isFavorite ? 200 : 0} // Favorite labels on top
+              zIndexOffset={isFavorite ? 300 : 50} // Favorite labels > Favorite pins > Normal labels > Normal pins
             />
           );
         })}

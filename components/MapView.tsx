@@ -169,22 +169,22 @@ interface MapViewProps {
 // Component to block map container from receiving pointer events in capture phase
 const SearchBarContainer = ({ children }: { children: React.ReactNode }) => {
     const containerRef = useRef<HTMLDivElement>(null);
-
+    
     useEffect(() => {
         const container = containerRef.current;
         if (!container) return;
-
+        
         const handleCaptureStart = (e: Event) => {
             // Stop event from reaching map container in capture phase
             e.stopPropagation();
         };
-
+        
         // Use capture phase to intercept events before they reach map container
         // Mark as passive since we only call stopPropagation(), not preventDefault()
         container.addEventListener('mousedown', handleCaptureStart, { capture: true, passive: true });
         container.addEventListener('touchstart', handleCaptureStart, { capture: true, passive: true });
         container.addEventListener('pointerdown', handleCaptureStart, { capture: true, passive: true });
-
+        
         return () => {
             container.removeEventListener('mousedown', handleCaptureStart, { capture: true });
             container.removeEventListener('touchstart', handleCaptureStart, { capture: true });
@@ -272,7 +272,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const [clusteredMarkers, setClusteredMarkers] = useState<Array<{ notes: Note[], position: [number, number] }>>([]);
   const [currentNoteIndex, setCurrentNoteIndex] = useState(0);
   const [currentClusterNotes, setCurrentClusterNotes] = useState<Note[]>([]);
-
+  
 
   
   
@@ -427,7 +427,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   // Settings panel
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
 
-
+  
   // Current marker index being viewed
 
   const defaultCenter: [number, number] = [28.1847, 112.9467];
@@ -1345,13 +1345,13 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           </div>
         </div>
       )}
-      <MapContainer
+      <MapContainer 
         key={projectId || 'no-project'}
         center={
-          isMapMode
+          isMapMode 
             ? (initialMapPosition?.center || defaultCenter)
             : [0, 0]
-        }
+        } 
         zoom={isMapMode ? (initialMapPosition?.zoom ?? 16) : -8}
         minZoom={isMapMode ? 6 : -20} 
         maxZoom={isMapMode ? 19 : 2}
@@ -1420,14 +1420,14 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         <MapNavigationHandler coords={navigateToCoords} onComplete={onNavigateComplete} />
         <MapPositionTracker onPositionChange={handleMapPositionChange} />
         {isMapMode ? (
-          <TileLayer
-            key={effectiveMapStyle}
+               <TileLayer 
+                 key={effectiveMapStyle}
             {...tileLayerConfig}
-            maxNativeZoom={19}
-            maxZoom={19}
-            tileSize={256}
-            zoomOffset={0}
-          />
+                 maxNativeZoom={19}
+                 maxZoom={19}
+                 tileSize={256}
+                 zoomOffset={0}
+               />
         ) : (
            <>
               {project.backgroundImage && imageDimensions && (
@@ -1442,7 +1442,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         <MapLongPressHandler onLongPress={handleLongPress} />
         
         {isMapMode && (
-          <MapCenterHandler
+          <MapCenterHandler 
             center={initialMapPosition?.center || defaultCenter}
             zoom={initialMapPosition?.zoom ?? 16}
           />
@@ -1544,7 +1544,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               key={note.id}
               position={[note.coords.lat, note.coords.lng]}
               icon={createCustomIcon(note, undefined, showTextLabels, pinSize)}
-              zIndexOffset={note.isFavorite ? 100 : -100}
+              zIndexOffset={note.isFavorite ? 200 : 0}
               eventHandlers={{
                 click: (e) => {
                   e.originalEvent?.stopPropagation();
@@ -1561,12 +1561,12 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               // Single marker, display directly
               const note = cluster.notes[0];
               return (
-          <Marker
-            key={note.id}
+          <Marker 
+            key={note.id} 
             position={[note.coords.lat, note.coords.lng]}
                   icon={createCustomIcon(note, undefined, showTextLabels, pinSize)}
-                  zIndexOffset={note.isFavorite ? 100 : -100}
-                  eventHandlers={{
+                  zIndexOffset={note.isFavorite ? 200 : 0}
+                  eventHandlers={{ 
                     click: (e) => {
                       e.originalEvent?.stopPropagation();
                       e.originalEvent?.stopImmediatePropagation();
@@ -1582,12 +1582,12 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 .sort()
                 .join('-');
               return (
-                <Marker
+                <Marker 
                   key={`cluster-${clusterKey}`}
                   position={cluster.position}
                   icon={createCustomIcon(cluster.notes[0], cluster.notes.length, showTextLabels, pinSize)}
-                  zIndexOffset={cluster.notes.some(note => note.isFavorite) ? 100 : -100}
-                  eventHandlers={{
+                  zIndexOffset={cluster.notes.some(note => note.isFavorite) ? 200 : 0}
+                  eventHandlers={{ 
                     click: (e) => {
                       e.originalEvent?.stopPropagation();
                       e.originalEvent?.stopImmediatePropagation();
@@ -1601,12 +1601,12 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         ) : (
           // Show single markers (non-map mode or when no clustering)
           mapInstance && getFilteredNotes.map(note => (
-            <Marker
-              key={note.id}
+            <Marker 
+              key={note.id} 
               position={[note.coords.lat, note.coords.lng]}
               icon={createCustomIcon(note, undefined, showTextLabels, pinSize)}
-              zIndexOffset={note.isFavorite ? 100 : -100}
-              eventHandlers={{
+              zIndexOffset={note.isFavorite ? 200 : 0}
+              eventHandlers={{ 
                 click: (e) => {
                   e.originalEvent?.stopPropagation();
                   e.originalEvent?.stopImmediatePropagation();
@@ -1664,8 +1664,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         {isMapMode && (
           <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none items-start">
               {/* First Row: Main Controls */}
-              <MapControls
-                onImportPhotos={() => fileInputRef.current?.click()}
+              <MapControls 
+                onImportPhotos={() => fileInputRef.current?.click()} 
                 onImportData={() => dataImportInputRef.current?.click()}
                 onLocateCurrentPosition={requestLocation}
                 mapStyle={mapStyle}
