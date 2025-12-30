@@ -8,6 +8,7 @@ import { useMapPosition } from '@/components/hooks/useMapPosition';
 import { useGeolocation } from '@/components/hooks/useGeolocation';
 import { useImageImport } from '@/components/hooks/useImageImport';
 import { useMapLayers } from '@/components/hooks/useMapLayers';
+import { useMapStyling } from '@/components/hooks/useMapStyling';
 import { MapLongPressHandler } from './map/MapLongPressHandler';
 import { MapNavigationHandler } from './map/MapNavigationHandler';
 import { TextLabelsLayer } from './map/TextLabelsLayer';
@@ -760,12 +761,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   // Drag and drop state
   const [isDragging, setIsDragging] = useState(false);
   
-  // Map style state - satellite toggle is independent from mapStyleId
-  // mapStyleId is for base map style (from settings), localMapStyle is for satellite toggle
-  const [localMapStyle, setLocalMapStyle] = useState<'standard' | 'satellite'>('standard');
-  // If satellite is active, use satellite; otherwise use mapStyleId or default
-  const effectiveMapStyle = localMapStyle === 'satellite' ? 'satellite' : (mapStyleId || 'carto-light-nolabels');
-  const mapStyle = localMapStyle; // For the toggle button
 
   // Text labels display mode
   const [showTextLabels, setShowTextLabels] = useState(false);
@@ -848,6 +843,20 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   } = useMapLayers({
     notes,
     projectFrames: project.frames
+  });
+
+  // Map styling management hook
+  const {
+    mapStyle,
+    effectiveMapStyle,
+    localMapStyle,
+    setLocalMapStyle,
+    handleLocalMapStyleChange,
+    handleMapStyleChange,
+    getTileLayerConfig
+  } = useMapStyling({
+    mapStyleId,
+    onMapStyleChange
   });
 
 
@@ -1758,26 +1767,14 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         <MapNavigationHandler coords={navigateToCoords} onComplete={onNavigateComplete} />
         <MapPositionTracker onPositionChange={handleMapPositionChange} />
         {isMapMode ? (
-           (() => {
-             const isSatellite = effectiveMapStyle === 'satellite';
-             const selectedStyle = isSatellite 
-               ? null 
-               : (MAP_STYLE_OPTIONS.find(s => s.id === effectiveMapStyle) || MAP_STYLE_OPTIONS[0]);
-             return (
-               <TileLayer 
-                 key={effectiveMapStyle}
-                 attribution={isSatellite 
-                   ? 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
-                   : selectedStyle!.attribution
-                 } 
-                 url={isSatellite ? MAP_SATELLITE_URL : selectedStyle!.url}
-                 maxNativeZoom={19}
-                 maxZoom={19}
-                 tileSize={256}
-                 zoomOffset={0}
-               />
-             );
-           })()
+          <TileLayer
+            key={effectiveMapStyle}
+            {...getTileLayerConfig()}
+            maxNativeZoom={19}
+            maxZoom={19}
+            tileSize={256}
+            zoomOffset={0}
+          />
         ) : (
            <>
               {project.backgroundImage && imageDimensions && (
@@ -2019,7 +2016,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 onImportData={() => dataImportInputRef.current?.click()}
                 onLocateCurrentPosition={requestLocation}
                 mapStyle={mapStyle}
-                onMapStyleChange={(style) => setLocalMapStyle(style)}
+                onMapStyleChange={handleLocalMapStyleChange}
                 mapNotes={getFilteredNotes}
                 frames={project.frames || []}
                 frameLayerVisibility={frameLayerVisibility}
@@ -2557,10 +2554,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           setShowSettingsPanel(false);
         }}
         currentMapStyle={mapStyleId || 'carto-light-nolabels'}
-        onMapStyleChange={(styleId) => {
-          onMapStyleChange?.(styleId);
-          set('mapp-map-style', styleId);
-        }}
+        onMapStyleChange={handleMapStyleChange}
         pinSize={pinSize}
         onPinSizeChange={setPinSize}
         clusterThreshold={clusterThreshold}
