@@ -1190,14 +1190,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const initialMapPosition = useMemo(() => getInitialMapPosition(), [getInitialMapPosition]); // Only depend on projectId to avoid unnecessary recalculations
 
 
-  // Real-time map position saving (similar to board's transform saving)
-  const handleMapPositionChange = useCallback((center: [number, number], zoom: number) => {
-    if (projectId) {
-      // Real-time save map position whenever it changes (after cache restoration)
-      console.log('[MapView] 实时保存地图位置:', { center, zoom });
-      setViewPositionCache(projectId, 'map', { center, zoom });
-    }
-  }, [projectId]);
+  // Map position saving - only when leaving map view (like BoardView)
+  // Remove real-time saving to avoid conflicts with cache restoration
 
   // Get current location and device orientation
   useEffect(() => {
@@ -2787,7 +2781,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         doubleClickZoom={false}
       >
         <MapNavigationHandler coords={navigateToCoords} onComplete={onNavigateComplete} />
-        <MapPositionTracker onPositionChange={handleMapPositionChange} />
         {isMapMode ? (
            (() => {
              const isSatellite = effectiveMapStyle === 'satellite';
