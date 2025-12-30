@@ -1147,46 +1147,21 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
   // Get cached position, last pin position, current location, or default
   // Navigation coordinates contain cached position from previous session
-  const initialMapPosition = useMemo(() => {
-    if (!isMapMode || !projectId) {
-      return null;
+  // Calculate initial map position like BoardView's calculateInitialTransform
+  const getInitialMapPosition = useCallback(() => {
+    if (!projectId) return { center: defaultCenter, zoom: 16 };
+
+    // Check cache first (like BoardView does)
+    const cached = getViewPositionCache(projectId, 'map');
+    if (cached?.center && cached.zoom &&
+        Array.isArray(cached.center) && cached.center.length === 2 &&
+        typeof cached.center[0] === 'number' && typeof cached.center[1] === 'number' &&
+        typeof cached.zoom === 'number' &&
+        !isNaN(cached.center[0]) && !isNaN(cached.center[1]) && !isNaN(cached.zoom)) {
+      return { center: cached.center, zoom: cached.zoom };
     }
 
-    // 1. Check cached position first (like BoardView does)
-    if (projectId) {
-      const cached = getViewPositionCache(projectId, 'map');
-      console.log('[MapView] Checking cache for projectId:', projectId, 'cached:', cached);
-
-      // Validate cached data more thoroughly
-      if (cached &&
-          cached.center &&
-          Array.isArray(cached.center) &&
-          cached.center.length === 2 &&
-          typeof cached.center[0] === 'number' &&
-          typeof cached.center[1] === 'number' &&
-          !isNaN(cached.center[0]) &&
-          !isNaN(cached.center[1]) &&
-          typeof cached.zoom === 'number' &&
-          !isNaN(cached.zoom)) {
-        console.log('[MapView] Using valid cached position:', cached);
-        return { center: cached.center, zoom: cached.zoom };
-      } else {
-        console.log('[MapView] Invalid or missing cache data, will use fallback. cached:', cached);
-      }
-    } else {
-      console.log('[MapView] No projectId, skipping cache check');
-    }
-
-    // 2. Navigation coordinates (only for explicit navigation like Gallery to Frame)
-    if (navigateToCoords) {
-      return {
-        center: [navigateToCoords.lat, navigateToCoords.lng] as [number, number],
-        zoom: navigateToCoords.zoom ?? 19
-      };
-    }
-
-    // 3. 保底位置 (zoom: 16)
-    // 2.1 最后pin坐标
+    // Fallback like BoardView's fit calculation
     if (mapNotes.length > 0) {
       const lastNote = mapNotes[mapNotes.length - 1];
       return {
@@ -1195,14 +1170,14 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       };
     }
 
-    // 2.2 实际坐标(当前位置)
     if (currentLocation) {
       return { center: [currentLocation.lat, currentLocation.lng] as [number, number], zoom: 16 };
     }
 
-    // 2.3 保底坐标
     return { center: defaultCenter, zoom: 16 };
-  }, [projectId]); // Only depend on projectId to avoid unnecessary recalculations
+  }, [projectId, mapNotes, currentLocation, defaultCenter]);
+
+  const initialMapPosition = useMemo(() => getInitialMapPosition(), [getInitialMapPosition]); // Only depend on projectId to avoid unnecessary recalculations
 
 
   // Real-time map position saving (similar to board's transform saving)
