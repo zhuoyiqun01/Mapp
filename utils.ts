@@ -259,7 +259,14 @@ export const exportToJpeg = async (elementId: string, fileName: string) => {
 };
 
 // 导出当前视图的中心对齐截图
-export const exportToJpegCentered = async (elementId: string, fileName: string) => {
+export const exportToJpegCentered = async (
+  elementId: string,
+  fileName: string,
+  options?: {
+    onBeforeExport?: () => Promise<void> | void;
+    onAfterExport?: () => Promise<void> | void;
+  }
+) => {
   const node = document.getElementById(elementId);
   if (!node) {
     alert('无法找到要导出的视图');
@@ -267,28 +274,33 @@ export const exportToJpegCentered = async (elementId: string, fileName: string) 
   }
 
   try {
+    // 执行导出前回调
+    if (options?.onBeforeExport) {
+      await options.onBeforeExport();
+    }
+
     // 隐藏所有 UI 元素（使用 fixed 定位的按钮、滑块等）
     const uiElements = document.querySelectorAll('.fixed, [class*="z-["]');
     const originalDisplays: string[] = [];
-    
+
     uiElements.forEach((el, index) => {
       const htmlEl = el as HTMLElement;
       originalDisplays[index] = htmlEl.style.display;
       // 只隐藏按钮、控件等，不隐藏整个容器
-      if (htmlEl.tagName === 'BUTTON' || 
+      if (htmlEl.tagName === 'BUTTON' ||
           htmlEl.className.includes('pointer-events-auto') ||
           htmlEl.className.includes('z-[500]') ||
           htmlEl.className.includes('z-50')) {
         htmlEl.style.display = 'none';
       }
     });
-    
+
     // 等待一帧确保DOM更新
     await new Promise(resolve => requestAnimationFrame(resolve));
-    
+
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
-    
+
     // 导出整个视口
     const dataUrl = await toJpeg(node, {
       quality: 0.95,
@@ -303,6 +315,11 @@ export const exportToJpegCentered = async (elementId: string, fileName: string) 
       const htmlEl = el as HTMLElement;
       htmlEl.style.display = originalDisplays[index];
     });
+
+    // 执行导出后回调
+    if (options?.onAfterExport) {
+      await options.onAfterExport();
+    }
 
     // 直接下载
     const link = document.createElement('a');

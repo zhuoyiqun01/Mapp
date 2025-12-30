@@ -49,6 +49,7 @@ export default function App() {
   const [isBoardEditMode, setIsBoardEditMode] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const mapViewFileInputRef = useRef<HTMLInputElement | null>(null);
+  const mapViewRef = useRef<any>(null);
   const [sidebarButtonY, setSidebarButtonY] = useState(96); // 初始值，将在 useEffect 中更新为屏幕中间
   const [showMapImportMenu, setShowMapImportMenu] = useState(false);
   const sidebarButtonDragRef = useRef({ isDragging: false, startY: 0, startButtonY: 0 });
@@ -343,6 +344,13 @@ export default function App() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+
+  // Map export function
+  const handleExportMap = async () => {
+    if (mapViewRef.current && mapViewRef.current.exportMapView) {
+      await mapViewRef.current.exportMapView();
+    }
+  };
 
   // Theme Color State - start with default, will be updated from IndexedDB
   const [themeColor, setThemeColor] = useState<string>('#FFDD00'); // Default yellow
@@ -1050,6 +1058,7 @@ export default function App() {
                   viewMode={viewMode}
                   activeProject={activeProject}
                   onExportCSV={handleExportCSV}
+                  onExportMap={handleExportMap}
                   syncStatus={syncStatus}
                   themeColor={themeColor}
                   onThemeColorChange={handleThemeColorChange}
@@ -1148,7 +1157,8 @@ export default function App() {
         )}
 
         {viewMode === 'map' ? (
-          <MapView 
+          <MapView
+            ref={mapViewRef}
             project={activeProject}
             onAddNote={addNote}
             onUpdateNote={updateNote}

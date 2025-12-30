@@ -112,9 +112,10 @@ interface ProjectManagerProps {
   isSidebar?: boolean;
   onCloseSidebar?: () => void;
   onBackToHome?: () => void;
-  viewMode?: 'map' | 'board' | 'table';
+  viewMode?: 'map' | 'board' | 'table' | 'gallery';
   activeProject?: Project | null;
   onExportCSV?: (project: Project) => void;
+  onExportMap?: () => Promise<void>;
   onCheckData?: () => Promise<void>;
   syncStatus?: SyncStatus;
   themeColor?: string;
@@ -123,17 +124,21 @@ interface ProjectManagerProps {
   onMapStyleChange?: (styleId: string) => void;
 }
 
-export const ProjectManager: React.FC<ProjectManagerProps> = ({ 
-  projects, 
-  currentProjectId, 
-  onCreateProject, 
-  onSelectProject, 
+export const ProjectManager: React.FC<ProjectManagerProps> = ({
+  projects,
+  currentProjectId,
+  onCreateProject,
+  onSelectProject,
   onDeleteProject,
   onUpdateProject,
   syncStatus,
   isSidebar = false,
   onCloseSidebar,
   onBackToHome,
+  viewMode,
+  activeProject,
+  onExportCSV,
+  onExportMap,
   viewMode = 'map',
   activeProject,
   onExportCSV,
@@ -208,7 +213,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     }
   };
 
-  const handleExportCurrentView = () => {
+  const handleExportCurrentView = async () => {
     if (!activeProject) {
       alert("Please open a project first");
       return;
@@ -219,6 +224,9 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       if (onExportCSV) {
         onExportCSV(activeProject);
       }
+    } else if (viewMode === 'map' && onExportMap) {
+      // Use special map export function that handles image preprocessing
+      await onExportMap();
     } else {
       const elementId = viewMode === 'map' ? 'map-view-container' : 'board-view-container';
       exportToJpegCentered(elementId, `${activeProject.name}-${viewMode}`);
