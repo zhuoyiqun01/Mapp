@@ -238,3 +238,4 @@ export const useProjectState = (): UseProjectStateReturn => {
     deleteNoteFromProject
   };
 };
+

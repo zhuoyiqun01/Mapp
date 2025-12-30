@@ -471,3 +471,4 @@ export const useImageImport = ({
     handleCancelImport
   };
 };
+

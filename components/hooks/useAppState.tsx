@@ -83,3 +83,4 @@ export const useAppState = (): UseAppStateReturn => {
     sidebarButtonDragRef
   };
 };
+

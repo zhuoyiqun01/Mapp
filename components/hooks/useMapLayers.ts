@@ -79,3 +79,4 @@ export const useMapLayers = ({ notes, projectFrames }: UseMapLayersProps) => {
     getFilteredNotes
   };
 };
+
