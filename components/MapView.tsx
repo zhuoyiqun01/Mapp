@@ -1146,31 +1146,26 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     [notes]
   );
 
-  // Determine the final map position with complete priority logic
-  const determineFinalMapPosition = useCallback(() => {
+  // Get cached position, last pin position, current location, or default
+  // Navigation coordinates take highest priority, then cached position to avoid jumping
+  const initialMapPosition = useMemo(() => {
     if (!isMapMode || !projectId) {
-      return { center: defaultCenter, zoom: 16 };
+      return null;
     }
 
-    // Priority order: navigateToCoords > cache > last pin > current location > default
-
-    // 1. Navigate coordinates (highest priority - from other views)
+    // 1. Navigation coordinates (highest priority - handled by MapContainer center prop)
     if (navigateToCoords) {
-      return {
-        center: [navigateToCoords.lat, navigateToCoords.lng] as [number, number],
-        zoom: 19 // Higher zoom for navigation
-      };
+      return { center: [navigateToCoords.lat, navigateToCoords.lng] as [number, number], zoom: 19 };
     }
 
-    // 2. Cached position (only if not restored before)
-    if (!hasRestoredFromCache) {
-      const cached = getViewPositionCache(projectId, 'map');
-      if (cached?.center && cached.zoom) {
-        return { center: cached.center, zoom: cached.zoom };
-      }
+    // 2. Always check cache first - this prevents jumping by ensuring MapContainer starts at cached position
+    const cached = getViewPositionCache(projectId, 'map');
+    if (cached?.center && cached.zoom) {
+      console.log('Using cached position for initial map setup:', cached);
+      return { center: cached.center, zoom: cached.zoom };
     }
 
-    // 3. Last pin position
+    // 3. Use last pin position
     if (mapNotes.length > 0) {
       const lastNote = mapNotes[mapNotes.length - 1];
       return {
@@ -1179,21 +1174,14 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       };
     }
 
-    // 4. Current location (if available)
+    // 4. Use current location (if available)
     if (currentLocation) {
       return { center: [currentLocation.lat, currentLocation.lng] as [number, number], zoom: 16 };
     }
 
-    // 5. Default position (lowest priority)
+    // 5. Use default
     return { center: defaultCenter, zoom: 16 };
-  }, [isMapMode, projectId, navigateToCoords, hasRestoredFromCache, mapNotes, currentLocation, defaultCenter]);
-
-  // Placeholder position for MapContainer initialization (will be immediately overridden in whenReady)
-  // Using coordinates far from normal usage to avoid visual jump
-  const placeholderPosition = useMemo(() => ({
-    center: [0, 0] as [number, number], // Null Island - will be immediately overridden
-    zoom: 2 // Very zoomed out to hide any content
-  }), []);
+  }, [isMapMode, projectId, navigateToCoords, mapNotes, currentLocation, defaultCenter]);
 
   // Reset cache restoration flag when project changes
   useEffect(() => {
@@ -2716,10 +2704,14 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           </div>
         </div>
       )}
-      <MapContainer
+      <MapContainer 
         key={`${project.id}-${projectId || 'no-project'}`}
-        center={isMapMode ? placeholderPosition.center : [0, 0]}
-        zoom={isMapMode ? placeholderPosition.zoom : -8}
+        center={
+          isMapMode
+            ? (initialMapPosition?.center || defaultCenter)
+            : [0, 0]
+        }
+        zoom={isMapMode ? (initialMapPosition?.zoom ?? 16) : -8}
         minZoom={isMapMode ? 6 : -20} 
         maxZoom={isMapMode ? 19 : 2}
         zoomSnap={0.1}  // Enable fractional zoom levels
@@ -2738,30 +2730,20 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             mapInitRef.current.add(map);
             
             map.whenReady(() => {
-              // Determine and set the final map position based on complete priority logic
-              const finalPosition = determineFinalMapPosition();
-
-              // Set final position immediately since map.whenReady() ensures map is fully ready
-              console.log('Setting final map position:', finalPosition);
-              map.setView(finalPosition.center, finalPosition.zoom, { animate: false });
-
-              // Mark as restored if we used cached position (but not navigation coords)
-              if (!navigateToCoords) {
+              // Handle navigation coordinates (highest priority) or ensure cache restoration is marked
+              if (navigateToCoords) {
+                // Navigation coordinates take precedence - ensure we're at the right spot
+                console.log('Navigating to coordinates:', navigateToCoords);
+                // MapContainer should already be set to navigateToCoords, but ensure it
+                map.setView([navigateToCoords.lat, navigateToCoords.lng], 19, { animate: false });
+              } else if (projectId && isMapMode) {
+                // For non-navigation cases, mark cache as restored since MapContainer already used cached position
                 const cached = getViewPositionCache(projectId, 'map');
-                if (cached?.center && cached.zoom &&
-                    cached.center[0] === finalPosition.center[0] &&
-                    cached.center[1] === finalPosition.center[1] &&
-                    cached.zoom === finalPosition.zoom) {
-                  setHasRestoredFromCache(true);
+                if (cached?.center && cached.zoom) {
+                  console.log('Map initialized with cached position:', cached);
                 }
+                setHasRestoredFromCache(true);
               }
-
-              // Prevent MapPositionTracker from immediately overriding during stabilization
-              setPausePositionTracking(true);
-              setTimeout(() => {
-                setPausePositionTracking(false);
-                console.log('Map position stabilization period ended');
-              }, 2000);
               
               // Helper function to safely invalidate size and update view
               const safeInvalidateAndUpdate = () => {
