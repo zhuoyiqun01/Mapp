@@ -98,12 +98,6 @@ export default function App() {
     }
   }, [currentProjectId]);
 
-  // Stable callback for map position changes - save to cache
-  const handleMapPositionChange = useCallback((center: [number, number], zoom: number) => {
-    if (currentProjectId) {
-      setViewPositionCache(currentProjectId, 'map', { center, zoom });
-    }
-  }, [currentProjectId]);
 
   // Stable callback for board transform changes - save to cache
   const handleBoardTransformChange = useCallback((x: number, y: number, scale: number) => {
@@ -1167,7 +1161,6 @@ export default function App() {
             onNavigateComplete={() => {
               setNavigateToMapCoords(null);
             }}
-            onPositionChange={handleMapPositionChange}
             onSwitchToBoardView={(coords) => {
               // Close editor first to ensure UI state is correct
               setIsEditorOpen(false);
@@ -1236,6 +1229,13 @@ export default function App() {
               if (coords) {
                 setTimeout(() => {
                   setNavigateToMapCoords(coords);
+                  // Save navigation position to cache for future use
+                  if (currentProjectId) {
+                    setViewPositionCache(currentProjectId, 'map', {
+                      center: [coords.lat, coords.lng],
+                      zoom: 16 // Default zoom for navigation
+                    });
+                  }
                 }, 100);
               }
               // Trigger MapView's file input after a short delay
@@ -1265,6 +1265,13 @@ export default function App() {
               if (coords) {
                 setTimeout(() => {
                   setNavigateToMapCoords(coords);
+                  // Save navigation position to cache for future use
+                  if (currentProjectId) {
+                    setViewPositionCache(currentProjectId, 'map', {
+                      center: [coords.lat, coords.lng],
+                      zoom: 16 // Default zoom for navigation
+                    });
+                  }
                 }, 100);
               }
             }}

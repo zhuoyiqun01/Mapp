@@ -9,7 +9,6 @@ import { MapLongPressHandler } from './map/MapLongPressHandler';
 import { MapNavigationHandler } from './map/MapNavigationHandler';
 import { TextLabelsLayer } from './map/TextLabelsLayer';
 import { MapCenterHandler } from './map/MapCenterHandler';
-import { MapPositionTracker } from './map/MapPositionTracker';
 import { MapZoomController } from './map/MapZoomController';
 import { SettingsPanel } from './SettingsPanel';
 
@@ -713,7 +712,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
 // Component to track map position changes and notify parent
 
 
-export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, projectId, onNavigateComplete, onPositionChange, onSwitchToBoardView, themeColor = THEME_COLOR, mapStyleId = 'carto-light-nolabels', onMapStyleChange, showImportMenu, setShowImportMenu }) => {
+export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, projectId, onNavigateComplete, onSwitchToBoardView, themeColor = THEME_COLOR, mapStyleId = 'carto-light-nolabels', onMapStyleChange, showImportMenu, setShowImportMenu }) => {
   if (!project) {
     return null;
   }
@@ -1126,9 +1125,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   // Settings panel
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
 
-  // Track if map position has been restored from cache to prevent jumping on re-entry
-  const [hasRestoredFromCache, setHasRestoredFromCache] = useState(false);
-  const [pausePositionTracking, setPausePositionTracking] = useState(false);
 
   // Current marker index being viewed
 
@@ -1147,7 +1143,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   );
 
   // Get cached position, last pin position, current location, or default
-  // Navigation coordinates take highest priority, then cached position to avoid jumping
+  // Navigation coordinates take highest priority, then cached position
   const initialMapPosition = useMemo(() => {
     if (!isMapMode || !projectId) {
       return null;
@@ -1158,13 +1154,13 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       return { center: [navigateToCoords.lat, navigateToCoords.lng] as [number, number], zoom: 19 };
     }
 
-    // 2. Always check cache first - this prevents jumping by ensuring MapContainer starts at cached position
+    // 2. Check cache - position saved when navigating from other views
     const cached = getViewPositionCache(projectId, 'map');
     if (cached?.center && cached.zoom) {
       return { center: cached.center, zoom: cached.zoom };
     }
 
-    // 3. Use last pin position
+    // 3. Fallback: use last pin position or default
     if (mapNotes.length > 0) {
       const lastNote = mapNotes[mapNotes.length - 1];
       return {
@@ -1173,19 +1169,9 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       };
     }
 
-    // 4. Use current location (if available)
-    if (currentLocation) {
-      return { center: [currentLocation.lat, currentLocation.lng] as [number, number], zoom: 16 };
-    }
-
-    // 5. Use default
     return { center: defaultCenter, zoom: 16 };
-  }, [isMapMode, projectId, navigateToCoords, mapNotes, currentLocation, defaultCenter]);
+  }, [isMapMode, projectId, navigateToCoords, mapNotes, defaultCenter]);
 
-  // Reset cache restoration flag when project changes
-  useEffect(() => {
-    setHasRestoredFromCache(false);
-  }, [projectId]);
 
   // Get current location and device orientation
   useEffect(() => {
@@ -2734,7 +2720,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 console.log('Navigating to coordinates:', navigateToCoords);
                 map.setView([navigateToCoords.lat, navigateToCoords.lng], 19, { animate: false });
               }
-              // No need to check cache again - MapContainer already used cached position for initial setup
               
               // Helper function to safely invalidate size and update view
               const safeInvalidateAndUpdate = () => {
@@ -2779,7 +2764,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         doubleClickZoom={false}
       >
         <MapNavigationHandler coords={navigateToCoords} onComplete={onNavigateComplete} />
-        <MapPositionTracker onPositionChange={onPositionChange} pauseUpdates={pausePositionTracking} />
         {isMapMode ? (
            (() => {
              const isSatellite = effectiveMapStyle === 'satellite';
