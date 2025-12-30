@@ -2718,11 +2718,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             mapInitRef.current.add(map);
             
             map.whenReady(() => {
-              // Handle navigation coordinates (highest priority) - ensure we're at the right spot
-              if (navigateToCoords) {
-                console.log('Navigating to coordinates:', navigateToCoords);
-                map.setView([navigateToCoords.lat, navigateToCoords.lng], 19, { animate: false });
-              }
+              // Navigation coordinates are now set before MapView mounts, so map should already be at correct position
+              // No need for additional setView calls
               
               // Helper function to safely invalidate size and update view
               const safeInvalidateAndUpdate = () => {

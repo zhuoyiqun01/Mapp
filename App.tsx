@@ -1238,11 +1238,8 @@ export default function App() {
             onSwitchToMapView={(coords?: { lat: number; lng: number }) => {
               // Close editor first to ensure UI state is correct
               setIsEditorOpen(false);
-              // Switch view first, then set navigation coordinates after a short delay
-              // This ensures MapView is mounted and ready to receive navigation
-              setViewMode('map');
 
-              // Priority: explicit coords > cached position from previous map session
+              // Prepare navigation coordinates BEFORE switching view to avoid timing issues
               let navigationCoords = coords;
               if (!navigationCoords && currentProjectId) {
                 // Read cached position from previous map session
@@ -1253,16 +1250,18 @@ export default function App() {
                 }
               }
 
-              // Set navigation coordinates after MapView has mounted
+              // Set navigation coordinates BEFORE view switch to ensure MapView has correct coords on mount
               if (navigationCoords) {
-                setTimeout(() => {
-                  setNavigateToMapCoords(navigationCoords);
-                }, 100);
+                setNavigateToMapCoords(navigationCoords);
               }
+
+              // Switch view after coordinates are set
+              setViewMode('map');
+
               // Trigger MapView's file input after a short delay
               setTimeout(() => {
                 mapViewFileInputRef.current?.click();
-              }, 300);
+              }, 200);
             }}
             onSwitchToBoardView={(coords?: { x: number; y: number }) => {
               if (coords) {
@@ -1279,11 +1278,8 @@ export default function App() {
             onSwitchToMapView={(coords?: { lat: number; lng: number }) => {
               // Close editor first to ensure UI state is correct
               setIsEditorOpen(false);
-              // Switch view first, then set navigation coordinates after a short delay
-              // This ensures MapView is mounted and ready to receive navigation
-              setViewMode('map');
 
-              // Priority: explicit coords > cached position from previous map session
+              // Prepare navigation coordinates BEFORE switching view to avoid timing issues
               let navigationCoords = coords;
               if (!navigationCoords && currentProjectId) {
                 // Read cached position from previous map session
@@ -1294,12 +1290,13 @@ export default function App() {
                 }
               }
 
-              // Set navigation coordinates after MapView has mounted
+              // Set navigation coordinates BEFORE view switch to ensure MapView has correct coords on mount
               if (navigationCoords) {
-                setTimeout(() => {
-                  setNavigateToMapCoords(navigationCoords);
-                }, 100);
+                setNavigateToMapCoords(navigationCoords);
               }
+
+              // Switch view after coordinates are set
+              setViewMode('map');
             }}
             onSwitchToBoardView={() => {
               // Close editor first to ensure UI state is correct
