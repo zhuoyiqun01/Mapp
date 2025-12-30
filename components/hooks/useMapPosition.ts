@@ -1,0 +1,85 @@
+import { useMemo, useCallback } from 'react';
+import { getViewPositionCache, setViewPositionCache } from '../utils/storage';
+import { Note } from '../types';
+
+interface UseMapPositionProps {
+  isMapMode: boolean;
+  projectId: string | undefined;
+  navigateToCoords?: { lat: number; lng: number; zoom?: number } | null;
+  mapNotes: Note[];
+  currentLocation?: { lat: number; lng: number } | null;
+  defaultCenter: [number, number];
+}
+
+export const useMapPosition = ({
+  isMapMode,
+  projectId,
+  navigateToCoords,
+  mapNotes,
+  currentLocation,
+  defaultCenter
+}: UseMapPositionProps) => {
+
+  // Calculate initial map position with priority order
+  const initialMapPosition = useMemo(() => {
+    if (!isMapMode || !projectId) {
+      console.log('[useMapPosition] Skipping initial position - isMapMode:', isMapMode, 'projectId:', projectId);
+      return null;
+    }
+
+    console.log('[useMapPosition] Calculating initial position:', {
+      navigateToCoords,
+      projectId,
+      isMapMode
+    });
+
+    // 1. Navigation coordinates (highest priority - handled by MapContainer center prop)
+    if (navigateToCoords) {
+      console.log('[useMapPosition] Using navigation coordinates:', navigateToCoords);
+      return {
+        center: [navigateToCoords.lat, navigateToCoords.lng] as [number, number],
+        zoom: navigateToCoords.zoom ?? 19
+      };
+    }
+
+    // 2. Check cached position (saved when leaving mapping view)
+    const cached = getViewPositionCache(projectId, 'map');
+    console.log('[useMapPosition] Checking cached position:', { cached, hasValidCache: !!(cached?.center && cached.zoom) });
+    if (cached?.center && cached.zoom) {
+      console.log('[useMapPosition] Using cached position for initial setup:', cached);
+      return { center: cached.center, zoom: cached.zoom };
+    }
+
+    // 3. Fallback positions (zoom: 16)
+    // 3.1 Last pin position
+    if (mapNotes.length > 0) {
+      const lastNote = mapNotes[mapNotes.length - 1];
+      return {
+        center: [lastNote.coords.lat, lastNote.coords.lng] as [number, number],
+        zoom: 16
+      };
+    }
+
+    // 3.2 Current location
+    if (currentLocation) {
+      return { center: [currentLocation.lat, currentLocation.lng] as [number, number], zoom: 16 };
+    }
+
+    // 3.3 Default fallback coordinates
+    return { center: defaultCenter, zoom: 16 };
+  }, [isMapMode, projectId, navigateToCoords, mapNotes, currentLocation, defaultCenter]);
+
+  // Real-time map position saving (similar to board's transform saving)
+  const handleMapPositionChange = useCallback((center: [number, number], zoom: number) => {
+    if (projectId) {
+      // Real-time save map position whenever it changes (after cache restoration)
+      console.log('[useMapPosition] 实时保存地图位置:', { center, zoom });
+      setViewPositionCache(projectId, 'map', { center, zoom });
+    }
+  }, [projectId]);
+
+  return {
+    initialMapPosition,
+    handleMapPositionChange
+  };
+};

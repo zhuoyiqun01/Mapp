@@ -4,7 +4,8 @@ import { MapContainer, TileLayer, Marker, ImageOverlay, useMap, useMapEvents } f
 import L from 'leaflet';
 import { Note, Coordinates, Project } from '../types';
 import { MAP_TILE_URL, MAP_TILE_URL_FALLBACK, MAP_SATELLITE_URL, MAP_ATTRIBUTION, THEME_COLOR, THEME_COLOR_DARK, MAP_STYLE_OPTIONS } from '../constants';
-import { getViewPositionCache, setViewPositionCache } from '../utils/storage';
+import { useMapPosition } from '../hooks/useMapPosition';
+import { useGeolocation } from '../hooks/useGeolocation';
 import { MapLongPressHandler } from './map/MapLongPressHandler';
 import { MapNavigationHandler } from './map/MapNavigationHandler';
 import { TextLabelsLayer } from './map/TextLabelsLayer';
@@ -237,140 +238,10 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
         });
     };
     
-    const checkLocationPermission = async (): Promise<string> => {
-        // Check if Permissions API is available
-        if ('permissions' in navigator) {
-            try {
-                const result = await navigator.permissions.query({ name: 'geolocation' as PermissionName });
-                return result.state; // 'granted', 'denied', or 'prompt'
-            } catch (e) {
-                // Permissions API might not support 'geolocation' name in some browsers
-                return 'unknown';
-            }
-        }
-        return 'unknown';
-    };
     
-    const getLocationErrorMessage = (error: any, permissionState?: string): string => {
-        if (!error) {
-            if (permissionState === 'denied') {
-                return 'Location permission was denied. Please enable location access in your browser settings.';
-            }
-            return 'Unable to get your current location.';
-        }
-        
-        const errorCode = error.code;
-        
-        // Check error codes
-        if (errorCode === 1) { // PERMISSION_DENIED
-            return 'Location permission was denied. Please enable location access in your browser settings and ensure your device location services are enabled.';
-        } else if (errorCode === 2) { // POSITION_UNAVAILABLE
-            return 'Location information is unavailable. Possible causes:\n• Device location services are disabled\n• GPS signal is weak or unavailable\n• You may be in a location where GPS cannot work (e.g., indoors, underground)';
-        } else if (errorCode === 3) { // TIMEOUT
-            return 'Location request timed out. This may happen if:\n• GPS signal is too weak\n• Location services are slow to respond\n• Network connectivity issues\n\nPlease try again or check your device location settings.';
-        }
-        
-        // Check error message for additional clues
-        const errorMessage = error.message || '';
-        if (errorMessage.includes('timeout') || errorMessage.includes('Timeout')) {
-            return 'Location request timed out. Please ensure your device location services are enabled and try again.';
-        }
-        if (errorMessage.includes('denied') || errorMessage.includes('permission')) {
-            return 'Location permission issue. Please check:\n• Browser location permissions\n• Device location services (system settings)\n• Try refreshing the page and granting permission again';
-        }
-        if (errorMessage.includes('unavailable') || errorMessage.includes('not available')) {
-            return 'Location is currently unavailable. Please check:\n• Device location services are enabled\n• GPS/Wi-Fi location is enabled\n• You are in an area with location coverage';
-        }
-        
-        // Default error message
-        return `Unable to get your current location. Error: ${errorMessage || 'Unknown error'}\n\nPlease check:\n• Browser location permissions\n• Device location services (system settings)\n• GPS signal strength\n• Network connectivity`;
-    };
     
     const [locationErrorMessage, setLocationErrorMessage] = useState<string>('');
     
-    const locateToCurrentPosition = async () => {
-        // Check permission state first
-        let permissionState: string = 'unknown';
-        try {
-            permissionState = await checkLocationPermission();
-            console.log('Location permission state:', permissionState);
-        } catch (e) {
-            console.warn('Failed to check permission state:', e);
-        }
-        
-        // Try locating with a fallback strategy for OPPO and other Android devices
-        // Strategy: Try high accuracy first, then fallback to lower accuracy if it fails
-        const tryLocate = (highAccuracy: boolean, timeoutMs: number, maxAge: number): Promise<void> => {
-            return new Promise((resolve, reject) => {
-                try {
-                    const locationControl = map.locate({
-                        setView: false,
-                        watch: false,
-                        enableHighAccuracy: highAccuracy,
-                        timeout: timeoutMs,
-                        maximumAge: maxAge
-                    });
-                    
-                    const currentPermissionState = permissionState;
-                    let resolved = false;
-                    
-                    const handleLocationFound = (e: L.LocationEvent) => {
-                        if (resolved) return;
-                        resolved = true;
-                        console.log('Location found:', e.latlng, `(highAccuracy: ${highAccuracy})`);
-            map.flyTo(e.latlng, 16);
-                        // Clean up listeners
-                        locationControl.off("locationfound", handleLocationFound);
-                        locationControl.off("locationerror", handleLocationError);
-                        resolve();
-                    };
-                    
-                    const handleLocationError = (e: L.ErrorEvent) => {
-                        if (resolved) return;
-                        console.warn("Location error:", e, `(highAccuracy: ${highAccuracy})`);
-                        console.warn("Error code:", e.code);
-                        console.warn("Error message:", e.message);
-                        
-                        // Clean up listeners
-                        locationControl.off("locationfound", handleLocationFound);
-                        locationControl.off("locationerror", handleLocationError);
-                        reject(e);
-                    };
-                    
-                    locationControl.on("locationfound", handleLocationFound);
-                    locationControl.on("locationerror", handleLocationError);
-                } catch (error: any) {
-                    reject(error);
-                }
-        });
-    };
-        
-        // Try high accuracy first (for better precision)
-        try {
-            await tryLocate(true, 15000, 60000); // 15s timeout, allow 60s cached location
-        } catch (firstError: any) {
-            console.warn("High accuracy location failed, trying lower accuracy:", firstError);
-            
-            // Fallback to lower accuracy (better compatibility with OPPO and other Android devices)
-            try {
-                await tryLocate(false, 15000, 300000); // 15s timeout, allow 5min cached location
-            } catch (secondError: any) {
-                console.warn("Lower accuracy location also failed:", secondError);
-                
-                // Both attempts failed, show error message
-                const finalError = secondError || firstError;
-                checkLocationPermission().then(state => {
-                    const errorMsg = getLocationErrorMessage(finalError, state || permissionState);
-                    setLocationErrorMessage(errorMsg);
-                    setShowLocationError(true);
-                }).catch(() => {
-                    const errorMsg = getLocationErrorMessage(finalError, permissionState);
-                    setLocationErrorMessage(errorMsg);
-                    setShowLocationError(true);
-                });
-            }
-        }
-    };
     
     const locateToLatestPin = () => {
         if (mapNotes.length > 0) {
@@ -722,10 +593,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const notes = project.notes;
   const [editingNote, setEditingNote] = useState<Partial<Note> | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
-  const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [deviceHeading, setDeviceHeading] = useState<number | null>(null);
-  const [hasLocationPermission, setHasLocationPermission] = useState(false);
-  const [locationError, setLocationError] = useState<string | null>(null);
 
   // Helper function to convert hex color to RGB
   const hexToRgb = (hex: string): string => {
@@ -1145,65 +1012,25 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     [notes]
   );
 
-  // Get cached position, last pin position, current location, or default
-  // Navigation coordinates contain cached position from previous session
-  const initialMapPosition = useMemo(() => {
-    if (!isMapMode || !projectId) {
-      console.log('[MapView] Skipping initial position - isMapMode:', isMapMode, 'projectId:', projectId);
-      return null;
-    }
+  // Geolocation management hook
+  const {
+    currentLocation,
+    deviceHeading,
+    hasLocationPermission,
+    locationError,
+    getCurrentBrowserLocation,
+    checkLocationPermission
+  } = useGeolocation(isMapMode);
 
-    console.log('[MapView] Calculating initial position:', {
-      navigateToCoords,
-      projectId,
-      isMapMode
-    });
-
-    // 1. Navigation coordinates (highest priority - handled by MapContainer center prop)
-    if (navigateToCoords) {
-      console.log('[MapView] Using navigation coordinates:', navigateToCoords);
-      return {
-        center: [navigateToCoords.lat, navigateToCoords.lng] as [number, number],
-        zoom: navigateToCoords.zoom ?? 19
-      };
-    }
-
-    // 2. Check cached position (saved when leaving mapping view)
-    const cached = getViewPositionCache(projectId, 'map');
-    console.log('[MapView] Checking cached position:', { cached, hasValidCache: !!(cached?.center && cached.zoom) });
-    if (cached?.center && cached.zoom) {
-      console.log('[MapView] Using cached position for initial setup:', cached);
-      return { center: cached.center, zoom: cached.zoom };
-    }
-
-    // 3. 保底位置 (zoom: 16)
-    // 2.1 最后pin坐标
-    if (mapNotes.length > 0) {
-      const lastNote = mapNotes[mapNotes.length - 1];
-      return {
-        center: [lastNote.coords.lat, lastNote.coords.lng] as [number, number],
-        zoom: 16
-      };
-    }
-
-    // 2.2 实际坐标(当前位置)
-    if (currentLocation) {
-      return { center: [currentLocation.lat, currentLocation.lng] as [number, number], zoom: 16 };
-    }
-
-    // 2.3 保底坐标
-    return { center: defaultCenter, zoom: 16 };
-  }, [isMapMode, projectId, navigateToCoords, mapNotes, currentLocation, defaultCenter]);
-
-
-  // Real-time map position saving (similar to board's transform saving)
-  const handleMapPositionChange = useCallback((center: [number, number], zoom: number) => {
-    if (projectId) {
-      // Real-time save map position whenever it changes (after cache restoration)
-      console.log('[MapView] 实时保存地图位置:', { center, zoom });
-      setViewPositionCache(projectId, 'map', { center, zoom });
-    }
-  }, [projectId]);
+  // Map position management hook
+  const { initialMapPosition, handleMapPositionChange } = useMapPosition({
+    isMapMode,
+    projectId,
+    navigateToCoords,
+    mapNotes,
+    currentLocation,
+    defaultCenter
+  });
 
   // Get current location and device orientation
   useEffect(() => {
