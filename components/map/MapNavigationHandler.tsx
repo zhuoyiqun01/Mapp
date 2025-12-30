@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { useMap } from 'react-leaflet';
 
 interface MapNavigationHandlerProps {
-  coords: { lat: number; lng: number } | null;
+  coords: { lat: number; lng: number; zoom?: number } | null;
   onComplete?: () => void;
 }
 
@@ -12,7 +12,7 @@ export const MapNavigationHandler: React.FC<MapNavigationHandlerProps> = ({ coor
   useEffect(() => {
     if (coords && map) {
       try {
-        map.setView([coords.lat, coords.lng], 19, {
+        map.setView([coords.lat, coords.lng], coords.zoom ?? 19, {
           animate: true,
           duration: 1
         });
