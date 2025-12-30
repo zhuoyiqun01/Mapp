@@ -712,7 +712,8 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
 // Component to track map position changes and notify parent
 
 
-const MapViewComponent = forwardRef<any, MapViewProps>(({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, projectId, onNavigateComplete, onPositionChange, onSwitchToBoardView, themeColor = THEME_COLOR, mapStyleId = 'carto-light-nolabels', showImportMenu, setShowImportMenu }, ref) => {
+const MapViewComponent = forwardRef<any, MapViewProps>((props, ref) => {
+  const { project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, projectId, onNavigateComplete, onPositionChange, onSwitchToBoardView, themeColor = THEME_COLOR, mapStyleId = 'carto-light-nolabels', showImportMenu, setShowImportMenu } = props;
   if (!project) {
     return null;
   }
