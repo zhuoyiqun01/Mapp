@@ -1187,11 +1187,28 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     return { center: defaultCenter, zoom: 16 };
   }, [projectId]); // Like BoardView, only depend on essential data
 
-  const initialMapPosition = useMemo(() => getInitialMapPosition(), [getInitialMapPosition]); // Only depend on projectId to avoid unnecessary recalculations
+  const initialMapPosition = useMemo(() => getInitialMapPosition(), [getInitialMapPosition]);
+
+  // Mark cache restoration as complete after initial position is set
+  useEffect(() => {
+    if (initialMapPosition && !hasRestoredFromCache) {
+      // Small delay to ensure map has settled before enabling position tracking
+      const timer = setTimeout(() => setHasRestoredFromCache(true), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [initialMapPosition, hasRestoredFromCache]); // Only depend on projectId to avoid unnecessary recalculations
 
 
-  // Map position saving - only when leaving map view (like BoardView)
-  // Remove real-time saving to avoid conflicts with cache restoration
+  // Real-time map position saving (like BoardView's continuous transform saving)
+  const handleMapPositionChange = useCallback((center: [number, number], zoom: number) => {
+    if (projectId) {
+      console.log('[MapView] 实时保存地图位置:', { center, zoom });
+      setViewPositionCache(projectId, 'map', { center, zoom });
+    }
+  }, [projectId]);
+
+  // Track if we've restored from cache to avoid saving the restored position immediately
+  const [hasRestoredFromCache, setHasRestoredFromCache] = useState(false);
 
   // Get current location and device orientation
   useEffect(() => {
@@ -2781,6 +2798,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         doubleClickZoom={false}
       >
         <MapNavigationHandler coords={navigateToCoords} onComplete={onNavigateComplete} />
+        <MapPositionTracker onPositionChange={handleMapPositionChange} enabled={hasRestoredFromCache} />
         {isMapMode ? (
            (() => {
              const isSatellite = effectiveMapStyle === 'satellite';
