@@ -1047,7 +1047,10 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
   // Settings panel
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
-  
+
+  // Track if map position has been restored from cache to prevent jumping on re-entry
+  const [hasRestoredFromCache, setHasRestoredFromCache] = useState(false);
+
   // Current marker index being viewed
 
   const defaultCenter: [number, number] = [28.1847, 112.9467];
@@ -1093,6 +1096,11 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     // 4. Use default
     return { center: defaultCenter, zoom: 16 };
   }, [isMapMode, projectId, mapNotes, currentLocation, defaultCenter]);
+
+  // Reset cache restoration flag when project changes
+  useEffect(() => {
+    setHasRestoredFromCache(false);
+  }, [projectId]);
 
   // Get current location and device orientation
   useEffect(() => {
@@ -2608,15 +2616,19 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             mapInitRef.current.add(map);
             
             map.whenReady(() => {
-              // Always check and apply cached position if available and no navigateToCoords
-              // This ensures cache takes priority over initial MapContainer props
-              if (!navigateToCoords && projectId && isMapMode) {
+              // Only restore from cache on first entry to prevent jumping when returning to map view
+              // This ensures cache takes priority over initial MapContainer props only once
+              if (!navigateToCoords && projectId && isMapMode && !hasRestoredFromCache) {
                 const cached = getViewPositionCache(projectId, 'map');
                 if (cached?.center && cached.zoom) {
                   // Use a small delay to ensure map is fully ready
                   setTimeout(() => {
                     map.setView(cached.center, cached.zoom, { animate: false });
+                    setHasRestoredFromCache(true);
                   }, 50);
+                } else {
+                  // Mark as restored even if no cache exists to prevent future attempts
+                  setHasRestoredFromCache(true);
                 }
               }
               
