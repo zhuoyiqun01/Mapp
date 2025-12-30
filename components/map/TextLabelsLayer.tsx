@@ -42,7 +42,7 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
                 font-size: ${fontSize}px;
                 font-weight: 500;
                 white-space: nowrap;
-                max-width: ${180 * scale}px;
+                max-width: 180px;
                 overflow: hidden;
                 text-overflow: ellipsis;
                 border: 2px solid ${themeColor};
@@ -51,14 +51,13 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
                 display: inline-block;
                 width: fit-content;
                 min-width: 20px;
-                text-align: center;
               ">
                 ${text}
               </div>
             `,
             className: 'custom-text-label',
-            iconSize: [Math.min(textWidth + 16, 180 * scale + 16), 24], // Cap width, height fixed
-            iconAnchor: [Math.min(textWidth + 16, 180 * scale + 16) / 2, 12] // Always center horizontally
+            iconSize: [textWidth + 16, 24], // Width based on text + padding, height fixed
+            iconAnchor: [textWidth / 2 + 8, 12] // Center horizontally, position above marker
           });
 
           return (
