@@ -1241,10 +1241,22 @@ export default function App() {
               // Switch view first, then set navigation coordinates after a short delay
               // This ensures MapView is mounted and ready to receive navigation
               setViewMode('map');
+
+              // Priority: explicit coords > cached position from previous map session
+              let navigationCoords = coords;
+              if (!navigationCoords && currentProjectId) {
+                // Read cached position from previous map session
+                const cached = getViewPositionCache(currentProjectId, 'map');
+                if (cached?.center && cached.zoom) {
+                  navigationCoords = { lat: cached.center[0], lng: cached.center[1] };
+                  console.log('Using cached position for navigation:', cached);
+                }
+              }
+
               // Set navigation coordinates after MapView has mounted
-              if (coords) {
+              if (navigationCoords) {
                 setTimeout(() => {
-                  setNavigateToMapCoords(coords);
+                  setNavigateToMapCoords(navigationCoords);
                 }, 100);
               }
               // Trigger MapView's file input after a short delay
@@ -1270,10 +1282,22 @@ export default function App() {
               // Switch view first, then set navigation coordinates after a short delay
               // This ensures MapView is mounted and ready to receive navigation
               setViewMode('map');
+
+              // Priority: explicit coords > cached position from previous map session
+              let navigationCoords = coords;
+              if (!navigationCoords && currentProjectId) {
+                // Read cached position from previous map session
+                const cached = getViewPositionCache(currentProjectId, 'map');
+                if (cached?.center && cached.zoom) {
+                  navigationCoords = { lat: cached.center[0], lng: cached.center[1] };
+                  console.log('Using cached position for navigation:', cached);
+                }
+              }
+
               // Set navigation coordinates after MapView has mounted
-              if (coords) {
+              if (navigationCoords) {
                 setTimeout(() => {
-                  setNavigateToMapCoords(coords);
+                  setNavigateToMapCoords(navigationCoords);
                 }, 100);
               }
             }}

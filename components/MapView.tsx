@@ -1145,7 +1145,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   );
 
   // Get cached position, last pin position, current location, or default
-  // Navigation coordinates take highest priority, then cached position
+  // Navigation coordinates contain cached position from previous session
   const initialMapPosition = useMemo(() => {
     if (!isMapMode || !projectId) {
       return null;
