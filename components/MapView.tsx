@@ -1156,7 +1156,14 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       return { center: [navigateToCoords.lat, navigateToCoords.lng] as [number, number], zoom: 19 };
     }
 
-    // 2. 保底位置 (zoom: 16)
+    // 2. Check cached position (saved when leaving mapping view)
+    const cached = getViewPositionCache(projectId, 'map');
+    if (cached?.center && cached.zoom) {
+      console.log('[MapView] Using cached position for initial setup:', cached);
+      return { center: cached.center, zoom: cached.zoom };
+    }
+
+    // 3. 保底位置 (zoom: 16)
     // 2.1 最后pin坐标
     if (mapNotes.length > 0) {
       const lastNote = mapNotes[mapNotes.length - 1];
