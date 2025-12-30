@@ -30,7 +30,7 @@ export const useMapStyling = ({ mapStyleId, onMapStyleChange }: UseMapStylingPro
   };
 
   // Get tile layer configuration
-  const getTileLayerConfig = useMemo(() => {
+  const tileLayerConfig = useMemo(() => {
     if (effectiveMapStyle === 'satellite') {
       return {
         url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
@@ -52,6 +52,6 @@ export const useMapStyling = ({ mapStyleId, onMapStyleChange }: UseMapStylingPro
     setLocalMapStyle,
     handleLocalMapStyleChange,
     handleMapStyleChange,
-    getTileLayerConfig
+    tileLayerConfig
   };
 };

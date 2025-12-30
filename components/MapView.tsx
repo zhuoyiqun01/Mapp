@@ -853,7 +853,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     setLocalMapStyle,
     handleLocalMapStyleChange,
     handleMapStyleChange,
-    getTileLayerConfig
+    tileLayerConfig
   } = useMapStyling({
     mapStyleId,
     onMapStyleChange
@@ -1769,7 +1769,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         {isMapMode ? (
           <TileLayer
             key={effectiveMapStyle}
-            {...getTileLayerConfig()}
+            {...tileLayerConfig}
             maxNativeZoom={19}
             maxZoom={19}
             tileSize={256}
