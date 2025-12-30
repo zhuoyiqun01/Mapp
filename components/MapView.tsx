@@ -2704,14 +2704,17 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           </div>
         </div>
       )}
-      <MapContainer 
-        key={`${project.id}-${projectId || 'no-project'}`}
-        center={
-          isMapMode
-            ? (initialMapPosition?.center || defaultCenter)
-            : [0, 0]
-        }
-        zoom={isMapMode ? (initialMapPosition?.zoom ?? 16) : -8}
+      {(() => {
+        const finalCenter = isMapMode ? (initialMapPosition?.center || defaultCenter) : [0, 0];
+        const finalZoom = isMapMode ? (initialMapPosition?.zoom ?? 16) : -8;
+        console.log('MapContainer final center:', finalCenter, 'zoom:', finalZoom);
+        console.log('initialMapPosition:', initialMapPosition);
+
+        return (
+          <MapContainer
+            key={`${project.id}-${projectId || 'no-project'}`}
+            center={finalCenter}
+            zoom={finalZoom}
         minZoom={isMapMode ? 6 : -20} 
         maxZoom={isMapMode ? 19 : 2}
         zoomSnap={0.1}  // Enable fractional zoom levels
@@ -3326,7 +3329,9 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
            />
         </div>
 
-      </MapContainer>
+          </MapContainer>
+        );
+      })()}
 
       {/* Frame Layer Button - Outside MapContainer, like BoardView */}
       {isMapMode && (
