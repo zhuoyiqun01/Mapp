@@ -2762,12 +2762,13 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 
                 try {
                   map.invalidateSize();
-                  // Force a view update to trigger tile loading
-                  const center = map.getCenter();
-                  const zoom = map.getZoom();
-                  if (center && typeof center.lat === 'number' && typeof center.lng === 'number') {
-                    map.setView(center, zoom, { animate: false });
-                  }
+                  // Removed: Force a view update to trigger tile loading
+                  // This was causing cached positions to be overwritten with incorrect values
+                  // const center = map.getCenter();
+                  // const zoom = map.getZoom();
+                  // if (center && typeof center.lat === 'number' && typeof center.lng === 'number') {
+                  //   map.setView(center, zoom, { animate: false });
+                  // }
                   return true; // Success
                 } catch (error) {
                   console.warn('Error updating map view:', error);
