@@ -2,17 +2,19 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, ImageOverlay, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
-import { Note, Coordinates, Project } from '../types';
+import { Note, Coordinates, Project, Frame } from '../types';
 import { MAP_TILE_URL, MAP_TILE_URL_FALLBACK, MAP_SATELLITE_URL, MAP_ATTRIBUTION, THEME_COLOR, THEME_COLOR_DARK, MAP_STYLE_OPTIONS } from '../constants';
 import { useMapPosition } from '@/components/hooks/useMapPosition';
 import { useGeolocation } from '@/components/hooks/useGeolocation';
 import { useImageImport } from '@/components/hooks/useImageImport';
+import { useMapLayers } from '@/components/hooks/useMapLayers';
 import { MapLongPressHandler } from './map/MapLongPressHandler';
 import { MapNavigationHandler } from './map/MapNavigationHandler';
 import { TextLabelsLayer } from './map/TextLabelsLayer';
 import { MapPositionTracker } from './map/MapPositionTracker';
 import { MapCenterHandler } from './map/MapCenterHandler';
 import { MapZoomController } from './map/MapZoomController';
+import { set } from 'idb-keyval';
 import { SettingsPanel } from './SettingsPanel';
 
 // Custom Horizontal Range Slider component - similar to ZoomSlider but horizontal
@@ -190,9 +192,10 @@ const SearchBarContainer = ({ children }: { children: React.ReactNode }) => {
     return <div ref={containerRef}>{children}</div>;
 };
 
-const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange, mapNotes, frames, frameLayerVisibility, setFrameLayerVisibility, themeColor = THEME_COLOR, showTextLabels, setShowTextLabels, pinSize, setPinSize, clusterThreshold, setClusterThreshold, onOpenSettings, showImportMenu, setShowImportMenu }: {
+const MapControls = ({ onImportPhotos, onImportData, onLocateCurrentPosition, mapStyle, onMapStyleChange, mapNotes, frames, frameLayerVisibility, setFrameLayerVisibility, themeColor = THEME_COLOR, showTextLabels, setShowTextLabels, pinSize, setPinSize, clusterThreshold, setClusterThreshold, onOpenSettings, showImportMenu, setShowImportMenu }: {
     onImportPhotos: () => void;
     onImportData: () => void;
+    onLocateCurrentPosition: () => void;
     mapStyle: 'standard' | 'satellite';
     onMapStyleChange: (style: 'standard' | 'satellite') => void;
     mapNotes: Note[];
@@ -217,31 +220,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
     // Use external state if provided, otherwise use internal state
     const currentShowImportMenu = showImportMenu !== undefined ? showImportMenu : internalShowImportMenu;
     const currentSetShowImportMenu = setShowImportMenu || setInternalShowImportMenu;
-    const [showLocationError, setShowLocationError] = useState(false);
     const locateMenuRef = useRef<HTMLDivElement>(null);
-    
-    const requestLocationPermission = (): Promise<GeolocationPosition> => {
-        return new Promise((resolve, reject) => {
-            if (!navigator.geolocation) {
-                reject(new Error('Geolocation is not supported by this browser'));
-                return;
-            }
-            
-            navigator.geolocation.getCurrentPosition(
-                (position) => resolve(position),
-                (error) => reject(error),
-                {
-                    enableHighAccuracy: true,
-                    timeout: 10000,
-                    maximumAge: 0
-                }
-            );
-        });
-    };
-    
-    
-    
-    const [locationErrorMessage, setLocationErrorMessage] = useState<string>('');
     
     
     const locateToLatestPin = () => {
@@ -372,7 +351,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
-                                requestLocation();
+                                onLocateCurrentPosition();
                                 setShowLocateMenu(false);
                             }}
                             onPointerDown={(e) => {
@@ -553,31 +532,6 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                         </button>
             
             {/* Location Error Dialog */}
-            {showLocationError && (
-                <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-black bg-opacity-50">
-                    <div className="bg-white rounded-xl shadow-xl p-6 max-w-md mx-4 max-h-[80vh] overflow-y-auto">
-                        <h3 className="text-lg font-semibold text-gray-900 mb-3">Location Failed</h3>
-                        <div className="text-sm text-gray-600 mb-4 whitespace-pre-line leading-relaxed">
-                            {locationErrorMessage || 'Unable to get your current location.'}
-                        </div>
-                        <div className="flex gap-2 justify-end">
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    setShowLocationError(false);
-                                    setLocationErrorMessage('');
-                                }}
-                                onPointerDown={(e) => e.stopPropagation()}
-                                onPointerMove={(e) => e.stopPropagation()}
-                                onPointerUp={(e) => e.stopPropagation()}
-                                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-                            >
-                                OK
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 }
@@ -665,62 +619,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const [currentNoteIndex, setCurrentNoteIndex] = useState(0);
   const [currentClusterNotes, setCurrentClusterNotes] = useState<Note[]>([]);
 
-  // Frame layer visibility state
-  const [frameLayerVisibility, setFrameLayerVisibility] = useState<Record<string, boolean>>({});
-  const [showAllFrames, setShowAllFrames] = useState(true); // Default to show all
-  const [showFrameLayerPanel, setShowFrameLayerPanel] = useState(false);
-  const frameLayerRef = useRef<HTMLDivElement>(null);
 
-  // Initialize frame layer visibility when project frames change
-  useEffect(() => {
-    if (project.frames) {
-      const newVisibility: Record<string, boolean> = {};
-      project.frames.forEach(frame => {
-        if (!(frame.id in frameLayerVisibility)) {
-          newVisibility[frame.id] = true; // Default to visible
-        }
-      });
-      if (Object.keys(newVisibility).length > 0) {
-        setFrameLayerVisibility(prev => ({ ...prev, ...newVisibility }));
-      }
-    }
-  }, [project.frames, frameLayerVisibility]);
-
-  // Close frame layer panel when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (frameLayerRef.current && !frameLayerRef.current.contains(event.target as Node)) {
-        setShowFrameLayerPanel(false);
-      }
-    };
-
-    if (showFrameLayerPanel) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }
-  }, [showFrameLayerPanel]);
-
-  // Filter notes based on frame layer visibility
-  const getFilteredNotes = useMemo(() => {
-    if (!project.frames || project.frames.length === 0) {
-      return notes; // No frames, show all notes
-    }
-
-    // If show all is enabled, show all notes
-    if (showAllFrames) {
-      return notes;
-    }
-
-    return notes.filter(note => {
-      // If note has no frame associations, hide it when Show All is disabled
-      if (!note.groupIds || note.groupIds.length === 0) {
-        return false; // Hide notes without frame associations when filtering is active
-      }
-
-      // Show note if any of its associated frames are visible (OR logic)
-      return note.groupIds.some(frameId => frameLayerVisibility[frameId] !== false);
-    });
-  }, [notes, project.frames, frameLayerVisibility, showAllFrames]);
   
   
   // Image fingerprint: GPS coordinates + 3 sampled pixels (top-left, bottom-left, bottom-right)
@@ -934,6 +833,21 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     onUpdateProject,
     onImportDialogChange,
     mapInstance
+  });
+
+  // Map layers management hook
+  const {
+    frameLayerVisibility,
+    setFrameLayerVisibility,
+    showAllFrames,
+    setShowAllFrames,
+    showFrameLayerPanel,
+    setShowFrameLayerPanel,
+    frameLayerRef,
+    getFilteredNotes
+  } = useMapLayers({
+    notes,
+    projectFrames: project.frames
   });
 
 
@@ -1952,14 +1866,18 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 <p className="text-sm text-red-800 font-medium">位置服务不可用</p>
                 <p className="text-xs text-red-600 mt-1">{locationError}</p>
                 <button
-                  onClick={retryLocation}
+                  onClick={requestLocation}
                   className="mt-2 px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 text-xs rounded-md transition-colors"
                 >
                   🔄 重试
                 </button>
               </div>
               <button
-                onClick={() => setLocationError(null)}
+                onClick={() => {
+                  // Since locationError is managed by the hook, we can't directly set it to null
+                  // The error will be cleared when requestLocation succeeds
+                  requestLocation();
+                }}
                 className="text-red-400 hover:text-red-600 text-lg leading-none"
                 title="关闭提示"
               >
@@ -2096,9 +2014,10 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         {isMapMode && (
           <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none items-start">
               {/* First Row: Main Controls */}
-              <MapControls 
-                onImportPhotos={() => fileInputRef.current?.click()} 
+              <MapControls
+                onImportPhotos={() => fileInputRef.current?.click()}
                 onImportData={() => dataImportInputRef.current?.click()}
+                onLocateCurrentPosition={requestLocation}
                 mapStyle={mapStyle}
                 onMapStyleChange={(style) => setLocalMapStyle(style)}
                 mapNotes={getFilteredNotes}
