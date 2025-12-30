@@ -310,6 +310,23 @@ export default function App() {
       clearViewPositionCache(currentProjectId);
     }
 
+    // 检查并记录所有缓存的导航位置
+    const checkAllCachedPositions = () => {
+      const allKeys = Object.keys(sessionStorage).filter(key => key.includes('mapp-view-pos'));
+      console.log('[Navigation] 当前sessionStorage中的所有位置缓存:', allKeys);
+
+      allKeys.forEach(key => {
+        try {
+          const data = sessionStorage.getItem(key);
+          console.log(`[Navigation] ${key}:`, JSON.parse(data || '{}'));
+        } catch (e) {
+          console.warn(`[Navigation] 解析缓存失败 ${key}:`, e);
+        }
+      });
+    };
+
+    checkAllCachedPositions();
+
     setCurrentProjectId(id);
     setIsSidebarOpen(false);
     setNavigateToMapCoords(null); // Clear navigation intent on project switch
@@ -1168,14 +1185,30 @@ export default function App() {
                   const center = mapInstance.getCenter();
                   const zoom = mapInstance.getZoom();
                   if (center && typeof center.lat === 'number' && typeof center.lng === 'number') {
+                    console.log('[Navigation] 保存地图位置 - 离开mapping:', {
+                      projectId: currentProjectId,
+                      center: [center.lat, center.lng],
+                      zoom,
+                      timestamp: new Date().toISOString()
+                    });
                     setViewPositionCache(currentProjectId, 'map', {
                       center: [center.lat, center.lng],
                       zoom
                     });
+                    // 验证保存结果
+                    const saved = getViewPositionCache(currentProjectId, 'map');
+                    console.log('[Navigation] 验证保存结果:', saved);
+                  } else {
+                    console.warn('[Navigation] 地图位置数据无效:', { center, zoom });
                   }
                 } catch (err) {
                   console.warn('[App] Failed to save map position before switching to board:', err);
                 }
+              } else {
+                console.warn('[Navigation] 保存失败 - 缺少必要数据:', {
+                  hasMapInstance: !!mapInstance,
+                  projectId: currentProjectId
+                });
               }
 
               // Close editor first to ensure UI state is correct
@@ -1240,14 +1273,33 @@ export default function App() {
               setIsEditorOpen(false);
 
               // Prepare navigation coordinates BEFORE switching view to avoid timing issues
+              console.log('[Navigation] 准备导航坐标 - 从Board进入mapping:', {
+                explicitCoords: coords,
+                projectId: currentProjectId,
+                timestamp: new Date().toISOString()
+              });
+
               let navigationCoords = coords;
               if (!navigationCoords && currentProjectId) {
                 // Read cached position from previous map session
                 const cached = getViewPositionCache(currentProjectId, 'map');
+                console.log('[Navigation] 从Board读取缓存位置:', {
+                  projectId: currentProjectId,
+                  cached,
+                  hasValidCache: !!(cached?.center && cached.zoom)
+                });
+
                 if (cached?.center && cached.zoom) {
                   navigationCoords = { lat: cached.center[0], lng: cached.center[1] };
-                  console.log('Using cached position for navigation:', cached);
+                  console.log('[Navigation] 从Board使用缓存位置作为导航坐标:', {
+                    coords: navigationCoords,
+                    originalCache: cached
+                  });
+                } else {
+                  console.log('[Navigation] 从Board无有效缓存，将使用保底位置');
                 }
+              } else if (navigationCoords) {
+                console.log('[Navigation] 从Board使用明确的导航坐标:', navigationCoords);
               }
 
               // Set navigation coordinates BEFORE view switch to ensure MapView has correct coords on mount
@@ -1280,14 +1332,33 @@ export default function App() {
               setIsEditorOpen(false);
 
               // Prepare navigation coordinates BEFORE switching view to avoid timing issues
+              console.log('[Navigation] 准备导航坐标 - 从Gallery进入mapping:', {
+                explicitCoords: coords,
+                projectId: currentProjectId,
+                timestamp: new Date().toISOString()
+              });
+
               let navigationCoords = coords;
               if (!navigationCoords && currentProjectId) {
                 // Read cached position from previous map session
                 const cached = getViewPositionCache(currentProjectId, 'map');
+                console.log('[Navigation] 从Gallery读取缓存位置:', {
+                  projectId: currentProjectId,
+                  cached,
+                  hasValidCache: !!(cached?.center && cached.zoom)
+                });
+
                 if (cached?.center && cached.zoom) {
                   navigationCoords = { lat: cached.center[0], lng: cached.center[1] };
-                  console.log('Using cached position for navigation:', cached);
+                  console.log('[Navigation] 从Gallery使用缓存位置作为导航坐标:', {
+                    coords: navigationCoords,
+                    originalCache: cached
+                  });
+                } else {
+                  console.log('[Navigation] 从Gallery无有效缓存，将使用保底位置');
                 }
+              } else if (navigationCoords) {
+                console.log('[Navigation] 从Gallery使用明确的导航坐标:', navigationCoords);
               }
 
               // Set navigation coordinates BEFORE view switch to ensure MapView has correct coords on mount
