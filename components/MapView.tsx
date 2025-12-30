@@ -1152,19 +1152,21 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       return null;
     }
 
-    // 1. Navigation coordinates (highest priority - handled by MapContainer center prop)
+    // 1. Check cached position first (like BoardView does)
+    if (projectId) {
+      const cached = getViewPositionCache(projectId, 'map');
+      if (cached?.center && cached.zoom) {
+        console.log('[MapView] Using cached position for initial setup:', cached);
+        return { center: cached.center, zoom: cached.zoom };
+      }
+    }
+
+    // 2. Navigation coordinates (only for explicit navigation like Gallery to Frame)
     if (navigateToCoords) {
       return {
         center: [navigateToCoords.lat, navigateToCoords.lng] as [number, number],
         zoom: navigateToCoords.zoom ?? 19
       };
-    }
-
-    // 2. Check cached position (saved when leaving mapping view)
-    const cached = getViewPositionCache(projectId, 'map');
-    if (cached?.center && cached.zoom) {
-      console.log('[MapView] Using cached position for initial setup:', cached);
-      return { center: cached.center, zoom: cached.zoom };
     }
 
     // 3. 保底位置 (zoom: 16)
