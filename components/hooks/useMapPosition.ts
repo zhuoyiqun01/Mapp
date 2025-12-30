@@ -67,7 +67,7 @@ export const useMapPosition = ({
 
     // 3.3 Default fallback coordinates
     return { center: defaultCenter, zoom: 16 };
-  }, [isMapMode, projectId, navigateToCoords, mapNotes, currentLocation, defaultCenter]);
+  }, [isMapMode, projectId, navigateToCoords, mapNotes.length, currentLocation?.lat, currentLocation?.lng, defaultCenter]);
 
   // Real-time map position saving (similar to board's transform saving)
   const handleMapPositionChange = useCallback((center: [number, number], zoom: number) => {
