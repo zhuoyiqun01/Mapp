@@ -1149,38 +1149,24 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   // Get cached position, last pin position, current location, or default
   // Navigation coordinates take highest priority, then cached position to avoid jumping
   const initialMapPosition = useMemo(() => {
-    console.log('Calculating initialMapPosition:', {
-      isMapMode,
-      projectId,
-      navigateToCoords: !!navigateToCoords,
-      mapNotesCount: mapNotes.length,
-      currentLocation: !!currentLocation,
-      defaultCenter
-    });
-
     if (!isMapMode || !projectId) {
-      console.log('Skipping initialMapPosition: isMapMode or projectId is falsy');
       return null;
     }
 
     // 1. Navigation coordinates (highest priority - handled by MapContainer center prop)
     if (navigateToCoords) {
-      console.log('Using navigation coordinates:', navigateToCoords);
       return { center: [navigateToCoords.lat, navigateToCoords.lng] as [number, number], zoom: 19 };
     }
 
     // 2. Always check cache first - this prevents jumping by ensuring MapContainer starts at cached position
     const cached = getViewPositionCache(projectId, 'map');
-    console.log('Cache check result:', { projectId, cached });
     if (cached?.center && cached.zoom) {
-      console.log('Using cached position for initial map setup:', cached);
       return { center: cached.center, zoom: cached.zoom };
     }
 
     // 3. Use last pin position
     if (mapNotes.length > 0) {
       const lastNote = mapNotes[mapNotes.length - 1];
-      console.log('Using last pin position:', lastNote.coords);
       return {
         center: [lastNote.coords.lat, lastNote.coords.lng] as [number, number],
         zoom: 16
@@ -1189,12 +1175,10 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
     // 4. Use current location (if available)
     if (currentLocation) {
-      console.log('Using current location:', currentLocation);
       return { center: [currentLocation.lat, currentLocation.lng] as [number, number], zoom: 16 };
     }
 
     // 5. Use default
-    console.log('Using default center:', defaultCenter);
     return { center: defaultCenter, zoom: 16 };
   }, [isMapMode, projectId, navigateToCoords, mapNotes, currentLocation, defaultCenter]);
 
@@ -2719,17 +2703,14 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           </div>
         </div>
       )}
-      {(() => {
-        const finalCenter = isMapMode ? (initialMapPosition?.center || defaultCenter) : [0, 0];
-        const finalZoom = isMapMode ? (initialMapPosition?.zoom ?? 16) : -8;
-        console.log('MapContainer final center:', finalCenter, 'zoom:', finalZoom);
-        console.log('initialMapPosition:', initialMapPosition);
-
-        return (
-          <MapContainer
-            key={`${project.id}-${projectId || 'no-project'}`}
-            center={finalCenter}
-            zoom={finalZoom}
+      <MapContainer
+        key={`${project.id}-${projectId || 'no-project'}`}
+        center={
+          isMapMode
+            ? (initialMapPosition?.center || defaultCenter)
+            : [0, 0]
+        }
+        zoom={isMapMode ? (initialMapPosition?.zoom ?? 16) : -8}
         minZoom={isMapMode ? 6 : -20} 
         maxZoom={isMapMode ? 19 : 2}
         zoomSnap={0.1}  // Enable fractional zoom levels
@@ -2748,20 +2729,12 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             mapInitRef.current.add(map);
             
             map.whenReady(() => {
-              // Handle navigation coordinates (highest priority) or ensure cache restoration is marked
+              // Handle navigation coordinates (highest priority) - ensure we're at the right spot
               if (navigateToCoords) {
-                // Navigation coordinates take precedence - ensure we're at the right spot
                 console.log('Navigating to coordinates:', navigateToCoords);
-                // MapContainer should already be set to navigateToCoords, but ensure it
                 map.setView([navigateToCoords.lat, navigateToCoords.lng], 19, { animate: false });
-              } else if (projectId && isMapMode) {
-                // For non-navigation cases, mark cache as restored since MapContainer already used cached position
-                const cached = getViewPositionCache(projectId, 'map');
-                if (cached?.center && cached.zoom) {
-                  console.log('Map initialized with cached position:', cached);
-                }
-                setHasRestoredFromCache(true);
               }
+              // No need to check cache again - MapContainer already used cached position for initial setup
               
               // Helper function to safely invalidate size and update view
               const safeInvalidateAndUpdate = () => {
@@ -3344,9 +3317,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
            />
         </div>
 
-          </MapContainer>
-        );
-      })()}
+      </MapContainer>
 
       {/* Frame Layer Button - Outside MapContainer, like BoardView */}
       {isMapMode && (
