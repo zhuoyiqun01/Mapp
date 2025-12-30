@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { MAP_STYLE_OPTIONS } from '../constants';
+import { MAP_STYLE_OPTIONS } from '../../constants';
 
 interface UseMapStylingProps {
   mapStyleId?: string;
