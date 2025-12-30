@@ -1147,31 +1147,37 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
   // Get cached position, last pin position, current location, or default
   // Navigation coordinates contain cached position from previous session
-  // Calculate initial map position like BoardView's calculateInitialTransform
-  const getInitialMapPosition = useCallback(() => {
-    console.log('[MapView] getInitialMapPosition called, projectId:', projectId);
-
-    if (!projectId) {
-      console.log('[MapView] No projectId, using default');
-      return { center: defaultCenter, zoom: 16 };
+  const initialMapPosition = useMemo(() => {
+    if (!isMapMode || !projectId) {
+      console.log('[MapView] Skipping initial position - isMapMode:', isMapMode, 'projectId:', projectId);
+      return null;
     }
 
-    // Check cache first (like BoardView does)
-    const cached = getViewPositionCache(projectId, 'map');
-    console.log('[MapView] Cache check result:', cached, 'center values:', cached?.center);
+    console.log('[MapView] Calculating initial position:', {
+      navigateToCoords,
+      projectId,
+      isMapMode
+    });
 
-    if (cached?.center && cached.zoom &&
-        Array.isArray(cached.center) && cached.center.length === 2 &&
-        typeof cached.center[0] === 'number' && typeof cached.center[1] === 'number' &&
-        typeof cached.zoom === 'number' &&
-        !isNaN(cached.center[0]) && !isNaN(cached.center[1]) && !isNaN(cached.zoom)) {
-      console.log('[MapView] Using cached position:', cached);
+    // 1. Navigation coordinates (highest priority - handled by MapContainer center prop)
+    if (navigateToCoords) {
+      console.log('[MapView] Using navigation coordinates:', navigateToCoords);
+      return {
+        center: [navigateToCoords.lat, navigateToCoords.lng] as [number, number],
+        zoom: navigateToCoords.zoom ?? 19
+      };
+    }
+
+    // 2. Check cached position (saved when leaving mapping view)
+    const cached = getViewPositionCache(projectId, 'map');
+    console.log('[MapView] Checking cached position:', { cached, hasValidCache: !!(cached?.center && cached.zoom) });
+    if (cached?.center && cached.zoom) {
+      console.log('[MapView] Using cached position for initial setup:', cached);
       return { center: cached.center, zoom: cached.zoom };
     }
 
-    console.log('[MapView] Cache invalid, using fallback');
-
-    // Fallback like BoardView's fit calculation
+    // 3. 保底位置 (zoom: 16)
+    // 2.1 最后pin坐标
     if (mapNotes.length > 0) {
       const lastNote = mapNotes[mapNotes.length - 1];
       return {
@@ -1180,35 +1186,24 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       };
     }
 
+    // 2.2 实际坐标(当前位置)
     if (currentLocation) {
       return { center: [currentLocation.lat, currentLocation.lng] as [number, number], zoom: 16 };
     }
 
+    // 2.3 保底坐标
     return { center: defaultCenter, zoom: 16 };
-  }, [projectId]); // Like BoardView, only depend on essential data
-
-  const initialMapPosition = useMemo(() => getInitialMapPosition(), [getInitialMapPosition]);
-
-  // Mark cache restoration as complete after initial position is set
-  useEffect(() => {
-    if (initialMapPosition && !hasRestoredFromCache) {
-      // Small delay to ensure map has settled before enabling position tracking
-      const timer = setTimeout(() => setHasRestoredFromCache(true), 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [initialMapPosition, hasRestoredFromCache]); // Only depend on projectId to avoid unnecessary recalculations
+  }, [isMapMode, projectId, navigateToCoords, mapNotes, currentLocation, defaultCenter]);
 
 
-  // Real-time map position saving (like BoardView's continuous transform saving)
+  // Real-time map position saving (similar to board's transform saving)
   const handleMapPositionChange = useCallback((center: [number, number], zoom: number) => {
     if (projectId) {
+      // Real-time save map position whenever it changes (after cache restoration)
       console.log('[MapView] 实时保存地图位置:', { center, zoom });
       setViewPositionCache(projectId, 'map', { center, zoom });
     }
   }, [projectId]);
-
-  // Track if we've restored from cache to avoid saving the restored position immediately
-  const [hasRestoredFromCache, setHasRestoredFromCache] = useState(false);
 
   // Get current location and device orientation
   useEffect(() => {
@@ -2727,7 +2722,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         </div>
       )}
       <MapContainer
-        key={projectId || 'no-project'}
+        key={`${project.id}-${projectId || 'no-project'}`}
         center={
           isMapMode
             ? (initialMapPosition?.center || defaultCenter)
@@ -2798,7 +2793,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         doubleClickZoom={false}
       >
         <MapNavigationHandler coords={navigateToCoords} onComplete={onNavigateComplete} />
-        <MapPositionTracker onPositionChange={handleMapPositionChange} enabled={hasRestoredFromCache} />
+        <MapPositionTracker onPositionChange={handleMapPositionChange} />
         {isMapMode ? (
            (() => {
              const isSatellite = effectiveMapStyle === 'satellite';
