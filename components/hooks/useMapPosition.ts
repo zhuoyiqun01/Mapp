@@ -1,5 +1,5 @@
 import { useMemo, useCallback } from 'react';
-import { getViewPositionCache, setViewPositionCache } from '../utils/storage';
+import { getViewPositionCache, setViewPositionCache } from '../../utils/storage';
 import { Note } from '../types';
 
 interface UseMapPositionProps {
