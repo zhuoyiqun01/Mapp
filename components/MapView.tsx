@@ -1188,10 +1188,11 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     return { center: defaultCenter, zoom: 16 };
   }, [isMapMode, projectId, navigateToCoords, hasRestoredFromCache, mapNotes, currentLocation, defaultCenter]);
 
-  // Temporary initial position for MapContainer (will be overridden in whenReady)
-  const tempInitialPosition = useMemo(() => ({
-    center: defaultCenter as [number, number],
-    zoom: 16
+  // Placeholder position for MapContainer initialization (will be immediately overridden in whenReady)
+  // Using coordinates far from normal usage to avoid visual jump
+  const placeholderPosition = useMemo(() => ({
+    center: [0, 0] as [number, number], // Null Island - will be immediately overridden
+    zoom: 2 // Very zoomed out to hide any content
   }), []);
 
   // Reset cache restoration flag when project changes
@@ -2717,8 +2718,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       )}
       <MapContainer
         key={`${project.id}-${projectId || 'no-project'}`}
-        center={isMapMode ? tempInitialPosition.center : [0, 0]}
-        zoom={isMapMode ? tempInitialPosition.zoom : -8}
+        center={isMapMode ? placeholderPosition.center : [0, 0]}
+        zoom={isMapMode ? placeholderPosition.zoom : -8}
         minZoom={isMapMode ? 6 : -20} 
         maxZoom={isMapMode ? 19 : 2}
         zoomSnap={0.1}  // Enable fractional zoom levels
@@ -2740,29 +2741,27 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               // Determine and set the final map position based on complete priority logic
               const finalPosition = determineFinalMapPosition();
 
-              // Use a small delay to ensure map is fully ready
-              setTimeout(() => {
-                console.log('Setting final map position:', finalPosition);
-                map.setView(finalPosition.center, finalPosition.zoom, { animate: false });
+              // Set final position immediately since map.whenReady() ensures map is fully ready
+              console.log('Setting final map position:', finalPosition);
+              map.setView(finalPosition.center, finalPosition.zoom, { animate: false });
 
-                // Mark as restored if we used cached position (but not navigation coords)
-                if (!navigateToCoords) {
-                  const cached = getViewPositionCache(projectId, 'map');
-                  if (cached?.center && cached.zoom &&
-                      cached.center[0] === finalPosition.center[0] &&
-                      cached.center[1] === finalPosition.center[1] &&
-                      cached.zoom === finalPosition.zoom) {
-                    setHasRestoredFromCache(true);
-                  }
+              // Mark as restored if we used cached position (but not navigation coords)
+              if (!navigateToCoords) {
+                const cached = getViewPositionCache(projectId, 'map');
+                if (cached?.center && cached.zoom &&
+                    cached.center[0] === finalPosition.center[0] &&
+                    cached.center[1] === finalPosition.center[1] &&
+                    cached.zoom === finalPosition.zoom) {
+                  setHasRestoredFromCache(true);
                 }
+              }
 
-                // Prevent MapPositionTracker from immediately overriding during stabilization
-                setPausePositionTracking(true);
-                setTimeout(() => {
-                  setPausePositionTracking(false);
-                  console.log('Map position stabilization period ended');
-                }, 2000);
-              }, 100); // Slightly longer delay for stability
+              // Prevent MapPositionTracker from immediately overriding during stabilization
+              setPausePositionTracking(true);
+              setTimeout(() => {
+                setPausePositionTracking(false);
+                console.log('Map position stabilization period ended');
+              }, 2000);
               
               // Helper function to safely invalidate size and update view
               const safeInvalidateAndUpdate = () => {
