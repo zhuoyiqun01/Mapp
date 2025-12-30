@@ -3445,7 +3445,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             onNext={switchToNextNote}
             onPrev={switchToPrevNote}
             onSaveWithoutClose={saveCurrentNoteWithoutClose}
-            onSwitchToBoardView={onSwitchToBoardView}
+            onSwitchToBoardView={(coords) => onSwitchToBoardView(coords, mapInstance)}
         />
       )}
 

@@ -20,7 +20,7 @@ interface NoteEditorProps {
   onPrev?: () => void;
   onSaveWithoutClose?: (note: Partial<Note>) => void;
   onSwitchToMapView?: (coords?: { lat: number; lng: number }) => void;
-  onSwitchToBoardView?: (coords?: { x: number; y: number }) => void;
+  onSwitchToBoardView?: (coords?: { x: number; y: number }, mapInstance?: any) => void;
 }
 
 const DEFAULT_BG = '#FFFDF5';
