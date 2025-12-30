@@ -1229,6 +1229,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   };
 
   const handleMarkerClick = (note: Note, e?: L.LeafletMouseEvent) => {
+    console.log('[MapView] handleMarkerClick called for note:', note.id);
     // Prevent event propagation to avoid conflicts with map events
     if (e) {
       e.originalEvent?.stopPropagation();
@@ -1259,6 +1260,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     setCurrentNoteIndex(0);
     setEditingNote(noteToEdit);
     setIsEditorOpen(true);
+    console.log('[MapView] Setting editor state - isEditorOpen:', true, 'editingNote:', noteToEdit);
     onToggleEditor(true);
   };
 
