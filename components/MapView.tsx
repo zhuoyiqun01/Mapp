@@ -150,6 +150,7 @@ interface MapViewProps {
   onSwitchToBoardView?: (coords?: { x: number; y: number }, mapInstance?: L.Map) => void;
   themeColor?: string;
   mapStyleId?: string;
+  onMapStyleChange?: (styleId: string) => void;
   showImportMenu?: boolean;
   setShowImportMenu?: (show: boolean) => void;
           }
@@ -712,7 +713,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
 // Component to track map position changes and notify parent
 
 
-export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, projectId, onNavigateComplete, onPositionChange, onSwitchToBoardView, themeColor = THEME_COLOR, mapStyleId = 'carto-light-nolabels', showImportMenu, setShowImportMenu }) => {
+export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, projectId, onNavigateComplete, onPositionChange, onSwitchToBoardView, themeColor = THEME_COLOR, mapStyleId = 'carto-light-nolabels', onMapStyleChange, showImportMenu, setShowImportMenu }) => {
   if (!project) {
     return null;
   }
@@ -3433,7 +3434,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         }}
         currentMapStyle={mapStyleId || 'carto-light-nolabels'}
         onMapStyleChange={(styleId) => {
-          setMapStyleId(styleId);
+          onMapStyleChange?.(styleId);
           set('mapp-map-style', styleId);
         }}
         pinSize={pinSize}

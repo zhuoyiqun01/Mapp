@@ -1181,6 +1181,7 @@ export default function App() {
             }}
             themeColor={themeColor}
             mapStyleId={mapStyle}
+            onMapStyleChange={setMapStyle}
             showImportMenu={showMapImportMenu}
             setShowImportMenu={setShowMapImportMenu}
           />
