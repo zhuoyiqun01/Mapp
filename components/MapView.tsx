@@ -2722,7 +2722,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         </div>
       )}
       <MapContainer
-        key={`${project.id}-${projectId || 'no-project'}`}
+        key={projectId || 'no-project'}
         center={
           isMapMode
             ? (initialMapPosition?.center || defaultCenter)
