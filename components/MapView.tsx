@@ -1156,11 +1156,22 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     if (projectId) {
       const cached = getViewPositionCache(projectId, 'map');
       console.log('[MapView] Checking cache for projectId:', projectId, 'cached:', cached);
-      if (cached?.center && cached.zoom) {
-        console.log('[MapView] Using cached position for initial setup:', cached);
+
+      // Validate cached data more thoroughly
+      if (cached &&
+          cached.center &&
+          Array.isArray(cached.center) &&
+          cached.center.length === 2 &&
+          typeof cached.center[0] === 'number' &&
+          typeof cached.center[1] === 'number' &&
+          !isNaN(cached.center[0]) &&
+          !isNaN(cached.center[1]) &&
+          typeof cached.zoom === 'number' &&
+          !isNaN(cached.zoom)) {
+        console.log('[MapView] Using valid cached position:', cached);
         return { center: cached.center, zoom: cached.zoom };
       } else {
-        console.log('[MapView] No valid cache found, will use fallback');
+        console.log('[MapView] Invalid or missing cache data, will use fallback. cached:', cached);
       }
     } else {
       console.log('[MapView] No projectId, skipping cache check');
