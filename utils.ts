@@ -235,6 +235,15 @@ export const exportToJpeg = async (elementId: string, fileName: string) => {
   }
 
   try {
+    // 处理跨域图片
+    handleCorsImages(node as HTMLElement);
+
+    // 等待所有图片加载完成
+    await checkImagesLoaded(node as HTMLElement);
+
+    // 等待一帧确保图片占位符渲染
+    await new Promise(resolve => requestAnimationFrame(resolve));
+
     const dataUrl = await toJpeg(node, {
       quality: 0.95,
       width: 1920,
@@ -245,7 +254,9 @@ export const exportToJpeg = async (elementId: string, fileName: string) => {
       style: {
         transform: 'none', // Reset transforms to capture full content if needed, though for fixed viewport this is tricky
         overflow: 'hidden'
-      }
+      },
+      skipFonts: true,
+      includeQueryParams: true,
     });
 
     const link = document.createElement('a');
@@ -254,19 +265,103 @@ export const exportToJpeg = async (elementId: string, fileName: string) => {
     link.click();
   } catch (error) {
     console.error('Export failed', error);
-    alert('Failed to export image.');
+
+    // 提供更详细的错误信息
+    let errorMessage = 'Failed to export image.';
+    if (error instanceof Error) {
+      if (error.message.includes('cross-origin') || error.message.includes('CORS')) {
+        errorMessage = 'Export failed: Cross-origin image restrictions. Please refresh and try again.';
+      } else if (error.message.includes('canvas') || error.message.includes('Canvas')) {
+        errorMessage = 'Export failed: Canvas rendering error, possibly due to unsupported image format.';
+      } else if (error.message.includes('network') || error.message.includes('Network')) {
+        errorMessage = 'Export failed: Network error, please check if image links are valid.';
+      }
+    }
+
+    alert(errorMessage);
   }
 };
 
+// 检查图片是否加载完成
+const checkImagesLoaded = (element: HTMLElement): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    const images = element.querySelectorAll('img');
+    if (images.length === 0) {
+      resolve();
+      return;
+    }
+
+    let loadedCount = 0;
+    let hasError = false;
+    const totalImages = images.length;
+
+    const onImageLoad = () => {
+      loadedCount++;
+      if (loadedCount === totalImages && !hasError) {
+        resolve();
+      }
+    };
+
+    const onImageError = (img: HTMLImageElement, event: Event) => {
+      console.warn('Image failed to load during export:', img.src, event);
+      hasError = true;
+
+      // 为失败的图片设置占位符
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || img.width || 100;
+      canvas.height = img.naturalHeight || img.height || 100;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#f3f4f6';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#6b7280';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('图片加载失败', canvas.width / 2, canvas.height / 2);
+        img.src = canvas.toDataURL();
+      }
+
+      onImageLoad();
+    };
+
+    images.forEach((img) => {
+      if (img.complete && img.naturalHeight > 0) {
+        // 图片已经加载完成
+        onImageLoad();
+      } else {
+        // 监听加载事件
+        img.addEventListener('load', onImageLoad);
+        img.addEventListener('error', (e) => onImageError(img, e));
+
+        // 设置超时
+        setTimeout(() => {
+          if (!img.complete) {
+            console.warn('Image load timeout:', img.src);
+            onImageError(img, new Event('timeout'));
+          }
+        }, 5000); // 5秒超时
+      }
+    });
+  });
+};
+
+// 处理跨域图片
+const handleCorsImages = (element: HTMLElement): void => {
+  const images = element.querySelectorAll('img');
+  images.forEach((img) => {
+    // 如果图片是跨域的，尝试添加 crossOrigin 属性
+    if (img.src && img.src.startsWith('http') && !img.crossOrigin) {
+      try {
+        img.crossOrigin = 'anonymous';
+      } catch (e) {
+        console.warn('Failed to set crossOrigin on image:', img.src);
+      }
+    }
+  });
+};
+
 // 导出当前视图的中心对齐截图
-export const exportToJpegCentered = async (
-  elementId: string,
-  fileName: string,
-  options?: {
-    onBeforeExport?: () => Promise<void> | void;
-    onAfterExport?: () => Promise<void> | void;
-  }
-) => {
+export const exportToJpegCentered = async (elementId: string, fileName: string) => {
   const node = document.getElementById(elementId);
   if (!node) {
     alert('无法找到要导出的视图');
@@ -274,11 +369,6 @@ export const exportToJpegCentered = async (
   }
 
   try {
-    // 执行导出前回调
-    if (options?.onBeforeExport) {
-      await options.onBeforeExport();
-    }
-
     // 隐藏所有 UI 元素（使用 fixed 定位的按钮、滑块等）
     const uiElements = document.querySelectorAll('.fixed, [class*="z-["]');
     const originalDisplays: string[] = [];
@@ -298,16 +388,30 @@ export const exportToJpegCentered = async (
     // 等待一帧确保DOM更新
     await new Promise(resolve => requestAnimationFrame(resolve));
 
+    // 处理跨域图片
+    handleCorsImages(node as HTMLElement);
+
+    // 等待所有图片加载完成
+    console.log('Checking image loading status...');
+    await checkImagesLoaded(node as HTMLElement);
+
+    // 再次等待一帧确保图片占位符渲染
+    await new Promise(resolve => requestAnimationFrame(resolve));
+
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
 
     // 导出整个视口
+    console.log('Starting export with dimensions:', viewportWidth, 'x', viewportHeight);
     const dataUrl = await toJpeg(node, {
       quality: 0.95,
-      pixelRatio: 2,
+      pixelRatio: Math.min(2, window.devicePixelRatio || 1), // 限制最大像素密度
       backgroundColor: '#f9fafb',
       width: viewportWidth,
       height: viewportHeight,
+      // 添加更多选项来处理图片问题
+      skipFonts: true, // 跳过字体加载检查
+      includeQueryParams: true, // 包含查询参数
     });
 
     // 恢复 UI 元素
@@ -316,16 +420,13 @@ export const exportToJpegCentered = async (
       htmlEl.style.display = originalDisplays[index];
     });
 
-    // 执行导出后回调
-    if (options?.onAfterExport) {
-      await options.onAfterExport();
-    }
-
     // 直接下载
     const link = document.createElement('a');
     link.download = `${fileName}.jpg`;
     link.href = dataUrl;
     link.click();
+
+    console.log('Export completed successfully');
   } catch (error) {
     // 确保恢复 UI 元素
     const uiElements = document.querySelectorAll('.fixed, [class*="z-["]');
@@ -333,8 +434,21 @@ export const exportToJpegCentered = async (
       const htmlEl = el as HTMLElement;
       htmlEl.style.display = '';
     });
-    
-    console.error('Export failed', error);
-    alert('导出图片失败');
+
+    console.error('Export failed:', error);
+
+    // 提供更详细的错误信息
+    let errorMessage = '导出图片失败';
+    if (error instanceof Error) {
+      if (error.message.includes('cross-origin') || error.message.includes('CORS')) {
+        errorMessage = '导出失败：图片跨域限制，请尝试刷新页面后重试';
+      } else if (error.message.includes('canvas') || error.message.includes('Canvas')) {
+        errorMessage = '导出失败：Canvas渲染错误，可能由图片格式不支持引起';
+      } else if (error.message.includes('network') || error.message.includes('Network')) {
+        errorMessage = '导出失败：网络错误，请检查图片链接是否有效';
+      }
+    }
+
+    alert(errorMessage);
   }
 };
