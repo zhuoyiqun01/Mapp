@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Marker, ImageOverlay, useMap, useMapEvents } f
 import L from 'leaflet';
 import { Note, Coordinates, Project } from '../types';
 import { MAP_TILE_URL, MAP_TILE_URL_FALLBACK, MAP_SATELLITE_URL, MAP_ATTRIBUTION, THEME_COLOR, THEME_COLOR_DARK, MAP_STYLE_OPTIONS } from '../constants';
-import { getViewPositionCache } from '../utils/storage';
+import { getViewPositionCache, setViewPositionCache } from '../utils/storage';
 import { MapLongPressHandler } from './map/MapLongPressHandler';
 import { MapNavigationHandler } from './map/MapNavigationHandler';
 import { TextLabelsLayer } from './map/TextLabelsLayer';
@@ -144,7 +144,7 @@ interface MapViewProps {
   onToggleEditor: (isOpen: boolean) => void;
   onImportDialogChange?: (isOpen: boolean) => void;
   onUpdateProject?: (project: Project) => void;
-  navigateToCoords?: { lat: number; lng: number } | null;
+  navigateToCoords?: { lat: number; lng: number; zoom?: number } | null;
   projectId?: string;
   onNavigateComplete?: () => void;
   onSwitchToBoardView?: (coords?: { x: number; y: number }, mapInstance?: L.Map) => void;
@@ -1154,7 +1154,10 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
     // 1. Navigation coordinates (highest priority - handled by MapContainer center prop)
     if (navigateToCoords) {
-      return { center: [navigateToCoords.lat, navigateToCoords.lng] as [number, number], zoom: 19 };
+      return {
+        center: [navigateToCoords.lat, navigateToCoords.lng] as [number, number],
+        zoom: navigateToCoords.zoom ?? 19
+      };
     }
 
     // 2. Check cached position (saved when leaving mapping view)

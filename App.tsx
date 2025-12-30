@@ -62,7 +62,7 @@ export default function App() {
   }, []);
   
   // Navigation state for cross-view positioning
-  const [navigateToMapCoords, setNavigateToMapCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [navigateToMapCoords, setNavigateToMapCoords] = useState<{ lat: number; lng: number; zoom?: number } | null>(null);
   const [navigateToBoardCoords, setNavigateToBoardCoords] = useState<{ x: number; y: number } | null>(null);
   
   // Project State
@@ -1279,6 +1279,7 @@ export default function App() {
               });
 
               let navigationCoords = coords;
+              let navigationZoom = 19; // Default navigation zoom
               if (!navigationCoords && currentProjectId) {
                 // Read cached position from previous map session
                 const cached = getViewPositionCache(currentProjectId, 'map');
@@ -1290,8 +1291,10 @@ export default function App() {
 
                 if (cached?.center && cached.zoom) {
                   navigationCoords = { lat: cached.center[0], lng: cached.center[1] };
+                  navigationZoom = cached.zoom; // Use cached zoom instead of navigation zoom
                   console.log('[Navigation] 从Board使用缓存位置作为导航坐标:', {
                     coords: navigationCoords,
+                    zoom: navigationZoom,
                     originalCache: cached
                   });
                 } else {
@@ -1303,7 +1306,11 @@ export default function App() {
 
               // Set navigation coordinates BEFORE view switch to ensure MapView has correct coords on mount
               if (navigationCoords) {
-                setNavigateToMapCoords(navigationCoords);
+                setNavigateToMapCoords({
+                  lat: navigationCoords.lat,
+                  lng: navigationCoords.lng,
+                  zoom: navigationZoom
+                });
               }
 
               // Switch view after coordinates are set
@@ -1362,7 +1369,11 @@ export default function App() {
 
               // Set navigation coordinates BEFORE view switch to ensure MapView has correct coords on mount
               if (navigationCoords) {
-                setNavigateToMapCoords(navigationCoords);
+                setNavigateToMapCoords({
+                  lat: navigationCoords.lat,
+                  lng: navigationCoords.lng,
+                  zoom: navigationZoom
+                });
               }
 
               // Switch view after coordinates are set
