@@ -1280,9 +1280,8 @@ export default function App() {
 
               let navigationCoords = coords;
               let navigationZoom = 19; // Default navigation zoom
-
               if (!navigationCoords && currentProjectId) {
-                // Read cached position - this IS the navigation target
+                // Read cached position from previous map session
                 const cached = getViewPositionCache(currentProjectId, 'map');
                 console.log('[Navigation] 从Board读取缓存位置:', {
                   projectId: currentProjectId,
@@ -1292,7 +1291,7 @@ export default function App() {
 
                 if (cached?.center && cached.zoom) {
                   navigationCoords = { lat: cached.center[0], lng: cached.center[1] };
-                  navigationZoom = cached.zoom; // Use cached zoom for navigation
+                  navigationZoom = cached.zoom; // Use cached zoom instead of navigation zoom
                   console.log('[Navigation] 从Board使用缓存位置作为导航坐标:', {
                     coords: navigationCoords,
                     zoom: navigationZoom,
@@ -1312,8 +1311,6 @@ export default function App() {
                   lng: navigationCoords.lng,
                   zoom: navigationZoom
                 });
-              } else {
-                setNavigateToMapCoords(null);
               }
 
               // Switch view after coordinates are set
@@ -1349,9 +1346,8 @@ export default function App() {
 
               let navigationCoords = coords;
               let navigationZoom = 19; // Default navigation zoom
-
               if (!navigationCoords && currentProjectId) {
-                // Read cached position - this IS the navigation target
+                // Read cached position from previous map session
                 const cached = getViewPositionCache(currentProjectId, 'map');
                 console.log('[Navigation] 从Gallery读取缓存位置:', {
                   projectId: currentProjectId,
@@ -1361,7 +1357,7 @@ export default function App() {
 
                 if (cached?.center && cached.zoom) {
                   navigationCoords = { lat: cached.center[0], lng: cached.center[1] };
-                  navigationZoom = cached.zoom; // Use cached zoom for navigation
+                  navigationZoom = cached.zoom; // Use cached zoom instead of navigation zoom
                   console.log('[Navigation] 从Gallery使用缓存位置作为导航坐标:', {
                     coords: navigationCoords,
                     zoom: navigationZoom,
@@ -1381,8 +1377,6 @@ export default function App() {
                   lng: navigationCoords.lng,
                   zoom: navigationZoom
                 });
-              } else {
-                setNavigateToMapCoords(null);
               }
 
               // Switch view after coordinates are set
