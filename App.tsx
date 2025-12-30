@@ -405,13 +405,9 @@ export default function App() {
                 });
         
               if (hasChanges) {
-                // 保存合并后的项目
-                for (const project of merged) {
-                  await saveProject(project);
-                }
-                    // 更新项目摘要
-                    const summaries = await loadProjectSummaries();
-                    setProjectSummaries(summaries);
+                // Note: Projects are now managed by useProjectState hook
+                // Update project summaries
+                await projectState.loadProjects();
               }
               
               // 如果云端有更新，同步到云端
@@ -490,13 +486,7 @@ export default function App() {
   // Save to IndexedDB and Cloud
   useEffect(() => {
     if (!isLoading && projects.length > 0) {
-      // 1. 保存到本地 IndexedDB（使用新格式）
-      Promise.all(projects.map(p => saveProject(p))).catch((err) => {
-        console.error("Failed to save projects to IDB", err);
-        if (err.name === 'QuotaExceededError') {
-          alert("Storage Limit Reached. Please delete some projects or images.");
-        }
-      });
+      // Note: Projects are now automatically saved by useProjectState hook
       
       // 2. 延迟同步到云端（防抖，避免频繁同步，仅在 Supabase 配置时执行）
       const hasSupabaseConfig = import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY;
