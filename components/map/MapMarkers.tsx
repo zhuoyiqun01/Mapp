@@ -1,8 +1,8 @@
 import React, { useCallback, useState } from 'react';
 import { Marker } from 'react-leaflet';
 import L from 'leaflet';
-import { Note } from '../types';
-import { THEME_COLOR } from '../constants';
+import { Note } from '../../types';
+import { THEME_COLOR } from '../../constants';
 
 interface ClusteredMarker {
   notes: Note[];
