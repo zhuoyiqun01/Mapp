@@ -1176,7 +1176,9 @@ export default function App() {
             navigateToCoords={navigateToMapCoords}
             projectId={currentProjectId || ''}
             onNavigateComplete={() => {
-              setNavigateToMapCoords(null);
+              // Don't clear navigateToMapCoords for cached position restoration
+              // Only clear it for explicit navigation (e.g., from Gallery to pin)
+              // The navigation coords will be cleared when switching to other views
             }}
             onSwitchToBoardView={(coords, mapInstance) => {
               // PRIORITY 1: Save current map position BEFORE any other operations
