@@ -684,33 +684,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     }
   };
 
-  // Get current browser location for live fallback
-  const getCurrentBrowserLocation = (): Promise<{ lat: number; lng: number }> => {
-    return new Promise((resolve, reject) => {
-      if (!navigator.geolocation) {
-        reject(new Error('Geolocation is not supported'));
-        return;
-      }
-
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          resolve({
-            lat: position.coords.latitude,
-            lng: position.coords.longitude
-          });
-        },
-        (error) => {
-          console.warn('Failed to get current browser location:', error);
-          reject(error);
-        },
-        {
-          timeout: 10000,
-          maximumAge: 30000,
-          enableHighAccuracy: true
-        }
-      );
-    });
-  };
 
   // Check if photo was taken recently (within last 30 minutes)
   const isPhotoTakenRecently = (exifData: any): boolean => {
