@@ -8,6 +8,7 @@ import { getViewPositionCache } from '../utils/storage';
 import { MapLongPressHandler } from './map/MapLongPressHandler';
 import { MapNavigationHandler } from './map/MapNavigationHandler';
 import { TextLabelsLayer } from './map/TextLabelsLayer';
+import { MapPositionTracker } from './map/MapPositionTracker';
 import { MapCenterHandler } from './map/MapCenterHandler';
 import { MapZoomController } from './map/MapZoomController';
 import { SettingsPanel } from './SettingsPanel';
@@ -1182,6 +1183,15 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     return { center: defaultCenter, zoom: 16 };
   }, [isMapMode, projectId, navigateToCoords, mapNotes, currentLocation, defaultCenter]);
 
+
+  // Real-time map position saving (similar to board's transform saving)
+  const handleMapPositionChange = useCallback((center: [number, number], zoom: number) => {
+    if (projectId) {
+      // Real-time save map position whenever it changes (after cache restoration)
+      console.log('[MapView] 实时保存地图位置:', { center, zoom });
+      setViewPositionCache(projectId, 'map', { center, zoom });
+    }
+  }, [projectId]);
 
   // Get current location and device orientation
   useEffect(() => {
@@ -2771,6 +2781,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         doubleClickZoom={false}
       >
         <MapNavigationHandler coords={navigateToCoords} onComplete={onNavigateComplete} />
+        <MapPositionTracker onPositionChange={handleMapPositionChange} />
         {isMapMode ? (
            (() => {
              const isSatellite = effectiveMapStyle === 'satellite';
