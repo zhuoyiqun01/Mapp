@@ -133,10 +133,9 @@ export default function App() {
         }
       }
 
-      // Step 4: Refresh project summaries (95%)
+      // Step 4: Refresh projects (95%)
       setLoadingProgress(95);
-      const summaries = await loadProjectSummaries();
-      setProjectSummaries(summaries);
+      await projectState.loadProjects();
 
       // Step 5: Complete (100%)
       setLoadingProgress(100);
@@ -232,10 +231,9 @@ export default function App() {
         }
       }
 
-      // Step 6: Refresh project summaries (95%)
+      // Step 6: Refresh projects (95%)
       setLoadingProgress(95);
-      const summaries = await loadProjectSummaries();
-      setProjectSummaries(summaries);
+      await projectState.loadProjects();
 
       // Step 7: Complete (100%)
       setLoadingProgress(100);
@@ -269,8 +267,6 @@ export default function App() {
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
 
-  // Theme Color State - start with default, will be updated from IndexedDB
-  const [themeColor, setThemeColor] = useState<string>('#FFDD00'); // Default yellow
   
   // Map Style State
   const [mapStyle, setMapStyle] = useState<string>('carto-light-nolabels');
@@ -326,10 +322,8 @@ export default function App() {
   useEffect(() => {
     const loadProjects = async () => {
       try {
-        // 1. 快速加载项目摘要（只显示项目列表）
-        const summaries = await loadProjectSummaries();
-        setProjectSummaries(summaries);
-        setIsLoading(false);
+        // 1. 快速加载项目（只显示项目列表）
+        await projectState.loadProjects();
         
         // 2. 后台执行所有维护和同步任务（不阻塞UI）
         setTimeout(async () => {
@@ -550,100 +544,25 @@ export default function App() {
     };
   }, [projects, isLoading]);
 
-  // Load full project with images when needed
-  const [activeProject, setActiveProject] = useState<Project | undefined>(
-    projects.find(p => p.id === currentProjectId)
-  );
 
-  // Load full project with images when project changes
-  useEffect(() => {
-    const loadActiveProject = async () => {
-      if (currentProjectId) {
-        // Load project with images for display
-        const fullProject = await loadProject(currentProjectId, true);
-        if (fullProject) {
-          setActiveProject(fullProject);
-        }
-      } else {
-        setActiveProject(undefined);
-      }
-    };
-    loadActiveProject();
-  }, [currentProjectId]);
 
-  // Update activeProject when projects array changes (but keep images loaded)
-  useEffect(() => {
-    if (currentProjectId && activeProject) {
-      const updatedProject = projects.find(p => p.id === currentProjectId);
-      if (updatedProject) {
-        // Merge: use updated metadata from projects, but keep images from activeProject
-        setActiveProject(prev => {
-          if (!prev) return updatedProject;
-          
-          // Create a map of existing notes with loaded images
-          const prevNotesMap = new Map<string, Note>(prev.notes.map(n => [n.id, n]));
-          
-          // Build new notes array: keep loaded images for existing notes, add new notes
-          const newNotes = updatedProject.notes.map((updatedNote: Note) => {
-            const prevNote: Note | undefined = prevNotesMap.get(updatedNote.id);
-            if (prevNote) {
-              // Note exists, keep loaded images/sketch unless the updated note has newer data
-              // Check if the updated note has images/sketch that differ from the cached version
-              const hasNewImages = updatedNote.images && updatedNote.images.length > 0 &&
-                (!prevNote.images || prevNote.images.length !== updatedNote.images.length ||
-                 !prevNote.images.every((img, idx) => img === updatedNote.images?.[idx]));
-              const hasNewSketch = updatedNote.sketch && updatedNote.sketch !== prevNote.sketch;
 
-              return {
-                ...updatedNote,
-                images: hasNewImages ? updatedNote.images : (prevNote.images || []),
-                sketch: hasNewSketch ? updatedNote.sketch : prevNote.sketch
-              };
-            } else {
-              // New note, will need to load images when displayed
-              return updatedNote;
-            }
-          });
-          
-          return {
-            ...updatedProject,
-            notes: newNotes,
-            frames: updatedProject.frames || prev.frames || [],
-            connections: updatedProject.connections || prev.connections || [],
-            backgroundImage: prev.backgroundImage || updatedProject.backgroundImage
-          };
-        });
-      }
-    }
-  }, [projects, currentProjectId]);
-
-  const addNote = (note: Note) => {
+  const addNote = async (note: Note) => {
     if (!currentProjectId) return;
-    setProjects(prev => prev.map(p => {
-        if (p.id === currentProjectId) {
-            return { ...p, notes: [...p.notes, note] };
-        }
-        return p;
-    }));
+    await projectState.addNoteToProject(currentProjectId, note);
   };
 
-  const updateNote = (updatedNote: Note) => {
+  const updateNote = async (updatedNote: Note) => {
     if (!currentProjectId) return;
-    setProjects(prev => prev.map(p => {
-        if (p.id === currentProjectId) {
-            return { ...p, notes: p.notes.map(n => n.id === updatedNote.id ? updatedNote : n) };
-        }
-        return p;
-    }));
+    await projectState.updateNoteInProject(currentProjectId, updatedNote.id, updatedNote);
   };
 
   const deleteNote = async (noteId: string) => {
     if (!currentProjectId) return;
-    
+
     // Find the note to delete (to get its images)
-    const project = projects.find(p => p.id === currentProjectId);
-    const noteToDelete = project?.notes.find(n => n.id === noteId);
-    
+    const noteToDelete = activeProject?.notes.find(n => n.id === noteId);
+
     // Delete note's images if they are stored separately
     if (noteToDelete) {
       // Delete images
@@ -660,7 +579,7 @@ export default function App() {
           // If it's Base64 (legacy), no need to delete
         }
       }
-      
+
       // Delete sketch
       if (noteToDelete.sketch && noteToDelete.sketch.startsWith('img-')) {
         try {
@@ -670,36 +589,9 @@ export default function App() {
         }
       }
     }
-    
-    // Update projects state
-    setProjects(prev => prev.map(p => {
-        if (p.id === currentProjectId) {
-            // 删除便利贴时，同时删除相关的连接
-            const updatedConnections = (p.connections || []).filter(
-              conn => conn.fromNoteId !== noteId && conn.toNoteId !== noteId
-            );
-            return { 
-              ...p, 
-              notes: p.notes.filter(n => n.id !== noteId),
-              connections: updatedConnections
-            };
-        }
-        return p;
-    }));
-    
-    // Update activeProject
-    if (activeProject && activeProject.id === currentProjectId) {
-      setActiveProject(prev => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          notes: prev.notes.filter(n => n.id !== noteId),
-          connections: (prev.connections || []).filter(
-            conn => conn.fromNoteId !== noteId && conn.toNoteId !== noteId
-          )
-        };
-      });
-    }
+
+    // Delete note from project (this will also update connections)
+    await projectState.deleteNoteFromProject(currentProjectId, noteId);
   };
 
   const handleExportCSV = (project: Project) => {
@@ -755,55 +647,31 @@ export default function App() {
   };
 
   const handleCreateProject = async (project: Project) => {
-    setProjects(prev => [...prev, project]);
-    setCurrentProjectId(project.id);
+    const projectId = await projectState.createProject({
+      name: project.name,
+      type: project.type,
+      backgroundImage: project.backgroundImage
+    });
+
     setViewMode('map');
-    // 确保创建项目后侧边栏保持关闭
     setIsSidebarOpen(false);
-    // 立即设置 activeProject 以确保界面立即切换到项目视图
-    // 使用传入的 project 对象，因为它已经包含了所有必要的信息
-    setActiveProject(project);
-    // 异步加载完整项目（包含图片）以更新 activeProject
-    try {
-      const fullProject = await loadProject(project.id, true);
-      if (fullProject) {
-        setActiveProject(fullProject);
-      }
-    } catch (error) {
-      console.error('Failed to load project after creation:', error);
-      // 即使加载失败，也保持使用传入的 project，确保界面能正常显示
-    }
+    await projectState.selectProject(projectId);
   };
 
   const handleDeleteProject = async (id: string) => {
-    setIsDeletingProject(true);
-    try {
-    await deleteProjectStorage(id);
-      // 更新项目列表
-      setProjectSummaries(prev => prev.filter(p => p.id !== id));
-      // 更新完整项目数据（如果已加载）
-    setProjects(prev => prev.filter(p => p.id !== id));
-      // 如果当前项目被删除，回到首页
-    if (currentProjectId === id) {
-        setCurrentProjectId(null);
-      }
-    } finally {
-      setIsDeletingProject(false);
-    }
+    await projectState.deleteProject(id);
   };
 
-  const handleUpdateProject = (projectOrId: Project | string, updates?: Partial<Project>) => {
-    // Support both signatures: (project: Project) and (id: string, updates: Partial<Project>)
+  const handleUpdateProject = async (projectOrId: Project | string, updates?: Partial<Project>) => {
     if (typeof projectOrId === 'string') {
-      // Old signature: (id: string, updates: Partial<Project>)
-      setProjects(prev => prev.map(p => 
-        p.id === projectOrId ? { ...p, ...updates } : p
-      ));
+      // Update by id and updates
+      const currentProject = activeProject;
+      if (currentProject && updates) {
+        await projectState.updateProject({ ...currentProject, ...updates });
+      }
     } else {
-      // New signature: (project: Project)
-      setProjects(prev => prev.map(p => 
-        p.id === projectOrId.id ? projectOrId : p
-      ));
+      // Update by full project object
+      await projectState.updateProject(projectOrId);
     }
   };
 
@@ -1080,11 +948,8 @@ export default function App() {
             onDeleteNote={deleteNote}
             onToggleEditor={setIsEditorOpen}
             onImportDialogChange={setIsImportDialogOpen}
-            onUpdateProject={(project) => {
-              if (!currentProjectId) return;
-              setProjects(prev => prev.map(p => 
-                p.id === currentProjectId ? project : p
-              ));
+            onUpdateProject={async (project) => {
+              await projectState.updateProject(project);
             }}
             fileInputRef={mapViewFileInputRef}
             navigateToCoords={navigateToMapCoords}
@@ -1122,32 +987,17 @@ export default function App() {
             onToggleEditor={setIsEditorOpen}
             onEditModeChange={setIsBoardEditMode}
             connections={activeProject.connections || []}
-            onUpdateConnections={(connections) => {
-              if (!currentProjectId) return;
-              setProjects(prev => prev.map(p => {
-                if (p.id === currentProjectId) {
-                  return { ...p, connections };
-                }
-                return p;
-              }));
+            onUpdateConnections={async (connections) => {
+              if (!currentProjectId || !activeProject) return;
+              await projectState.updateProject({ ...activeProject, connections });
             }}
             frames={activeProject.frames || []}
-            onUpdateFrames={(frames) => {
-              if (!currentProjectId) return;
-              setProjects(prev => prev.map(p => {
-                if (p.id === currentProjectId) {
-                  return { ...p, frames };
-                }
-                return p;
-              }));
+            onUpdateFrames={async (frames) => {
+              if (!currentProjectId || !activeProject) return;
+              await projectState.updateProject({ ...activeProject, frames });
             }}
             project={activeProject}
-            onUpdateProject={(projectUpdate) => {
-              if (!currentProjectId) return;
-              setProjects(prev => prev.map(p => 
-                p.id === currentProjectId ? { ...p, ...projectUpdate } : p
-              ));
-            }}
+            onUpdateProject={handleUpdateProject}
             navigateToCoords={navigateToBoardCoords}
             projectId={currentProjectId || ''}
             onNavigateComplete={() => {
@@ -1230,14 +1080,9 @@ export default function App() {
           <TableView 
             project={activeProject}
             onUpdateNote={updateNote}
-            onUpdateFrames={(frames) => {
-              if (!currentProjectId) return;
-              setProjects(prev => prev.map(p => {
-                if (p.id === currentProjectId) {
-                  return { ...p, frames };
-                }
-                return p;
-              }));
+            onUpdateFrames={async (frames) => {
+              if (!currentProjectId || !activeProject) return;
+              await projectState.updateProject({ ...activeProject, frames });
             }}
             onSwitchToBoardView={(coords?: { x: number; y: number }) => {
               if (coords) {
