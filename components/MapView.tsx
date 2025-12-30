@@ -372,7 +372,7 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
-                                locateToCurrentPosition();
+                                requestLocation();
                                 setShowLocateMenu(false);
                             }}
                             onPointerDown={(e) => {
@@ -979,6 +979,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     deviceHeading,
     hasLocationPermission,
     locationError,
+    requestLocation,
     getCurrentBrowserLocation,
     checkLocationPermission
   } = useGeolocation(isMapMode);

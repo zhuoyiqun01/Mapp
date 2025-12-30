@@ -109,89 +109,50 @@ export const useGeolocation = (isMapMode: boolean) => {
     });
   }, [getCurrentPositionWithRetry, formatLocationError]);
 
-  // Initialize location services
+  // Manual location request function (must be called from user gesture)
+  const requestLocation = useCallback(async () => {
+    try {
+      setLocationError(null);
+
+      // Check permission first
+      const permission = await checkLocationPermission();
+      setHasLocationPermission(permission === 'granted');
+
+      if (permission !== 'granted') {
+        setLocationError('位置权限未授予。请在浏览器设置中允许位置访问。');
+        return;
+      }
+
+      // Get current position
+      await getCurrentPositionWithRetry(
+        (position) => {
+          setCurrentLocation({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          });
+          setLocationError(null);
+        },
+        (error) => {
+          console.warn('Location request failed:', error);
+          setLocationError(formatLocationError(error));
+        }
+      );
+    } catch (error) {
+      console.warn('Location request error:', error);
+      setLocationError('获取位置信息时发生错误。');
+    }
+  }, [getCurrentPositionWithRetry, checkLocationPermission, formatLocationError]);
+
+  // Initialize only permission check and device orientation (no automatic location request)
   useEffect(() => {
     if (!isMapMode) return;
 
-    let locationWatchId: number | null = null;
-
-    // Check location permission and set up location tracking
-    const checkLocationPermissionAndGetLocation = async () => {
-      if ('permissions' in navigator) {
-        try {
-          const permission = await navigator.permissions.query({ name: 'geolocation' as PermissionName });
-          setHasLocationPermission(permission.state === 'granted');
-
-          if (permission.state === 'granted') {
-            // Get initial position with retry logic
-            getCurrentPositionWithRetry(
-              (position) => {
-                setCurrentLocation({
-                  lat: position.coords.latitude,
-                  lng: position.coords.longitude
-                });
-                setLocationError(null); // Clear any previous error
-              },
-              (error) => {
-                console.warn('Location access failed after retries:', error);
-                setLocationError(formatLocationError(error));
-              }
-            );
-
-            // Set up continuous position watching with fallback accuracy
-            locationWatchId = navigator.geolocation.watchPosition(
-              (position) => {
-                setCurrentLocation({
-                  lat: position.coords.latitude,
-                  lng: position.coords.longitude
-                });
-                setLocationError(null); // Clear any previous error
-              },
-              (error) => {
-                console.warn('Location watch failed:', error);
-                // Try to restart with lower accuracy if watch fails
-                if (error.code === error.TIMEOUT) {
-                  console.log('Restarting location watch with lower accuracy...');
-                  // Stop current watch
-                  if (locationWatchId) {
-                    navigator.geolocation.clearWatch(locationWatchId);
-                  }
-                  // Restart with lower accuracy
-                  locationWatchId = navigator.geolocation.watchPosition(
-                    (position) => {
-                      setCurrentLocation({
-                        lat: position.coords.latitude,
-                        lng: position.coords.longitude
-                      });
-                      setLocationError(null);
-                    },
-                    (fallbackError) => {
-                      console.warn('Location watch fallback also failed:', fallbackError);
-                    },
-                    {
-                      timeout: 20000,
-                      maximumAge: 60000,
-                      enableHighAccuracy: false // Use lower accuracy for fallback
-                    }
-                  );
-                }
-              },
-              {
-                timeout: 15000,
-                maximumAge: 30000,
-                enableHighAccuracy: false // Start with lower accuracy for better reliability
-              }
-            );
-          }
-        } catch (error) {
-          console.warn('Permission check failed:', error);
-          setHasLocationPermission(false);
-          setLocationError('无法检查位置权限。请刷新页面重试。');
-        }
-      }
-    };
-
-    checkLocationPermissionAndGetLocation();
+    // Check permission status without requesting location
+    checkLocationPermission().then(permission => {
+      setHasLocationPermission(permission === 'granted');
+    }).catch(() => {
+      setHasLocationPermission(false);
+    });
 
     // Set up device orientation listener for heading
     const handleDeviceOrientation = (event: DeviceOrientationEvent) => {
@@ -214,18 +175,15 @@ export const useGeolocation = (isMapMode: boolean) => {
       if ('DeviceOrientationEvent' in window) {
         window.removeEventListener('deviceorientation', handleDeviceOrientation, true);
       }
-      // Clear location watch
-      if (locationWatchId !== null) {
-        navigator.geolocation.clearWatch(locationWatchId);
-      }
     };
-  }, [isMapMode, getCurrentPositionWithRetry, formatLocationError]);
+  }, [isMapMode, checkLocationPermission]);
 
   return {
     currentLocation,
     deviceHeading,
     hasLocationPermission,
     locationError,
+    requestLocation,
     getCurrentBrowserLocation,
     checkLocationPermission
   };
