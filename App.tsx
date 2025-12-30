@@ -1179,7 +1179,7 @@ export default function App() {
               setNavigateToMapCoords(null);
             }}
             onSwitchToBoardView={(coords, mapInstance) => {
-              // Save current map position before switching to board view
+              // PRIORITY 1: Save current map position BEFORE any other operations
               if (mapInstance && currentProjectId) {
                 try {
                   const center = mapInstance.getCenter();
@@ -1211,15 +1211,14 @@ export default function App() {
                 });
               }
 
-              // Close editor first to ensure UI state is correct
+              // PRIORITY 2: Close editor and prepare navigation
               setIsEditorOpen(false);
-              // Use requestAnimationFrame to ensure state updates are batched
-              requestAnimationFrame(() => {
-                if (coords) {
-                  setNavigateToBoardCoords(coords);
-                }
-                setViewMode('board');
-              });
+
+              // PRIORITY 3: Set navigation coordinates and switch view (synchronous for immediate effect)
+              if (coords) {
+                setNavigateToBoardCoords(coords);
+              }
+              setViewMode('board');
             }}
             themeColor={themeColor}
             mapStyleId={mapStyle}
