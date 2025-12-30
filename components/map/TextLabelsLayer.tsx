@@ -36,7 +36,7 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
             html: `
               <div style="
                 background: white;
-                color: ${themeColor};
+                color: black;
                 padding: 2px 6px;
                 border-radius: 4px;
                 font-size: ${fontSize}px;
