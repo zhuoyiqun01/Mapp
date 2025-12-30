@@ -161,25 +161,26 @@ interface MapViewProps {
 // Component to block map container from receiving pointer events in capture phase
 const SearchBarContainer = ({ children }: { children: React.ReactNode }) => {
     const containerRef = useRef<HTMLDivElement>(null);
-    
+
     useEffect(() => {
         const container = containerRef.current;
         if (!container) return;
-        
+
         const handleCaptureStart = (e: Event) => {
             // Stop event from reaching map container in capture phase
             e.stopPropagation();
         };
-        
+
         // Use capture phase to intercept events before they reach map container
-        container.addEventListener('mousedown', handleCaptureStart, true);
-        container.addEventListener('touchstart', handleCaptureStart, true);
-        container.addEventListener('pointerdown', handleCaptureStart, true);
-        
+        // Mark as passive since we only call stopPropagation(), not preventDefault()
+        container.addEventListener('mousedown', handleCaptureStart, { capture: true, passive: true });
+        container.addEventListener('touchstart', handleCaptureStart, { capture: true, passive: true });
+        container.addEventListener('pointerdown', handleCaptureStart, { capture: true, passive: true });
+
         return () => {
-            container.removeEventListener('mousedown', handleCaptureStart, true);
-            container.removeEventListener('touchstart', handleCaptureStart, true);
-            container.removeEventListener('pointerdown', handleCaptureStart, true);
+            container.removeEventListener('mousedown', handleCaptureStart, { capture: true });
+            container.removeEventListener('touchstart', handleCaptureStart, { capture: true });
+            container.removeEventListener('pointerdown', handleCaptureStart, { capture: true });
         };
     }, []);
     
@@ -397,21 +398,22 @@ const MapControls = ({ onImportPhotos, onImportData, mapStyle, onMapStyleChange,
     useEffect(() => {
         const container = controlsRef.current;
         if (!container) return;
-        
+
         const handleCaptureStart = (e: Event) => {
             // Stop event from reaching map container in capture phase
             e.stopPropagation();
         };
-        
+
         // Use capture phase to intercept events before they reach map container
-        container.addEventListener('mousedown', handleCaptureStart, true);
-        container.addEventListener('touchstart', handleCaptureStart, true);
-        container.addEventListener('pointerdown', handleCaptureStart, true);
-        
+        // Mark as passive since we only call stopPropagation(), not preventDefault()
+        container.addEventListener('mousedown', handleCaptureStart, { capture: true, passive: true });
+        container.addEventListener('touchstart', handleCaptureStart, { capture: true, passive: true });
+        container.addEventListener('pointerdown', handleCaptureStart, { capture: true, passive: true });
+
         return () => {
-            container.removeEventListener('mousedown', handleCaptureStart, true);
-            container.removeEventListener('touchstart', handleCaptureStart, true);
-            container.removeEventListener('pointerdown', handleCaptureStart, true);
+            container.removeEventListener('mousedown', handleCaptureStart, { capture: true });
+            container.removeEventListener('touchstart', handleCaptureStart, { capture: true });
+            container.removeEventListener('pointerdown', handleCaptureStart, { capture: true });
         };
     }, []);
     
