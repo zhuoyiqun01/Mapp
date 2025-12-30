@@ -2719,7 +2719,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         )}
 
         {/* User Location Indicator - only show if location permission is granted */}
-        {isMapMode && hasLocationPermission && currentLocation && (
+        {isMapMode && hasLocationPermission && currentLocation && mapInstance && (
           <Marker
             position={[currentLocation.lat, currentLocation.lng]}
             icon={L.divIcon({
@@ -2785,19 +2785,19 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               }}
             />
           ))
-        ) : clusteredMarkers.length > 0 ? (
+        ) : clusteredMarkers.length > 0 && mapInstance ? (
           // Show clustered markers (only show clusters with multiple markers, single markers shown separately)
-          clusteredMarkers.map((cluster, index) => {
+          clusteredMarkers.map((cluster) => {
             if (cluster.notes.length === 1) {
               // Single marker, display directly
               const note = cluster.notes[0];
               return (
-          <Marker 
-            key={note.id} 
+          <Marker
+            key={note.id}
             position={[note.coords.lat, note.coords.lng]}
                   icon={createCustomIcon(note, undefined, showTextLabels, pinSize)}
                   zIndexOffset={note.isFavorite ? 100 : -100}
-                  eventHandlers={{ 
+                  eventHandlers={{
                     click: (e) => {
                       e.originalEvent?.stopPropagation();
                       e.originalEvent?.stopImmediatePropagation();
@@ -2807,14 +2807,18 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 />
               );
             } else {
-              // Multiple markers, show cluster
+              // Multiple markers, show cluster - use sorted note IDs as stable key
+              const clusterKey = cluster.notes
+                .map(note => note.id)
+                .sort()
+                .join('-');
               return (
-                <Marker 
-                  key={`cluster-${index}`}
+                <Marker
+                  key={`cluster-${clusterKey}`}
                   position={cluster.position}
                   icon={createCustomIcon(cluster.notes[0], cluster.notes.length, showTextLabels, pinSize)}
                   zIndexOffset={cluster.notes.some(note => note.isFavorite) ? 100 : -100}
-                  eventHandlers={{ 
+                  eventHandlers={{
                     click: (e) => {
                       e.originalEvent?.stopPropagation();
                       e.originalEvent?.stopImmediatePropagation();
@@ -2827,13 +2831,13 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           })
         ) : (
           // Show single markers (non-map mode or when no clustering)
-          getFilteredNotes.map(note => (
-            <Marker 
-              key={note.id} 
+          mapInstance && getFilteredNotes.map(note => (
+            <Marker
+              key={note.id}
               position={[note.coords.lat, note.coords.lng]}
               icon={createCustomIcon(note, undefined, showTextLabels, pinSize)}
               zIndexOffset={note.isFavorite ? 100 : -100}
-              eventHandlers={{ 
+              eventHandlers={{
                 click: (e) => {
                   e.originalEvent?.stopPropagation();
                   e.originalEvent?.stopImmediatePropagation();
