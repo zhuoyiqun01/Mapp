@@ -3,14 +3,15 @@ import { useMap } from 'react-leaflet';
 
 interface MapPositionTrackerProps {
   onPositionChange?: (center: [number, number], zoom: number) => void;
+  pauseUpdates?: boolean; // Allow parent to pause position tracking
 }
 
-export const MapPositionTracker: React.FC<MapPositionTrackerProps> = ({ onPositionChange }) => {
+export const MapPositionTracker: React.FC<MapPositionTrackerProps> = ({ onPositionChange, pauseUpdates = false }) => {
   const map = useMap();
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    if (!map || !onPositionChange) return;
+    if (!map || !onPositionChange || pauseUpdates) return;
 
     const handleMoveEnd = () => {
       // Debounce to avoid too frequent updates and prevent initial default position from overwriting cache
@@ -27,7 +28,7 @@ export const MapPositionTracker: React.FC<MapPositionTrackerProps> = ({ onPositi
         } catch (error) {
           console.warn('MapPositionTracker: Failed to get map position:', error);
         }
-      }, 2000); // 2 second delay
+      }, 500); // 500ms delay for better responsiveness
     };
 
     map.on('moveend', handleMoveEnd);

@@ -1128,6 +1128,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
   // Track if map position has been restored from cache to prevent jumping on re-entry
   const [hasRestoredFromCache, setHasRestoredFromCache] = useState(false);
+  const [pausePositionTracking, setPausePositionTracking] = useState(false);
 
   // Current marker index being viewed
 
@@ -2731,9 +2732,17 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 if (cached?.center && cached.zoom) {
                   // Use a small delay to ensure map is fully ready
                   setTimeout(() => {
+                    console.log('Restoring map position from cache:', cached);
                     map.setView(cached.center, cached.zoom, { animate: false });
                     setHasRestoredFromCache(true);
-                  }, 50);
+
+                    // Prevent MapPositionTracker from immediately overriding the restored position
+                    setPausePositionTracking(true);
+                    setTimeout(() => {
+                      setPausePositionTracking(false);
+                      console.log('Cache restoration stabilization period ended');
+                    }, 2000);
+                  }, 100); // Slightly longer delay for stability
                 } else {
                   // Mark as restored even if no cache exists to prevent future attempts
                   setHasRestoredFromCache(true);
@@ -2783,7 +2792,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         doubleClickZoom={false}
       >
         <MapNavigationHandler coords={navigateToCoords} onComplete={onNavigateComplete} />
-        <MapPositionTracker onPositionChange={onPositionChange} />
+        <MapPositionTracker onPositionChange={onPositionChange} pauseUpdates={pausePositionTracking} />
         {isMapMode ? (
            (() => {
              const isSatellite = effectiveMapStyle === 'satellite';
