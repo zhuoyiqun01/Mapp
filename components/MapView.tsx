@@ -723,6 +723,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [deviceHeading, setDeviceHeading] = useState<number | null>(null);
   const [hasLocationPermission, setHasLocationPermission] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
 
   // Helper function to convert hex color to RGB
   const hexToRgb = (hex: string): string => {
@@ -734,6 +735,49 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       return `${r}, ${g}, ${b}`;
     }
     return '255, 255, 255'; // fallback to white
+  };
+
+  // Enhanced geolocation function with retry logic
+  const getCurrentPositionWithRetry = (
+    onSuccess: (position: GeolocationPosition) => void,
+    onError: (error: GeolocationPositionError) => void,
+    maxRetries: number = 2,
+    currentRetry: number = 0
+  ): void => {
+    const timeout = currentRetry === 0 ? 10000 : 15000; // First attempt 10s, retries 15s
+
+    navigator.geolocation.getCurrentPosition(
+      onSuccess,
+      (error) => {
+        if (currentRetry < maxRetries) {
+          console.log(`Location attempt ${currentRetry + 1} failed, retrying...`, error);
+          setTimeout(() => {
+            getCurrentPositionWithRetry(onSuccess, onError, maxRetries, currentRetry + 1);
+          }, 1000); // Wait 1 second before retry
+        } else {
+          onError(error);
+        }
+      },
+      {
+        timeout,
+        maximumAge: 60000,
+        enableHighAccuracy: true
+      }
+    );
+  };
+
+  // Format geolocation error for user display
+  const formatLocationError = (error: GeolocationPositionError): string => {
+    switch (error.code) {
+      case error.PERMISSION_DENIED:
+        return '位置权限被拒绝。如需显示您的位置，请在浏览器设置中允许位置访问。';
+      case error.POSITION_UNAVAILABLE:
+        return '无法获取您的位置信息。请检查GPS信号或网络连接。';
+      case error.TIMEOUT:
+        return '获取位置超时。请重试或检查网络连接。';
+      default:
+        return '获取位置失败：' + error.message;
+    }
   };
 
   // Get current browser location for live fallback
@@ -1116,18 +1160,19 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           setHasLocationPermission(permission.state === 'granted');
 
           if (permission.state === 'granted') {
-            // Get initial position
-            navigator.geolocation.getCurrentPosition(
+            // Get initial position with retry logic
+            getCurrentPositionWithRetry(
               (position) => {
                 setCurrentLocation({
                   lat: position.coords.latitude,
                   lng: position.coords.longitude
                 });
+                setLocationError(null); // Clear any previous error
               },
               (error) => {
-                console.log('Location access denied or failed:', error);
-              },
-              { timeout: 5000, maximumAge: 60000, enableHighAccuracy: true }
+                console.warn('Location access failed after retries:', error);
+                setLocationError(formatLocationError(error));
+              }
             );
 
             // Set up continuous position watching
@@ -1137,19 +1182,23 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                   lat: position.coords.latitude,
                   lng: position.coords.longitude
                 });
+                setLocationError(null); // Clear any previous error
               },
               (error) => {
-                console.log('Location watch failed:', error);
+                console.warn('Location watch failed:', error);
+                // Don't set error for watch failures as they might be temporary
               },
               {
-                timeout: 10000,
+                timeout: 15000, // Increased timeout for watch
                 maximumAge: 30000,
                 enableHighAccuracy: true
               }
             );
           }
         } catch (error) {
-          console.log('Permission check failed:', error);
+          console.warn('Permission check failed:', error);
+          setHasLocationPermission(false);
+          setLocationError('无法检查位置权限。请刷新页面重试。');
         }
       }
     };
@@ -2778,6 +2827,25 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             })}
             zIndexOffset={1000} // Always on top
           />
+        )}
+
+        {/* Location error indicator */}
+        {isMapMode && locationError && (
+          <div className="fixed top-20 left-4 right-4 z-[1000] bg-red-50 border border-red-200 rounded-lg p-3 shadow-lg">
+            <div className="flex items-start gap-2">
+              <div className="text-red-500 mt-0.5">⚠️</div>
+              <div className="flex-1">
+                <p className="text-sm text-red-800 font-medium">位置服务不可用</p>
+                <p className="text-xs text-red-600 mt-1">{locationError}</p>
+              </div>
+              <button
+                onClick={() => setLocationError(null)}
+                className="text-red-400 hover:text-red-600 text-lg leading-none"
+              >
+                ×
+              </button>
+            </div>
+          </div>
         )}
         
         {isMapMode && (showTextLabels ? (
