@@ -30,7 +30,7 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
           const fontSize = Math.max(10, pinSize / 3) * scale;
           const approxCharWidth = fontSize * 0.6; // Approximate character width
           const padding = 12 * scale; // Scale padding with favorite status
-          const textWidth = Math.min(text.length * approxCharWidth + padding, 120 * scale);
+          const textWidth = Math.min(text.length * approxCharWidth + padding, 180 * scale);
 
           const icon = new DivIcon({
             html: `
@@ -42,7 +42,7 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
                 font-size: ${fontSize}px;
                 font-weight: 500;
                 white-space: nowrap;
-                max-width: 120px;
+                max-width: 180px;
                 overflow: hidden;
                 text-overflow: ellipsis;
                 border: 2px solid ${themeColor};
