@@ -737,31 +737,39 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     return '255, 255, 255'; // fallback to white
   };
 
-  // Enhanced geolocation function with retry logic
+  // Enhanced geolocation function with retry logic and accuracy fallback
   const getCurrentPositionWithRetry = (
     onSuccess: (position: GeolocationPosition) => void,
     onError: (error: GeolocationPositionError) => void,
-    maxRetries: number = 2,
+    maxRetries: number = 3,
     currentRetry: number = 0
   ): void => {
-    const timeout = currentRetry === 0 ? 10000 : 15000; // First attempt 10s, retries 15s
+    // Progressive timeout and accuracy settings
+    const settings = [
+      { timeout: 10000, enableHighAccuracy: true },    // First attempt: high accuracy
+      { timeout: 15000, enableHighAccuracy: false },   // Second attempt: fast/low accuracy
+      { timeout: 20000, enableHighAccuracy: false }    // Third attempt: longer timeout/low accuracy
+    ];
+
+    const currentSettings = settings[Math.min(currentRetry, settings.length - 1)];
 
     navigator.geolocation.getCurrentPosition(
       onSuccess,
       (error) => {
         if (currentRetry < maxRetries) {
-          console.log(`Location attempt ${currentRetry + 1} failed, retrying...`, error);
+          const accuracy = currentSettings.enableHighAccuracy ? '高精度' : '普通精度';
+          console.log(`位置获取尝试 ${currentRetry + 1} 失败 (${accuracy})，正在重试...`, error);
           setTimeout(() => {
             getCurrentPositionWithRetry(onSuccess, onError, maxRetries, currentRetry + 1);
-          }, 1000); // Wait 1 second before retry
+          }, 1500); // Wait 1.5 seconds before retry
         } else {
           onError(error);
         }
       },
       {
-        timeout,
+        timeout: currentSettings.timeout,
         maximumAge: 60000,
-        enableHighAccuracy: true
+        enableHighAccuracy: currentSettings.enableHighAccuracy
       }
     );
   };
@@ -770,13 +778,39 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const formatLocationError = (error: GeolocationPositionError): string => {
     switch (error.code) {
       case error.PERMISSION_DENIED:
-        return '位置权限被拒绝。如需显示您的位置，请在浏览器设置中允许位置访问。';
+        return '位置权限被拒绝。如需显示您的位置，请在浏览器设置中允许位置访问，然后点击右下角的刷新按钮重试。';
       case error.POSITION_UNAVAILABLE:
-        return '无法获取您的位置信息。请检查GPS信号或网络连接。';
+        return '无法获取您的位置信息。请确保GPS已开启、网络连接正常，然后点击右下角的刷新按钮重试。';
       case error.TIMEOUT:
-        return '获取位置超时。请重试或检查网络连接。';
+        return '获取位置超时。这可能是由于网络连接问题或GPS信号弱导致的。请移动到开阔区域或点击右下角的刷新按钮重试。';
       default:
-        return '获取位置失败：' + error.message;
+        return '获取位置失败：' + error.message + '。请点击右下角的刷新按钮重试。';
+    }
+  };
+
+  // Retry location fetching manually
+  const retryLocation = () => {
+    setLocationError(null);
+    if ('permissions' in navigator) {
+      navigator.permissions.query({ name: 'geolocation' as PermissionName }).then((permission) => {
+        if (permission.state === 'granted') {
+          getCurrentPositionWithRetry(
+            (position) => {
+              setCurrentLocation({
+                lat: position.coords.latitude,
+                lng: position.coords.longitude
+              });
+              setLocationError(null);
+            },
+            (error) => {
+              console.warn('Manual location retry failed:', error);
+              setLocationError(formatLocationError(error));
+            }
+          );
+        } else {
+          setLocationError('位置权限未授予。请在浏览器设置中允许位置访问。');
+        }
+      });
     }
   };
 
@@ -1175,7 +1209,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               }
             );
 
-            // Set up continuous position watching
+            // Set up continuous position watching with fallback accuracy
             locationWatchId = navigator.geolocation.watchPosition(
               (position) => {
                 setCurrentLocation({
@@ -1186,12 +1220,37 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               },
               (error) => {
                 console.warn('Location watch failed:', error);
-                // Don't set error for watch failures as they might be temporary
+                // Try to restart with lower accuracy if watch fails
+                if (error.code === error.TIMEOUT) {
+                  console.log('Restarting location watch with lower accuracy...');
+                  // Stop current watch
+                  if (locationWatchId) {
+                    navigator.geolocation.clearWatch(locationWatchId);
+                  }
+                  // Restart with lower accuracy
+                  locationWatchId = navigator.geolocation.watchPosition(
+                    (position) => {
+                      setCurrentLocation({
+                        lat: position.coords.latitude,
+                        lng: position.coords.longitude
+                      });
+                      setLocationError(null);
+                    },
+                    (fallbackError) => {
+                      console.warn('Location watch fallback also failed:', fallbackError);
+                    },
+                    {
+                      timeout: 20000,
+                      maximumAge: 60000,
+                      enableHighAccuracy: false // Use lower accuracy for fallback
+                    }
+                  );
+                }
               },
               {
-                timeout: 15000, // Increased timeout for watch
+                timeout: 15000,
                 maximumAge: 30000,
-                enableHighAccuracy: true
+                enableHighAccuracy: false // Start with lower accuracy for better reliability
               }
             );
           }
@@ -2833,14 +2892,21 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         {isMapMode && locationError && (
           <div className="fixed top-20 left-4 right-4 z-[1000] bg-red-50 border border-red-200 rounded-lg p-3 shadow-lg">
             <div className="flex items-start gap-2">
-              <div className="text-red-500 mt-0.5">⚠️</div>
+              <div className="text-red-500 mt-0.5">📍</div>
               <div className="flex-1">
                 <p className="text-sm text-red-800 font-medium">位置服务不可用</p>
                 <p className="text-xs text-red-600 mt-1">{locationError}</p>
+                <button
+                  onClick={retryLocation}
+                  className="mt-2 px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 text-xs rounded-md transition-colors"
+                >
+                  🔄 重试
+                </button>
               </div>
               <button
                 onClick={() => setLocationError(null)}
                 className="text-red-400 hover:text-red-600 text-lg leading-none"
+                title="关闭提示"
               >
                 ×
               </button>
