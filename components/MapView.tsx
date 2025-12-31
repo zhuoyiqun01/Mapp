@@ -1613,17 +1613,67 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               <div className="flex-1">
                 <p className="text-sm text-red-800 font-medium">位置服务不可用</p>
                 <p className="text-xs text-red-600 mt-1">{locationError}</p>
-                <button
-                  onClick={requestLocation}
-                  className="mt-2 px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 text-xs rounded-md transition-colors"
-                >
-                  🔄 重试
-                </button>
+                <div className="mt-2 flex gap-2">
+                  {locationError.includes('已被拒绝') ? (
+                    // Permission denied - offer to request permission
+                    <button
+                      onClick={async () => {
+                        try {
+                          // Try to request permission again
+                          const result = await navigator.permissions.query({ name: 'geolocation' as PermissionName });
+                          if (result.state === 'denied') {
+                            alert('位置权限已被永久拒绝。请在浏览器设置中手动允许位置访问。\n\nChrome: 设置 > 隐私和安全 > 网站设置 > 位置\nSafari: 偏好设置 > 隐私 > 网站 > 位置');
+                            return;
+                          }
+                          // Try requesting location again
+                          await requestLocation();
+                        } catch (error) {
+                          alert('无法重新请求权限。请刷新页面或在浏览器设置中允许位置访问。');
+                        }
+                      }}
+                      className="px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded-md transition-colors"
+                    >
+                      🔐 申请权限
+                    </button>
+                  ) : (
+                    // Other errors - offer retry
+                    <button
+                      onClick={requestLocation}
+                      className="px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 text-xs rounded-md transition-colors"
+                    >
+                      🔄 重试
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      // Open browser location settings help
+                      const isChrome = navigator.userAgent.includes('Chrome');
+                      const isSafari = navigator.userAgent.includes('Safari') && !navigator.userAgent.includes('Chrome');
+                      const isFirefox = navigator.userAgent.includes('Firefox');
+
+                      let message = '如何允许位置权限：\n\n';
+                      if (isChrome) {
+                        message += 'Chrome: 点击地址栏左侧的🔒图标 > 位置 > 允许';
+                      } else if (isSafari) {
+                        message += 'Safari: Safari > 偏好设置 > 隐私 > 位置服务';
+                      } else if (isFirefox) {
+                        message += 'Firefox: 点击地址栏左侧的🛡️图标 > 权限 > 位置';
+                      } else {
+                        message += '请在浏览器设置中查找"位置"或"地理位置"权限设置';
+                      }
+
+                      alert(message);
+                    }}
+                    className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs rounded-md transition-colors"
+                  >
+                    ❓ 帮助
+                  </button>
+                </div>
               </div>
               <button
                 onClick={() => {
-                  // Since locationError is managed by the hook, we can't directly set it to null
-                  // The error will be cleared when requestLocation succeeds
+                  // Clear the error by trying to request location again
+                  // This will either succeed or show the error again
                   requestLocation();
                 }}
                 className="text-red-400 hover:text-red-600 text-lg leading-none"

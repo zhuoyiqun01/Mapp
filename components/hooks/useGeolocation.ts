@@ -118,9 +118,14 @@ export const useGeolocation = (isMapMode: boolean) => {
       const permission = await checkLocationPermission();
       setHasLocationPermission(permission === 'granted');
 
-      if (permission !== 'granted') {
-        setLocationError('位置权限未授予。请在浏览器设置中允许位置访问。');
+      if (permission === 'denied') {
+        setLocationError('位置权限已被拒绝。请在浏览器设置中允许位置访问，或点击"申请权限"按钮重新请求。');
         return;
+      }
+
+      if (permission !== 'granted') {
+        // Permission is 'prompt' - try to request it
+        // The getCurrentPosition call will trigger the browser's permission dialog
       }
 
       // Get current position
