@@ -458,30 +458,53 @@ export default function App() {
     loadProjects();
   }, []);
 
-  // Disable browser two-finger zoom
+  // Disable browser two-finger zoom and long-press interactions
   useEffect(() => {
     const preventZoom = (e: TouchEvent) => {
       if (e.touches.length > 1) {
         e.preventDefault();
       }
     };
-    
+
     const preventGesture = (e: Event) => {
       e.preventDefault();
     };
-    
+
+    const preventContextMenu = (e: Event) => {
+      e.preventDefault();
+    };
+
+    const preventLongPress = (e: TouchEvent) => {
+      // Prevent long-press context menu on mobile
+      if (e.touches.length === 1) {
+        // For single touch, we'll rely on CSS -webkit-touch-callout: none
+        // But we can still prevent other long-press behaviors
+      }
+    };
+
+    // Prevent two-finger zoom
     document.addEventListener('touchstart', preventZoom, { passive: false });
     document.addEventListener('touchmove', preventZoom, { passive: false });
+
+    // Prevent gesture events
     document.addEventListener('gesturestart', preventGesture);
     document.addEventListener('gesturechange', preventGesture);
     document.addEventListener('gestureend', preventGesture);
-    
+
+    // Prevent context menu (right-click/long-press menu)
+    document.addEventListener('contextmenu', preventContextMenu);
+
+    // Prevent long-press selection on iOS
+    document.addEventListener('touchstart', preventLongPress, { passive: true });
+
     return () => {
       document.removeEventListener('touchstart', preventZoom);
       document.removeEventListener('touchmove', preventZoom);
       document.removeEventListener('gesturestart', preventGesture);
       document.removeEventListener('gesturechange', preventGesture);
       document.removeEventListener('gestureend', preventGesture);
+      document.removeEventListener('contextmenu', preventContextMenu);
+      document.removeEventListener('touchstart', preventLongPress);
     };
   }, []);
 

@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta name="theme-color" content="var(--theme-color)" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="format-detection" content="telephone=no" />
     <title>Mapp</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <script src="https://cdn.tailwindcss.com"></script>
@@ -54,7 +58,28 @@
          -webkit-touch-callout: none !important;
          -webkit-user-select: none !important;
          user-select: none !important;
-         touch-action: none; 
+         touch-action: none;
+       }
+
+       /* Global disable for mobile browser long-press interactions */
+       * {
+         -webkit-touch-callout: none !important;
+         -webkit-user-select: none !important;
+         -webkit-tap-highlight-color: rgba(0,0,0,0) !important;
+         -webkit-tap-highlight-color: transparent !important;
+         user-select: none !important;
+       }
+
+       /* Allow text selection in input fields and textareas */
+       input, textarea, [contenteditable="true"] {
+         -webkit-user-select: text !important;
+         user-select: text !important;
+       }
+
+       /* Disable context menu on right-click/long-press */
+       * {
+         -webkit-context-menu: none !important;
+         context-menu: none !important;
        }
      </style>
   <script type="importmap">
