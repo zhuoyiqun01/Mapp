@@ -1,7 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
-import { Note } from '../types';
-import { getCurrentBrowserLocation } from './useGeolocation';
-import { loadImage } from '../utils/storage';
+import { Note } from '../../types';
+import { loadImage } from '../../utils/storage';
 
 export interface ImportPreview {
   file: File;
@@ -386,14 +385,15 @@ export const useImageImport = ({
             lat: preview.lat ?? 0,
             lng: preview.lng ?? 0
           },
-          title: '',
-          content: '',
+          text: '',
+          emoji: '📍',
+          fontSize: 3,
           images: [base64],
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          boardX: undefined,
-          boardY: undefined,
-          boardScale: 1
+          tags: [],
+          variant: 'image',
+          createdAt: Date.now(),
+          boardX: 0,
+          boardY: 0
         };
 
         // Calculate board position (same logic as handleLongPress)
