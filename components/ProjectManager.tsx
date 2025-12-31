@@ -1,12 +1,106 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Project, Note } from '../types';
-import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check, Upload, Palette, Settings } from 'lucide-react';
+import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check, Upload, Palette, Settings, ZoomIn } from 'lucide-react';
 import { generateId, fileToBase64, formatDate, exportToJpeg, exportToJpegCentered, compressImageFromBase64 } from '../utils';
 import { loadProject, loadNoteImages, loadBackgroundImage, saveProject, loadAllProjects } from '../utils/storage';
 import { getLastSyncTime, type SyncStatus } from '../utils/sync';
 import { DEFAULT_THEME_COLOR } from '../constants';
 import { ThemeColorPicker } from './ThemeColorPicker';
+
+// Export resolution dialog component
+const ExportResolutionDialog: React.FC<{
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: (pixelRatio: number) => void;
+  currentDimensions: { width: number; height: number };
+}> = ({ isOpen, onClose, onConfirm, currentDimensions }) => {
+  const [selectedRatio, setSelectedRatio] = useState(1);
+
+  if (!isOpen) return null;
+
+  const ratios = [
+    { label: '1x (标准)', value: 1, description: '适合预览和快速分享' },
+    { label: '2x (高清)', value: 2, description: '适合打印和高清显示' },
+    { label: '3x (超清)', value: 3, description: '适合专业打印和大尺寸显示' },
+    { label: '4x (超高分辨率)', value: 4, description: '适合海报级打印' }
+  ];
+
+  const selectedOption = ratios.find(r => r.value === selectedRatio);
+  const finalWidth = Math.round(currentDimensions.width * selectedRatio);
+  const finalHeight = Math.round(currentDimensions.height * selectedRatio);
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[3000]" onClick={onClose}>
+      <div
+        className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-3 mb-4">
+          <ZoomIn className="w-6 h-6 text-blue-500" />
+          <h3 className="text-lg font-semibold text-gray-900">导出图片设置</h3>
+        </div>
+
+        <div className="mb-4">
+          <p className="text-sm text-gray-600 mb-2">当前屏幕尺寸：</p>
+          <p className="font-mono text-sm bg-gray-50 px-3 py-2 rounded">
+            {currentDimensions.width} × {currentDimensions.height} 像素
+          </p>
+        </div>
+
+        <div className="mb-6">
+          <p className="text-sm text-gray-600 mb-3">选择分辨率倍数：</p>
+          <div className="space-y-2">
+            {ratios.map((ratio) => (
+              <label
+                key={ratio.value}
+                className="flex items-start gap-3 p-3 rounded-lg border cursor-pointer hover:bg-gray-50 transition-colors"
+                style={{
+                  borderColor: selectedRatio === ratio.value ? '#3B82F6' : '#E5E7EB',
+                  backgroundColor: selectedRatio === ratio.value ? '#EBF4FF' : 'transparent'
+                }}
+              >
+                <input
+                  type="radio"
+                  name="resolution"
+                  value={ratio.value}
+                  checked={selectedRatio === ratio.value}
+                  onChange={() => setSelectedRatio(ratio.value)}
+                  className="mt-0.5 text-blue-500 focus:ring-blue-500"
+                />
+                <div className="flex-1">
+                  <div className="font-medium text-sm">{ratio.label}</div>
+                  <div className="text-xs text-gray-500 mt-0.5">{ratio.description}</div>
+                  <div className="font-mono text-xs text-gray-600 mt-1">
+                    输出尺寸：{Math.round(currentDimensions.width * ratio.value)} × {Math.round(currentDimensions.height * ratio.value)} 像素
+                  </div>
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+          >
+            取消
+          </button>
+          <button
+            onClick={() => {
+              onConfirm(selectedRatio);
+              onClose();
+            }}
+            className="flex-1 px-4 py-2 text-white bg-blue-500 hover:bg-blue-600 rounded-lg transition-colors"
+          >
+            导出图片
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // Menu dropdown component that adjusts position to avoid going off-screen
 const MenuDropdown: React.FC<{
@@ -172,6 +266,8 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   const importFileInputRef = React.useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [showThemeColorPicker, setShowThemeColorPicker] = useState(false);
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [pendingExport, setPendingExport] = useState<{ elementId: string; fileName: string } | null>(null);
 
   const handleCreate = () => {
     if (!newProjectName.trim()) return;
@@ -220,8 +316,24 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         onExportCSV(activeProject);
       }
     } else {
+      // Show export dialog for image export
       const elementId = viewMode === 'map' ? 'map-view-container' : 'board-view-container';
-      exportToJpegCentered(elementId, `${activeProject.name}-${viewMode}`);
+      const fileName = `${activeProject.name}-${viewMode}`;
+      setPendingExport({ elementId, fileName });
+      setShowExportDialog(true);
+    }
+  };
+
+  const handleExportConfirm = async (pixelRatio: number) => {
+    if (!pendingExport) return;
+
+    try {
+      await exportToJpegCentered(pendingExport.elementId, pendingExport.fileName, pixelRatio);
+    } catch (error) {
+      console.error('Export failed:', error);
+      alert('导出失败，请重试');
+    } finally {
+      setPendingExport(null);
     }
   };
 
@@ -1362,6 +1474,20 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           onColorChange={onThemeColorChange}
         />
       )}
+
+      {/* Export Resolution Dialog */}
+      <ExportResolutionDialog
+        isOpen={showExportDialog}
+        onClose={() => {
+          setShowExportDialog(false);
+          setPendingExport(null);
+        }}
+        onConfirm={handleExportConfirm}
+        currentDimensions={{
+          width: window.innerWidth,
+          height: window.innerHeight
+        }}
+      />
 
     </div>
   );

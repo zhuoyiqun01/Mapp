@@ -361,7 +361,7 @@ const handleCorsImages = (element: HTMLElement): void => {
 };
 
 // 导出当前视图的中心对齐截图
-export const exportToJpegCentered = async (elementId: string, fileName: string) => {
+export const exportToJpegCentered = async (elementId: string, fileName: string, pixelRatio: number = Math.min(2, window.devicePixelRatio || 1)) => {
   const node = document.getElementById(elementId);
   if (!node) {
     alert('无法找到要导出的视图');
@@ -414,7 +414,7 @@ export const exportToJpegCentered = async (elementId: string, fileName: string) 
     console.log('Starting export with dimensions:', viewportWidth, 'x', viewportHeight);
     const dataUrl = await toJpeg(node, {
       quality: 0.95,
-      pixelRatio: Math.min(2, window.devicePixelRatio || 1), // 限制最大像素密度
+      pixelRatio: pixelRatio, // 使用传入的分辨率倍数
       backgroundColor: '#f9fafb',
       width: viewportWidth,
       height: viewportHeight,
