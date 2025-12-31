@@ -13,13 +13,13 @@ import { MAP_STYLE_OPTIONS } from './constants';
 import { useProjectState } from './components/hooks/useProjectState';
 import { useViewState } from './components/hooks/useViewState';
 import { useAppState } from './components/hooks/useAppState';
-import {
-  syncProjectsToCloud,
-  loadProjectsFromCloud,
-  mergeProjects,
+import { 
+  syncProjectsToCloud, 
+  loadProjectsFromCloud, 
+  mergeProjects, 
   shouldSync,
   getLastSyncTime,
-  type SyncStatus
+  type SyncStatus 
 } from './utils/sync';
 import {
   migrateFromOldFormat,
@@ -549,10 +549,10 @@ export default function App() {
 
   const deleteNote = async (noteId: string) => {
     if (!currentProjectId) return;
-
+    
     // Find the note to delete (to get its images)
     const noteToDelete = activeProject?.notes.find(n => n.id === noteId);
-
+    
     // Delete note's images if they are stored separately
     if (noteToDelete) {
       // Delete images
@@ -569,7 +569,7 @@ export default function App() {
           // If it's Base64 (legacy), no need to delete
         }
       }
-
+      
       // Delete sketch
       if (noteToDelete.sketch && noteToDelete.sketch.startsWith('img-')) {
         try {
@@ -579,7 +579,7 @@ export default function App() {
         }
       }
     }
-
+    
     // Delete note from project (this will also update connections)
     await projectState.deleteNoteFromProject(currentProjectId, noteId);
   };
@@ -957,10 +957,10 @@ export default function App() {
               setIsEditorOpen(false);
 
               // PRIORITY 3: Set navigation coordinates and switch view
-              if (coords) {
+                if (coords) {
                 navigateToBoard(coords);
-              }
-              setViewMode('board');
+                }
+                setViewMode('board');
             }}
             themeColor={themeColor}
             mapStyleId={mapStyle}

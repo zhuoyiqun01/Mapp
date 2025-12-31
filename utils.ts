@@ -275,7 +275,7 @@ export const exportToJpeg = async (elementId: string, fileName: string) => {
         errorMessage = 'Export failed: Canvas rendering error, possibly due to unsupported image format.';
       } else if (error.message.includes('network') || error.message.includes('Network')) {
         errorMessage = 'Export failed: Network error, please check if image links are valid.';
-      }
+  }
     }
 
     alert(errorMessage);
@@ -372,19 +372,19 @@ export const exportToJpegCentered = async (elementId: string, fileName: string) 
     // 隐藏所有 UI 元素（使用 fixed 定位的按钮、滑块等）
     const uiElements = document.querySelectorAll('.fixed, [class*="z-["]');
     const originalDisplays: string[] = [];
-
+    
     uiElements.forEach((el, index) => {
       const htmlEl = el as HTMLElement;
       originalDisplays[index] = htmlEl.style.display;
       // 只隐藏按钮、控件等，不隐藏整个容器
-      if (htmlEl.tagName === 'BUTTON' ||
+      if (htmlEl.tagName === 'BUTTON' || 
           htmlEl.className.includes('pointer-events-auto') ||
           htmlEl.className.includes('z-[500]') ||
           htmlEl.className.includes('z-50')) {
         htmlEl.style.display = 'none';
       }
     });
-
+    
     // 等待一帧确保DOM更新
     await new Promise(resolve => requestAnimationFrame(resolve));
 
@@ -397,10 +397,10 @@ export const exportToJpegCentered = async (elementId: string, fileName: string) 
 
     // 再次等待一帧确保图片占位符渲染
     await new Promise(resolve => requestAnimationFrame(resolve));
-
+    
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
-
+    
     // 导出整个视口
     console.log('Starting export with dimensions:', viewportWidth, 'x', viewportHeight);
     const dataUrl = await toJpeg(node, {
@@ -434,7 +434,7 @@ export const exportToJpegCentered = async (elementId: string, fileName: string) 
       const htmlEl = el as HTMLElement;
       htmlEl.style.display = '';
     });
-
+    
     console.error('Export failed:', error);
 
     // 提供更详细的错误信息
