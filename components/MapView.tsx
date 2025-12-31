@@ -430,19 +430,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   // Location error retry tracking
   const [hasRetriedLocation, setHasRetriedLocation] = useState(false);
 
-  // Auto-hide location error after 2 seconds
-  useEffect(() => {
-    if (locationError) {
-      const timer = setTimeout(() => {
-        // We can't directly set locationError to null since it's managed by the hook
-        // Instead, we'll trigger a new location request to clear the error state
-        setHasRetriedLocation(false);
-      }, 2000);
-
-      return () => clearTimeout(timer);
-    }
-  }, [locationError]);
-
   
   // Current marker index being viewed
 
@@ -470,6 +457,19 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     getCurrentBrowserLocation,
     checkLocationPermission
   } = useGeolocation(isMapMode);
+
+  // Auto-hide location error after 2 seconds
+  useEffect(() => {
+    if (locationError) {
+      const timer = setTimeout(() => {
+        // We can't directly set locationError to null since it's managed by the hook
+        // Instead, we'll trigger a new location request to clear the error state
+        setHasRetriedLocation(false);
+      }, 2000);
+
+      return () => clearTimeout(timer);
+    }
+  }, [locationError]);
 
   // Enhanced location request with auto-retry
   const handleLocateCurrentPosition = useCallback(async () => {
