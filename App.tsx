@@ -50,6 +50,7 @@ export default function App() {
     projectSummaries,
     activeProject,
     currentProjectId,
+    setCurrentProjectId,
     isLoading,
     isLoadingProject,
     loadingProgress,
