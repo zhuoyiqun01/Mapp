@@ -585,8 +585,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       });
 
       // Get current location
-      const location = await getCurrentBrowserLocation();
-      if (!location) {
+      const userLocation = await getCurrentBrowserLocation();
+      if (!userLocation) {
         throw new Error('Unable to get current location');
       }
 
@@ -596,7 +596,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
       const newNote: Note = {
         id: `note-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        coords: { lat: location.lat, lng: location.lng },
+        coords: { lat: userLocation.lat, lng: userLocation.lng },
         text: '',
         emoji: '📷',
         fontSize: 3,
