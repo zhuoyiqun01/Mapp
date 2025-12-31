@@ -1039,79 +1039,35 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
     for (const file of fileArray) {
       try {
         // Read EXIF data with comprehensive options for better compatibility
-        // Support multiple phone manufacturers (Xiaomi, OPPO, etc.)
-        let exifData = await exifr.parse(file, {
-          gps: true,
-          translateKeys: false,
-          translateValues: false,
+        // Support multiple phone manufacturers (Xiaomi, OPPO, etc.) and online albums
+        const output = await exifr.parse(file, {
+          tiff: true,
+          exif: true,
+          gps: true,        // Parse standard GPS
+          xmp: true,        // Critical: Support Android devices that store GPS in XMP
+          translateValues: true, // Critical: Auto convert DMS arrays and handle N/S/E/W refs
+          mergeOutput: true,    // Flatten all results to single object
           reviveValues: true
         });
-        
-        // If GPS data not found, try reading all EXIF data without filters
-        if (!exifData || (!exifData.latitude && !exifData.GPSLatitude && !exifData.GPS)) {
-          console.log('GPS not found in primary parse, trying full EXIF read for:', file.name);
-          exifData = await exifr.parse(file, {
-            translateKeys: false,
-            translateValues: false,
-            reviveValues: true
-          });
-          
-          console.log('Full EXIF data for', file.name, ':', exifData);
-        }
-        
-        // Try multiple ways to extract GPS coordinates
-        // Different manufacturers may store GPS data in different formats
+
+        // Extract GPS coordinates - prioritize library-calculated standard values
         let lat = null;
         let lng = null;
-        
-        if (exifData) {
-          // Method 1: Direct latitude/longitude (standard format, most common)
-          if (exifData.latitude !== undefined && exifData.longitude !== undefined) {
-            lat = Number(exifData.latitude);
-            lng = Number(exifData.longitude);
+
+        if (output) {
+          // Primary: Use library-calculated standard latitude/longitude (most compatible)
+          if (typeof output.latitude === 'number' && typeof output.longitude === 'number') {
+            lat = output.latitude;
+            lng = output.longitude;
           }
-          // Method 2: GPSLatitude/GPSLongitude with ref (Xiaomi, some Android)
-          else if (exifData.GPSLatitude !== undefined && exifData.GPSLongitude !== undefined) {
-            lat = Number(exifData.GPSLatitude);
-            lng = Number(exifData.GPSLongitude);
-            // Apply reference (N/S, E/W)
-            if (exifData.GPSLatitudeRef === 'S') lat = -lat;
-            if (exifData.GPSLongitudeRef === 'W') lng = -lng;
-          }
-          // Method 3: GPS object (some formats)
-          else if (exifData.GPS) {
-            if (exifData.GPS.latitude !== undefined && exifData.GPS.longitude !== undefined) {
-              lat = Number(exifData.GPS.latitude);
-              lng = Number(exifData.GPS.longitude);
-            } else if (exifData.GPS.GPSLatitude !== undefined && exifData.GPS.GPSLongitude !== undefined) {
-              lat = Number(exifData.GPS.GPSLatitude);
-              lng = Number(exifData.GPS.GPSLongitude);
-              if (exifData.GPS.GPSLatitudeRef === 'S') lat = -lat;
-              if (exifData.GPS.GPSLongitudeRef === 'W') lng = -lng;
+          // Fallback: Raw GPS values (rarely needed if translateValues: true works)
+          else if (output.GPSLatitude && output.GPSLongitude) {
+            // translateValues should have handled the conversion, but defensive check
+            if (typeof output.GPSLatitude === 'number' && typeof output.GPSLongitude === 'number') {
+              lat = output.GPSLatitude;
+              lng = output.GPSLongitude;
             }
           }
-          // Method 4: Try to parse from GPS array format [degrees, minutes, seconds]
-          // Some manufacturers store GPS as arrays
-          else if (exifData.GPSLatitude && Array.isArray(exifData.GPSLatitude)) {
-            const latArray = exifData.GPSLatitude;
-            const lngArray = exifData.GPSLongitude;
-            if (latArray.length >= 3 && lngArray.length >= 3) {
-              lat = latArray[0] + latArray[1] / 60 + latArray[2] / 3600;
-              lng = lngArray[0] + lngArray[1] / 60 + lngArray[2] / 3600;
-              if (exifData.GPSLatitudeRef === 'S') lat = -lat;
-              if (exifData.GPSLongitudeRef === 'W') lng = -lng;
-            }
-          }
-          // Method 5: Try alternative key names (case variations)
-          else {
-            const keys = Object.keys(exifData);
-            const latKey = keys.find(k => k.toLowerCase().includes('lat') && !k.toLowerCase().includes('ref'));
-            const lngKey = keys.find(k => k.toLowerCase().includes('lng') || (k.toLowerCase().includes('lon') && !k.toLowerCase().includes('ref')));
-            
-            if (latKey && lngKey) {
-              lat = Number(exifData[latKey]);
-              lng = Number(exifData[lngKey]);
-              // Check for ref keys
               const latRefKey = keys.find(k => k.toLowerCase().includes('lat') && k.toLowerCase().includes('ref'));
               const lngRefKey = keys.find(k => (k.toLowerCase().includes('lng') || k.toLowerCase().includes('lon')) && k.toLowerCase().includes('ref'));
               if (latRefKey && exifData[latRefKey] === 'S') lat = -lat;
@@ -1121,10 +1077,10 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
         }
         
         // Validate coordinates
-        if (lat === null || lng === null || isNaN(lat) || isNaN(lng) || lat === 0 || lng === 0) {
+        if (lat === null || lng === null || isNaN(lat) || isNaN(lng)) {
           console.warn('Could not extract GPS coordinates from:', file.name);
-          console.warn('Available EXIF keys:', exifData ? Object.keys(exifData) : 'No EXIF data');
-          console.warn('EXIF data sample:', exifData ? JSON.stringify(exifData, null, 2).substring(0, 500) : 'No data');
+          console.warn('Available EXIF keys:', output ? Object.keys(output) : 'No EXIF data');
+          console.warn('EXIF data sample:', output ? JSON.stringify(output, null, 2).substring(0, 500) : 'No data');
           previews.push({
             file,
             imageUrl: URL.createObjectURL(file),

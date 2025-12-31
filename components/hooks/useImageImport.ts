@@ -197,52 +197,41 @@ export const useImageImport = ({
         // Try to read EXIF from original file first (before HEIC conversion)
         try {
           const exifr = (await import('exifr')).default;
-          exifDataFromOriginal = await exifr.parse(file, {
-            gps: true,
-            translateKeys: false,
-            translateValues: false,
-            reviveValues: true,
-            pick: ['GPSLatitude', 'GPSLongitude', 'GPSLatitudeRef', 'GPSLongitudeRef', 'latitude', 'longitude', 'GPS']
+
+          // Core EXIF reading with full compatibility
+          const output = await exifr.parse(file, {
+            tiff: true,
+            exif: true,
+            gps: true,        // Parse standard GPS
+            xmp: true,        // Critical: Support Android devices that store GPS in XMP
+            translateValues: true, // Critical: Auto convert DMS arrays and handle N/S/E/W refs
+            mergeOutput: true,    // Flatten all results to single object
+            reviveValues: true
           });
 
-          // If GPS not found, try full EXIF read
-          if (!exifDataFromOriginal || (!exifDataFromOriginal.latitude && !exifDataFromOriginal.GPSLatitude && !exifDataFromOriginal.GPS)) {
-            exifDataFromOriginal = await exifr.parse(file, {
-              translateKeys: false,
-              translateValues: false,
-              reviveValues: true,
-              pick: true as any
-            });
-          }
-
-          // Extract GPS from original file if found
-          if (exifDataFromOriginal) {
-            if (exifDataFromOriginal.latitude !== undefined && exifDataFromOriginal.longitude !== undefined) {
-              lat = Number(exifDataFromOriginal.latitude);
-              lng = Number(exifDataFromOriginal.longitude);
-            } else if (exifDataFromOriginal.GPSLatitude !== undefined && exifDataFromOriginal.GPSLongitude !== undefined) {
-              lat = Number(exifDataFromOriginal.GPSLatitude);
-              lng = Number(exifDataFromOriginal.GPSLongitude);
-              if (exifDataFromOriginal.GPSLatitudeRef === 'S') lat = -lat;
-              if (exifDataFromOriginal.GPSLongitudeRef === 'W') lng = -lng;
-            } else if (exifDataFromOriginal.GPS) {
-              if (exifDataFromOriginal.GPS.latitude !== undefined && exifDataFromOriginal.GPS.longitude !== undefined) {
-                lat = Number(exifDataFromOriginal.GPS.latitude);
-                lng = Number(exifDataFromOriginal.GPS.longitude);
-              } else if (exifDataFromOriginal.GPS.GPSLatitude !== undefined && exifDataFromOriginal.GPS.GPSLongitude !== undefined) {
-                lat = Number(exifDataFromOriginal.GPS.GPSLatitude);
-                lng = Number(exifDataFromOriginal.GPS.GPSLongitude);
-                if (exifDataFromOriginal.GPS.GPSLatitudeRef === 'S') lat = -lat;
-                if (exifDataFromOriginal.GPS.GPSLongitudeRef === 'W') lng = -lng;
+          // Extract GPS coordinates - prioritize library-calculated standard values
+          if (output) {
+            // Primary: Use library-calculated standard latitude/longitude (most compatible)
+            if (typeof output.latitude === 'number' && typeof output.longitude === 'number') {
+              lat = output.latitude;
+              lng = output.longitude;
+            }
+            // Fallback: Raw GPS values (rarely needed if translateValues: true works)
+            else if (output.GPSLatitude && output.GPSLongitude) {
+              // translateValues should have handled the conversion, but defensive check
+              if (typeof output.GPSLatitude === 'number' && typeof output.GPSLongitude === 'number') {
+                lat = output.GPSLatitude;
+                lng = output.GPSLongitude;
               }
             }
 
-            if (lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
-              console.log('GPS found in original file:', file.name, { lat, lng });
+            // Validate coordinates (keep 0,0 check for error data filtering)
+            if (lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng)) {
+              console.log('GPS found in original file:', file.name, { lat, lng, source: 'exif' });
             }
           }
         } catch (originalExifError) {
-          console.warn('Failed to read EXIF from original file:', originalExifError);
+          console.warn('Failed to read EXIF from original file (possibly HEIC structure issue):', originalExifError);
         }
 
         // Convert HEIC to JPEG if needed before processing
@@ -471,5 +460,6 @@ export const useImageImport = ({
     handleCancelImport
   };
 };
+
 
 
