@@ -6,6 +6,7 @@ import {
   saveProject,
   deleteProject as deleteProjectStorage,
   loadProject,
+  loadNoteImages,
   ProjectSummary
 } from '../../utils/storage';
 
@@ -79,7 +80,25 @@ export const useProjectState = (): UseProjectStateReturn => {
         const batchSize = 5;
         for (let i = 0; i < totalNotes; i += batchSize) {
           const batch = project.notes.slice(i, i + batchSize);
-          // Note: Image loading logic would be implemented here
+
+          // Load images for this batch of notes
+          const loadedBatch = await Promise.all(
+            batch.map(async (note) => {
+              try {
+                const loadedNote = await loadNoteImages(note);
+                return loadedNote;
+              } catch (error) {
+                console.error(`Failed to load images for note ${note.id}:`, error);
+                return note; // Return original note if loading fails
+              }
+            })
+          );
+
+          // Update the notes in the project
+          for (let j = 0; j < batch.length; j++) {
+            project.notes[i + j] = loadedBatch[j];
+          }
+
           loadedNotes += batch.length;
           const progress = 10 + (loadedNotes / totalNotes) * 90;
           setLoadingProgress(Math.min(100, Math.round(progress)));
