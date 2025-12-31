@@ -5,8 +5,8 @@ import { getCurrentBrowserLocation } from './useGeolocation';
 export interface ImportPreview {
   file: File;
   imageUrl: string;
-  lat: number;
-  lng: number;
+  lat: number | null;
+  lng: number | null;
   error?: string;
   isDuplicate?: boolean;
   imageFingerprint?: string;
@@ -340,11 +340,15 @@ export const useImageImport = ({
           if (isDuplicate) break;
         }
 
+        // Set error if coordinates are missing
+        const error = (lat === null || lng === null) ? 'Missing location data' : undefined;
+
         previews.push({
           file: processedFile,
           imageUrl: imageUrl,
           lat: lat,
           lng: lng,
+          error: error,
           isDuplicate: isDuplicate,
           imageFingerprint: imageFingerprint
         });
@@ -365,10 +369,12 @@ export const useImageImport = ({
     onImportDialogChange?.(true);
 
     // If there's valid location data, fly to that position
-    const validPreviews = previews.filter(p => !p.error);
+    const validPreviews = previews.filter(p => !p.error && p.lat !== null && p.lng !== null);
     if (validPreviews.length > 0 && mapInstance) {
       const firstValid = validPreviews[0];
-      mapInstance.flyTo([firstValid.lat, firstValid.lng], 16, { duration: 1.5 });
+      if (firstValid.lat !== null && firstValid.lng !== null) {
+        mapInstance.flyTo([firstValid.lat, firstValid.lng], 16, { duration: 1.5 });
+      }
     }
   }, [notes, onImportDialogChange, mapInstance]);
 
@@ -395,7 +401,10 @@ export const useImageImport = ({
         // Create new note
         const newNote: Note = {
           id: `note-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          coords: { lat: preview.lat, lng: preview.lng },
+          coords: {
+            lat: preview.lat ?? 0,
+            lng: preview.lng ?? 0
+          },
           title: '',
           content: '',
           images: [base64],

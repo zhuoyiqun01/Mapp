@@ -1618,7 +1618,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         ))}
 
         {/* Import preview markers */}
-        {isMapMode && showImportDialog && importPreview.filter(p => !p.error).map((preview, index) => (
+        {isMapMode && showImportDialog && importPreview.filter(p => !p.error && p.lat !== null && p.lng !== null).map((preview, index) => (
           <Marker
             key={`preview-${index}`}
             position={[preview.lat, preview.lng]}
@@ -2142,7 +2142,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                         <Check size={12} />
                       </div>
                     )}
-                    {!preview.error && (
+                    {!preview.error && preview.lat !== null && preview.lng !== null && (
                       <div className="mt-1 text-xs text-gray-600">
                         {preview.lat.toFixed(6)}, {preview.lng.toFixed(6)}
                       </div>
