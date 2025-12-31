@@ -30,6 +30,7 @@ interface UseProjectStateReturn {
   updateNoteInProject: (projectId: string, noteId: string, updates: Partial<Note>) => Promise<void>;
   deleteNoteFromProject: (projectId: string, noteId: string) => Promise<void>;
   setCurrentProjectId: (id: string | null) => void;
+  setActiveProject: (project: Project | null) => void;
 }
 
 export const useProjectState = (): UseProjectStateReturn => {
@@ -237,7 +238,8 @@ export const useProjectState = (): UseProjectStateReturn => {
     addNoteToProject,
     updateNoteInProject,
     deleteNoteFromProject,
-    setCurrentProjectId
+    setCurrentProjectId,
+    setActiveProject
   };
 };
 

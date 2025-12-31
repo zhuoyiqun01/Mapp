@@ -51,6 +51,7 @@ export default function App() {
     activeProject,
     currentProjectId,
     setCurrentProjectId,
+    setActiveProject,
     isLoading,
     isLoadingProject,
     loadingProgress,
@@ -743,31 +744,17 @@ export default function App() {
           />
         )}
 
-      {/* Welcome/Home Page */}
-      <div className="flex-1 flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
-        <div className="text-center max-w-md mx-auto p-8">
-          <div className="mb-8">
-            <h1 className="text-4xl font-bold text-gray-900 mb-4">Mapp</h1>
-            <p className="text-lg text-gray-600 mb-8">Create and explore your interactive maps</p>
-          </div>
-
-          <div className="space-y-4">
-            <button
-              onClick={() => setIsSidebarOpen(true)}
-              className="w-full py-4 px-6 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-semibold transition-colors shadow-lg"
-              style={{ backgroundColor: themeColor }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${themeColor}E6`}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
-            >
-              Open Projects
-            </button>
-
-            <div className="text-sm text-gray-500">
-              Select or create a project to start mapping
-            </div>
-          </div>
-        </div>
-      </div>
+      <ProjectManager 
+           projects={summariesToProjects(projectSummaries)}
+         currentProjectId={null}
+         onCreateProject={handleCreateProject}
+           onSelectProject={handleSelectProject}
+         onDeleteProject={handleDeleteProject}
+         onUpdateProject={handleUpdateProject}
+           onCheckData={handleCheckData}
+         themeColor={themeColor}
+         onThemeColorChange={handleThemeColorChange}
+      />
       </div>
     );
   }
@@ -844,7 +831,10 @@ export default function App() {
                  onDeleteProject={handleDeleteProject}
          onUpdateProject={handleUpdateProject}
                  onCloseSidebar={() => setIsSidebarOpen(false)}
-                  onBackToHome={() => { setCurrentProjectId(null); }}
+                  onBackToHome={() => {
+                    setCurrentProjectId(null);
+                    setActiveProject(null);
+                  }}
                   viewMode={viewMode}
                   activeProject={activeProject}
                   onExportCSV={handleExportCSV}
