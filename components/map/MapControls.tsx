@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useMap } from 'react-leaflet';
 import { Note, Frame } from '../types';
 import { THEME_COLOR } from '../../constants';
-import { Search, Locate, Loader2, X, Check, Satellite, Type, Settings, MapPin } from 'lucide-react';
+import { Search, Locate, Loader2, X, Check, Satellite, Type, Settings, MapPin, Camera } from 'lucide-react';
 
 interface MapControlsProps {
   onLocateCurrentPosition: () => void;
+  onImportFromCamera?: () => void;
   mapStyle: 'standard' | 'satellite';
   onMapStyleChange: (style: 'standard' | 'satellite') => void;
   mapNotes: Note[];
@@ -21,6 +22,7 @@ interface MapControlsProps {
 
 export const MapControls: React.FC<MapControlsProps> = ({
   onLocateCurrentPosition,
+  onImportFromCamera,
   mapStyle,
   onMapStyleChange,
   mapNotes,
@@ -162,6 +164,21 @@ export const MapControls: React.FC<MapControlsProps> = ({
               <MapPin size={16} className="text-gray-400 group-hover:text-red-500 transition-colors" />
               <span>Latest Note</span>
             </button>
+            {onImportFromCamera && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onImportFromCamera();
+                  setShowLocateMenu(false);
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onPointerMove={(e) => e.stopPropagation()}
+                className="group w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-3 text-sm transition-colors"
+              >
+                <Camera size={16} className="text-gray-400 group-hover:text-green-500 transition-colors" />
+                <span>Import from Camera</span>
+              </button>
+            )}
           </div>
         )}
       </div>
