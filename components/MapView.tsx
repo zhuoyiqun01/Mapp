@@ -1664,16 +1664,11 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         {isMapMode && (
           <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none items-start">
               {/* First Row: Main Controls */}
-              <MapControls 
-                onImportPhotos={() => fileInputRef.current?.click()} 
-                onImportData={() => dataImportInputRef.current?.click()}
+              <MapControls
                 onLocateCurrentPosition={requestLocation}
                 mapStyle={mapStyle}
                 onMapStyleChange={handleLocalMapStyleChange}
                 mapNotes={getFilteredNotes}
-                frames={project.frames || []}
-                frameLayerVisibility={frameLayerVisibility}
-                setFrameLayerVisibility={setFrameLayerVisibility}
                 themeColor={themeColor}
                 showTextLabels={showTextLabels}
                 setShowTextLabels={setShowTextLabels}
@@ -1682,8 +1677,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 clusterThreshold={clusterThreshold}
                 setClusterThreshold={setClusterThreshold}
                 onOpenSettings={() => setShowSettingsPanel(true)}
-                showImportMenu={showImportMenu}
-                setShowImportMenu={setShowImportMenu}
               />
 
               {/* Second Row: Sliders (hidden on small screens, available in settings) */}

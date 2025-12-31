@@ -369,18 +369,23 @@ export const exportToJpegCentered = async (elementId: string, fileName: string) 
   }
 
   try {
-    // 隐藏所有 UI 元素（使用 fixed 定位的按钮、滑块等）
-    const uiElements = document.querySelectorAll('.fixed, [class*="z-["]');
+    // 隐藏所有 UI 元素（包括 absolute、fixed 定位的元素）
+    const uiElements = document.querySelectorAll('.fixed, .absolute, [class*="z-["]');
     const originalDisplays: string[] = [];
-    
+
     uiElements.forEach((el, index) => {
       const htmlEl = el as HTMLElement;
       originalDisplays[index] = htmlEl.style.display;
-      // 只隐藏按钮、控件等，不隐藏整个容器
-      if (htmlEl.tagName === 'BUTTON' || 
+      // 只隐藏按钮、控件、下拉菜单等UI元素，不隐藏地图容器
+      if (htmlEl.tagName === 'BUTTON' ||
           htmlEl.className.includes('pointer-events-auto') ||
           htmlEl.className.includes('z-[500]') ||
-          htmlEl.className.includes('z-50')) {
+          htmlEl.className.includes('z-[400]') ||
+          htmlEl.className.includes('z-[4000]') ||
+          htmlEl.className.includes('z-50') ||
+          htmlEl.className.includes('shadow-lg') ||
+          htmlEl.className.includes('rounded-xl') ||
+          htmlEl.tagName === 'DIV' && htmlEl.className.includes('absolute') && !htmlEl.id.includes('container')) {
         htmlEl.style.display = 'none';
       }
     });
@@ -394,6 +399,10 @@ export const exportToJpegCentered = async (elementId: string, fileName: string) 
     // 等待所有图片加载完成
     console.log('Checking image loading status...');
     await checkImagesLoaded(node as HTMLElement);
+
+    // 额外等待时间确保地图完全渲染
+    console.log('Waiting for map rendering...');
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     // 再次等待一帧确保图片占位符渲染
     await new Promise(resolve => requestAnimationFrame(resolve));
@@ -429,7 +438,7 @@ export const exportToJpegCentered = async (elementId: string, fileName: string) 
     console.log('Export completed successfully');
   } catch (error) {
     // 确保恢复 UI 元素
-    const uiElements = document.querySelectorAll('.fixed, [class*="z-["]');
+    const uiElements = document.querySelectorAll('.fixed, .absolute, [class*="z-["]');
     uiElements.forEach(el => {
       const htmlEl = el as HTMLElement;
       htmlEl.style.display = '';

@@ -580,10 +580,10 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                                 const centerY = initialNote.boardY! + noteHeight / 2;
                                 onSwitchToBoardView({ x: centerX, y: centerY }); 
                             }}
-                            className="text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-full p-1.5 transition-colors active:scale-90"
+                            className="text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-full p-1.5 transition-colors active:scale-90"
                             title="定位到board视图"
                             >
-                            <Locate size={24} />
+                            <Locate size={24} className="text-gray-400 hover:text-gray-600" />
                             </button>
                     )}
                     {/* Show navigate to map button when in board view (only if onSwitchToBoardView doesn't exist or both exist) */}
@@ -593,10 +593,10 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                                 setShowEmojiPicker(false); 
                                 onSwitchToMapView(initialNote.coords); 
                             }}
-                            className="text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-full p-1.5 transition-colors active:scale-90"
+                            className="text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-full p-1.5 transition-colors active:scale-90"
                             title="定位到地图视图"
                         >
-                            <Locate size={24} />
+                            <Locate size={24} className="text-gray-400 hover:text-gray-600" />
                         </button>
                 )}
                 <button 
