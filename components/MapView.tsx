@@ -198,7 +198,7 @@ const SearchBarContainer = ({ children }: { children: React.ReactNode }) => {
 export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, projectId, onNavigateComplete, onSwitchToBoardView, themeColor = THEME_COLOR, mapStyleId = 'carto-light-nolabels', onMapStyleChange, showImportMenu, setShowImportMenu }) => {
   if (!project) {
     return null;
-  }
+        }
   const notes = project.notes;
   const [editingNote, setEditingNote] = useState<Partial<Note> | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
@@ -236,14 +236,14 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             photoDate = new Date(isoDate);
           } else {
             photoDate = new Date(dateStr);
-          }
+                    }
 
           if (!isNaN(photoDate.getTime())) {
             break;
-          }
+                        }
         } catch (e) {
           continue;
-        }
+                        }
       }
     }
 
@@ -1664,7 +1664,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         {isMapMode && (
           <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none items-start">
               {/* First Row: Main Controls */}
-              <MapControls
+              <MapControls 
                 onLocateCurrentPosition={requestLocation}
                 mapStyle={mapStyle}
                 onMapStyleChange={handleLocalMapStyleChange}
