@@ -456,8 +456,82 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   } = useGeolocation(isMapMode);
 
   // Camera import functionality
-  const handleImportFromCamera = () => {
-    alert('Camera import clicked! This feature is under development.');
+  const handleImportFromCamera = async () => {
+    try {
+      // Request camera access
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' } // Use back camera if available
+      });
+
+      // Create video element to capture from camera
+      const video = document.createElement('video');
+      video.srcObject = stream;
+      video.play();
+
+      // Wait for video to be ready
+      await new Promise((resolve) => {
+        video.onloadedmetadata = resolve;
+      });
+
+      // Create canvas to capture frame
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        throw new Error('Failed to get canvas context');
+      }
+
+      // Capture frame
+      ctx.drawImage(video, 0, 0);
+
+      // Stop camera
+      stream.getTracks().forEach(track => track.stop());
+
+      // Convert to blob
+      const blob = await new Promise<Blob>((resolve) => {
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else throw new Error('Failed to convert canvas to blob');
+        }, 'image/jpeg', 0.8);
+      });
+
+      // Get current location
+      const location = await getCurrentBrowserLocation();
+      if (!location) {
+        throw new Error('Unable to get current location');
+      }
+
+      // Create note with captured image
+      const imageFile = new File([blob], `camera-${Date.now()}.jpg`, { type: 'image/jpeg' });
+      const base64 = await fileToBase64(imageFile);
+
+      const newNote: Note = {
+        id: `note-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        coords: { lat: location.lat, lng: location.lng },
+        text: '',
+        emoji: '📷',
+        fontSize: 3,
+        images: [base64],
+        tags: [],
+        variant: 'image',
+        createdAt: Date.now(),
+        boardX: 0,
+        boardY: 0
+      };
+
+      // Add the note
+      onAddNote(newNote);
+
+      // Optional: Fly to the new location
+      if (mapInstance) {
+        mapInstance.flyTo([location.lat, location.lng], 16);
+      }
+
+    } catch (error) {
+      console.error('Failed to import from camera:', error);
+      alert(`相机导入失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    }
   };
 
   // Map position management hook
@@ -1671,7 +1745,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               {/* First Row: Main Controls */}
               <MapControls
                 onLocateCurrentPosition={requestLocation}
-                onImportFromCamera={handleImportFromCamera}
                 mapStyle={mapStyle}
                 onMapStyleChange={handleLocalMapStyleChange}
                 mapNotes={getFilteredNotes}
@@ -2241,6 +2314,17 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
             >
               <FileJson size={16} /> Import from Data
+            </button>
+            <div className="h-px bg-gray-100 my-1" />
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleImportFromCamera();
+                setShowImportMenu && setShowImportMenu(false);
+              }}
+              className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+            >
+              <Plus size={16} /> Import from Camera
             </button>
           </div>
         </div>
