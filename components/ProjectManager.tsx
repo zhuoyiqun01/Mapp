@@ -14,16 +14,17 @@ const ExportResolutionDialog: React.FC<{
   onClose: () => void;
   onConfirm: (pixelRatio: number) => void;
   currentDimensions: { width: number; height: number };
-}> = ({ isOpen, onClose, onConfirm, currentDimensions }) => {
+  themeColor: string;
+}> = ({ isOpen, onClose, onConfirm, currentDimensions, themeColor }) => {
   const [selectedRatio, setSelectedRatio] = useState(1);
 
   if (!isOpen) return null;
 
   const ratios = [
-    { label: '1x (标准)', value: 1, description: '适合预览和快速分享' },
-    { label: '2x (高清)', value: 2, description: '适合打印和高清显示' },
-    { label: '3x (超清)', value: 3, description: '适合专业打印和大尺寸显示' },
-    { label: '4x (超高分辨率)', value: 4, description: '适合海报级打印' }
+    { label: '1x', value: 1 },
+    { label: '2x', value: 2 },
+    { label: '3x', value: 3 },
+    { label: '4x', value: 4 }
   ];
 
   const selectedOption = ratios.find(r => r.value === selectedRatio);
@@ -37,8 +38,8 @@ const ExportResolutionDialog: React.FC<{
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-3 mb-4">
-          <ZoomIn className="w-6 h-6 text-blue-500" />
-          <h3 className="text-lg font-semibold text-gray-900">导出图片设置</h3>
+          <ZoomIn className="w-6 h-6" style={{ color: themeColor }} />
+          <h3 className="text-lg font-semibold text-gray-900">导出图片</h3>
         </div>
 
         <div className="mb-4">
@@ -56,8 +57,8 @@ const ExportResolutionDialog: React.FC<{
                 key={ratio.value}
                 className="flex items-start gap-3 p-3 rounded-lg border cursor-pointer hover:bg-gray-50 transition-colors"
                 style={{
-                  borderColor: selectedRatio === ratio.value ? '#3B82F6' : '#E5E7EB',
-                  backgroundColor: selectedRatio === ratio.value ? '#EBF4FF' : 'transparent'
+                  borderColor: selectedRatio === ratio.value ? themeColor : '#E5E7EB',
+                  backgroundColor: selectedRatio === ratio.value ? `${themeColor}15` : 'transparent'
                 }}
               >
                 <input
@@ -66,13 +67,13 @@ const ExportResolutionDialog: React.FC<{
                   value={ratio.value}
                   checked={selectedRatio === ratio.value}
                   onChange={() => setSelectedRatio(ratio.value)}
-                  className="mt-0.5 text-blue-500 focus:ring-blue-500"
+                  className="mt-0.5 focus:ring-blue-500"
+                  style={{ color: themeColor }}
                 />
                 <div className="flex-1">
                   <div className="font-medium text-sm">{ratio.label}</div>
-                  <div className="text-xs text-gray-500 mt-0.5">{ratio.description}</div>
-                  <div className="font-mono text-xs text-gray-600 mt-1">
-                    输出尺寸：{Math.round(currentDimensions.width * ratio.value)} × {Math.round(currentDimensions.height * ratio.value)} 像素
+                  <div className="font-mono text-xs text-gray-600 mt-0.5">
+                    {Math.round(currentDimensions.width * ratio.value)} × {Math.round(currentDimensions.height * ratio.value)}
                   </div>
                 </div>
               </label>
@@ -92,7 +93,10 @@ const ExportResolutionDialog: React.FC<{
               onConfirm(selectedRatio);
               onClose();
             }}
-            className="flex-1 px-4 py-2 text-white bg-blue-500 hover:bg-blue-600 rounded-lg transition-colors"
+            className="flex-1 px-4 py-2 text-white rounded-lg transition-colors"
+            style={{ backgroundColor: themeColor }}
+            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${themeColor}E6`}
+            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
           >
             导出图片
           </button>
@@ -1487,6 +1491,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           width: window.innerWidth,
           height: window.innerHeight
         }}
+        themeColor={themeColor}
       />
 
     </div>
