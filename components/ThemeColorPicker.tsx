@@ -160,28 +160,8 @@ export const ThemeColorPicker: React.FC<ThemeColorPickerProps> = ({
   }
 
   function handleApply() {
-    // Calculate dark variant (reduce lightness by ~10%)
-    const darkL = Math.max(0, hsl.l - 10);
-    const darkRgb = hslToRgb(hsl.h, hsl.s, darkL);
-    const darkHex = rgbToHex(darkRgb.r, darkRgb.g, darkRgb.b);
-
-    // Update CSS variables
-    document.documentElement.style.setProperty('--theme-color', hex);
-    document.documentElement.style.setProperty('--theme-color-dark', darkHex);
-
-    // Update meta theme-color
-    const metaThemeColor = document.querySelector('meta[name="theme-color"]');
-    if (metaThemeColor) {
-      metaThemeColor.setAttribute('content', hex);
-    }
-
-    // Save to IndexedDB
-    set('mapp-theme-color', hex);
-    set('mapp-theme-color-dark', darkHex);
-
-    // Notify parent
+    // Just notify parent - let parent handle all updates
     onColorChange(hex);
-
     onClose();
   }
 

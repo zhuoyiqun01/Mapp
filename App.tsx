@@ -690,11 +690,32 @@ export default function App() {
     }
   };
 
-  const handleThemeColorChange = (color: string) => {
+  const handleThemeColorChange = async (color: string) => {
+    // Update React state first
     setThemeColor(color);
-    // Force re-render by updating a dummy state or using window.location.reload()
-    // For now, we'll just update the CSS variables which should be enough
-    window.location.reload();
+
+    // Calculate dark variant
+    const darkR = Math.max(0, Math.floor(parseInt(color.slice(1, 3), 16) * 0.9));
+    const darkG = Math.max(0, Math.floor(parseInt(color.slice(3, 5), 16) * 0.9));
+    const darkB = Math.max(0, Math.floor(parseInt(color.slice(5, 7), 16) * 0.9));
+    const darkHex = '#' + [darkR, darkG, darkB].map(x => {
+      const hex = x.toString(16);
+      return hex.length === 1 ? '0' + hex : hex;
+    }).join('').toUpperCase();
+
+    // Update CSS variables for immediate visual feedback
+    document.documentElement.style.setProperty('--theme-color', color);
+    document.documentElement.style.setProperty('--theme-color-dark', darkHex);
+
+    // Update meta theme-color
+    const metaThemeColor = document.querySelector('meta[name="theme-color"]');
+    if (metaThemeColor) {
+      metaThemeColor.setAttribute('content', color);
+    }
+
+    // Save to IndexedDB
+    await set('mapp-theme-color', color);
+    await set('mapp-theme-color-dark', darkHex);
   };
 
   if (isLoading) {
