@@ -429,6 +429,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
   // Location error retry tracking
   const [hasRetriedLocation, setHasRetriedLocation] = useState(false);
+  const [isLocating, setIsLocating] = useState(false);
 
   
   // Current marker index being viewed
@@ -471,28 +472,57 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     }
   }, [locationError]);
 
-  // Enhanced location request with auto-retry
+  // Enhanced location request with auto-retry and navigation
   const handleLocateCurrentPosition = useCallback(async () => {
     try {
+      setIsLocating(true);
       setHasRetriedLocation(false);
+      console.log('Requesting current location...');
+
+      // Request location
       await requestLocation();
+
+      // Wait a bit for the location to be set, then navigate
+      setTimeout(() => {
+        if (currentLocation && mapInstance) {
+          console.log('Location obtained, navigating to:', currentLocation);
+          mapInstance.flyTo([currentLocation.lat, currentLocation.lng], 16, {
+            duration: 1.5
+          });
+        } else {
+          console.warn('Location not available after request');
+        }
+        setIsLocating(false);
+      }, 100);
+
     } catch (error) {
+      console.log('Location request failed, trying retry...');
       // If first attempt fails and we haven't retried yet, try again
       if (!hasRetriedLocation) {
         setHasRetriedLocation(true);
-        console.log('Location request failed, retrying...');
         try {
           await requestLocation();
+          // If retry succeeds, navigate
+          setTimeout(() => {
+            if (currentLocation && mapInstance) {
+              console.log('Location obtained after retry, navigating to:', currentLocation);
+              mapInstance.flyTo([currentLocation.lat, currentLocation.lng], 16, {
+                duration: 1.5
+              });
+            }
+            setIsLocating(false);
+          }, 100);
         } catch (retryError) {
           // If retry also fails, show error notification
           console.error('Location request failed after retry:', retryError);
-          // The error will be displayed by the locationError state in the UI
+          setIsLocating(false);
         }
       } else {
         console.error('Location request failed:', error);
+        setIsLocating(false);
       }
     }
-  }, [requestLocation, hasRetriedLocation]);
+  }, [requestLocation, hasRetriedLocation, currentLocation, mapInstance]);
 
   // Check if camera is available
   const isCameraAvailable = () => {
@@ -1786,6 +1816,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               {/* First Row: Main Controls */}
               <MapControls
                 onLocateCurrentPosition={handleLocateCurrentPosition}
+                isLocating={isLocating}
                 mapStyle={mapStyle}
                 onMapStyleChange={handleLocalMapStyleChange}
                 mapNotes={getFilteredNotes}

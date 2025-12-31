@@ -6,6 +6,7 @@ import { Search, Locate, Loader2, X, Check, Satellite, Type, Settings, MapPin } 
 
 interface MapControlsProps {
   onLocateCurrentPosition: () => void;
+  isLocating?: boolean;
   mapStyle: 'standard' | 'satellite';
   onMapStyleChange: (style: 'standard' | 'satellite') => void;
   mapNotes: Note[];
@@ -21,6 +22,7 @@ interface MapControlsProps {
 
 export const MapControls: React.FC<MapControlsProps> = ({
   onLocateCurrentPosition,
+  isLocating = false,
   mapStyle,
   onMapStyleChange,
   mapNotes,
@@ -144,10 +146,15 @@ export const MapControls: React.FC<MapControlsProps> = ({
               }}
               onPointerDown={(e) => e.stopPropagation()}
               onPointerMove={(e) => e.stopPropagation()}
-              className="group w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-3 text-sm transition-colors"
+              disabled={isLocating}
+              className="group w-full text-left px-4 py-3 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-3 text-sm transition-colors"
             >
-              <Locate size={16} className="text-gray-400 group-hover:text-blue-500 transition-colors" />
-              <span>My Location</span>
+              {isLocating ? (
+                <Loader2 size={16} className="text-blue-500 animate-spin" />
+              ) : (
+                <Locate size={16} className="text-gray-400 group-hover:text-blue-500 transition-colors" />
+              )}
+              <span>{isLocating ? 'Locating...' : 'My Location'}</span>
             </button>
             <button
               onClick={(e) => {
