@@ -455,9 +455,28 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     checkLocationPermission
   } = useGeolocation(isMapMode);
 
+  // Check if camera is available
+  const isCameraAvailable = () => {
+    return location.protocol === 'https:' ||
+           location.hostname === 'localhost' ||
+           location.hostname === '127.0.0.1' &&
+           navigator.mediaDevices &&
+           navigator.mediaDevices.getUserMedia;
+  };
+
   // Camera import functionality
   const handleImportFromCamera = async () => {
     try {
+      // Check if we're on HTTPS (required for camera access)
+      if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+        throw new Error('Camera access requires HTTPS. Please access this site over HTTPS or use localhost for development.');
+      }
+
+      // Check if camera API is available
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Camera API is not supported in this browser. Please use a modern browser with camera support.');
+      }
+
       // Request camera access
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment' } // Use back camera if available
@@ -2315,17 +2334,29 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             >
               <FileJson size={16} /> Import from Data
             </button>
-            <div className="h-px bg-gray-100 my-1" />
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                handleImportFromCamera();
-                setShowImportMenu && setShowImportMenu(false);
-              }}
-              className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
-            >
-              <Plus size={16} /> Import from Camera
-            </button>
+            {isCameraAvailable() ? (
+              <>
+                <div className="h-px bg-gray-100 my-1" />
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleImportFromCamera();
+                    setShowImportMenu && setShowImportMenu(false);
+                  }}
+                  className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                >
+                  <Plus size={16} /> Import from Camera
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="h-px bg-gray-100 my-1" />
+                <div className="px-4 py-2.5 text-xs text-gray-500 flex items-center gap-2">
+                  <Plus size={16} className="opacity-50" />
+                  <span>Camera requires HTTPS</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
