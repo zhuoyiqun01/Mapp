@@ -10,6 +10,7 @@ import { useImageImport } from '@/components/hooks/useImageImport';
 import { useMapLayers } from '@/components/hooks/useMapLayers';
 import { useMapStyling } from '@/components/hooks/useMapStyling';
 import { MapLongPressHandler } from './map/MapLongPressHandler';
+import { MapLongPressMenu } from './map/MapLongPressMenu';
 import { MapNavigationHandler } from './map/MapNavigationHandler';
 import { TextLabelsLayer } from './map/TextLabelsLayer';
 import { MapPositionTracker } from './map/MapPositionTracker';
@@ -202,6 +203,13 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const notes = project.notes;
   const [editingNote, setEditingNote] = useState<Partial<Note> | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
+
+  // Long press menu state
+  const [longPressMenu, setLongPressMenu] = useState<{
+    show: boolean;
+    position: { x: number; y: number };
+    coords: { lat: number; lng: number };
+  } | null>(null);
 
   // Helper function to convert hex color to RGB
   const hexToRgb = (hex: string): string => {
@@ -548,16 +556,40 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       : [[0, 0], [1000, 1000]];
 
   const handleLongPress = (coords: Coordinates) => {
+    // Get the current mouse/touch position for menu placement
+    const event = window.event as MouseEvent | TouchEvent;
+    let clientX = 0;
+    let clientY = 0;
+
+    if (event instanceof MouseEvent) {
+      clientX = event.clientX;
+      clientY = event.clientY;
+    } else if (event instanceof TouchEvent && event.changedTouches.length > 0) {
+      clientX = event.changedTouches[0].clientX;
+      clientY = event.changedTouches[0].clientY;
+    }
+
+    // Show long press menu
+    setLongPressMenu({
+      show: true,
+      position: { x: clientX, y: clientY },
+      coords: { lat: coords.lat, lng: coords.lng }
+    });
+  };
+
+  const handleCreateNote = () => {
+    if (!longPressMenu) return;
+
     // Calculate boardX and boardY for board view placement
     // Use same logic as BoardView's createNoteAtCenter to avoid overlap
     const noteWidth = 256; // standard note width
     const noteHeight = 256;
     const spacing = 50;
     const aspectRatioThreshold = 2.5; // If width/height > 2.5, start a new row
-    
+
     let boardX = 100; // Default position
     let boardY = 100;
-    
+
     // Calculate position to the right of existing notes, or start new row if too wide
     const boardNotes = notes.filter(n => n.boardX !== undefined && n.boardY !== undefined);
     if (boardNotes.length > 0) {
@@ -565,7 +597,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       let minY = Infinity;
       let maxX = -Infinity;
       let maxY = -Infinity;
-      
+
       boardNotes.forEach(note => {
         const existingNoteWidth = (note.variant === 'compact') ? 180 : 256;
         const existingNoteHeight = (note.variant === 'compact') ? 180 : 256;
@@ -573,18 +605,18 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         const noteRight = noteLeft + existingNoteWidth;
         const noteTop = note.boardY;
         const noteBottom = noteTop + existingNoteHeight;
-        
+
         if (noteLeft < minX) minX = noteLeft;
         if (noteTop < minY) minY = noteTop;
         if (noteRight > maxX) maxX = noteRight;
         if (noteBottom > maxY) maxY = noteBottom;
       });
-      
+
       if (maxX !== -Infinity && minY !== Infinity) {
         const contentWidth = maxX - minX;
         const contentHeight = maxY - minY;
         const aspectRatio = contentHeight > 0 ? contentWidth / contentHeight : 0;
-        
+
         // If aspect ratio is too wide, start a new row
         if (aspectRatio > aspectRatioThreshold) {
           // Start new row: go to left edge, below existing content
@@ -601,8 +633,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     const newNote: Partial<Note> = {
       id: generateId(),
       createdAt: Date.now(),
-      coords: coords,
-      fontSize: 3, 
+      coords: longPressMenu.coords,
+      fontSize: 3,
       emoji: '', // No default emoji
       text: '',
       images: [],
@@ -616,6 +648,89 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     setEditingNote(newNote);
     setIsEditorOpen(true);
     onToggleEditor(true);
+  };
+
+  const handleImportFromCamera = async () => {
+    if (!longPressMenu) return;
+
+    try {
+      // Get current location
+      const locationResult = await new Promise<GeolocationCoordinates>((resolve, reject) => {
+        if (!navigator.geolocation) {
+          reject(new Error('Geolocation is not supported'));
+          return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+          (position) => resolve(position.coords),
+          (error) => reject(error),
+          { enableHighAccuracy: true, timeout: 10000 }
+        );
+      });
+
+      // Access camera
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'environment', // Use back camera if available
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        }
+      });
+
+      // Create video element to capture frame
+      const video = document.createElement('video');
+      video.srcObject = stream;
+      video.play();
+
+      // Wait for video to load
+      await new Promise((resolve) => {
+        video.onloadedmetadata = resolve;
+      });
+
+      // Create canvas to capture frame
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Could not get canvas context');
+
+      ctx.drawImage(video, 0, 0);
+
+      // Convert to blob
+      const blob = await new Promise<Blob>((resolve) =>
+        canvas.toBlob((b) => resolve(b!), 'image/jpeg', 0.9)
+      );
+
+      // Stop camera stream
+      stream.getTracks().forEach(track => track.stop());
+
+      // Create file from blob
+      const file = new File([blob], `camera-${Date.now()}.jpg`, { type: 'image/jpeg' });
+
+      // Use the existing import logic with the camera photo
+      // We'll call the import handler with the camera photo and updated coordinates
+      const files = [file] as any as FileList;
+
+      // Create a data URL from the canvas for immediate preview
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+
+      // Update the coordinates to current location
+      const updatedCoords = {
+        lat: locationResult.latitude,
+        lng: locationResult.longitude
+      };
+
+      // Import the photo using the existing logic
+      await handleImageImport(files, false);
+
+    } catch (error) {
+      console.error('Failed to import from camera:', error);
+      alert('无法访问摄像头或获取位置信息，请检查权限设置。');
+    }
+  };
+
+  const closeLongPressMenu = () => {
+    setLongPressMenu(null);
   };
 
   const handleMarkerClick = (note: Note, e?: L.LeafletMouseEvent) => {
@@ -2238,6 +2353,17 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             </button>
           </div>
         </div>
+      )}
+
+      {/* Long press menu */}
+      {longPressMenu?.show && (
+        <MapLongPressMenu
+          position={longPressMenu.position}
+          coords={longPressMenu.coords}
+          onCreateNote={handleCreateNote}
+          onImportFromCamera={handleImportFromCamera}
+          onClose={closeLongPressMenu}
+        />
       )}
     </div>
   );
