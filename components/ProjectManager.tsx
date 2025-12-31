@@ -1050,7 +1050,9 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         <>
           <button 
             onClick={() => {
+              console.log('[ProjectManager] Back to home button clicked');
               if (onBackToHome) {
+                console.log('[ProjectManager] Calling onBackToHome');
                 onBackToHome();
               }
               if (onCloseSidebar) {

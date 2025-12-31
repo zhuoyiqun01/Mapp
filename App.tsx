@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Map as MapIcon, Grid, Menu, Loader2, Table2, Cloud, CloudOff, CheckCircle2, AlertCircle, RefreshCw, Image as ImageIcon, Plus, MapPin } from 'lucide-react';
+import { Map as MapIcon, Grid, Menu, Loader2, Table2, Cloud, CloudOff, CheckCircle2, AlertCircle, RefreshCw, Image as ImageIcon, Plus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapView } from './components/MapView';
 import { BoardView } from './components/BoardView';
@@ -743,114 +743,31 @@ export default function App() {
           />
         )}
 
-      {currentProjectId ? (
-        <>
-          {/* Map View */}
-          <div className="flex-1 relative overflow-hidden">
-            <MapView
-              project={activeProject!}
-              onAddNote={addNote}
-              onUpdateNote={updateNote}
-              onDeleteNote={deleteNote}
-              onToggleEditor={() => setIsEditorOpen(!isEditorOpen)}
-              onImportDialogChange={setShowImportMenu}
-              onUpdateProject={handleUpdateProject}
-              fileInputRef={mapFileInputRef}
-              navigateToCoords={navigateToMapCoords}
-              projectId={currentProjectId}
-              onNavigateComplete={() => {
-                clearMapNavigation();
-                setNavigateToMapCoords(null);
-              }}
-              onSwitchToBoardView={(coords, mapInstance) => {
-                if (coords) {
-                  navigateToBoard(coords.x, coords.y);
-                }
-              }}
-              themeColor={themeColor}
-              mapStyleId={mapStyle}
-              onMapStyleChange={handleLocalMapStyleChange}
-              showImportMenu={showMapImportMenu}
-              setShowImportMenu={setShowMapImportMenu}
-            />
+      {/* Welcome/Home Page */}
+      <div className="flex-1 flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
+        <div className="text-center max-w-md mx-auto p-8">
+          <div className="mb-8">
+            <h1 className="text-4xl font-bold text-gray-900 mb-4">Mapp</h1>
+            <p className="text-lg text-gray-600 mb-8">Create and explore your interactive maps</p>
           </div>
 
-          {/* Sidebar */}
-          <AnimatePresence>
-          {isSidebarOpen && (
-              <div className="fixed inset-0 z-[2000] flex overflow-hidden">
-                 <motion.div
-                   className="fixed inset-0 bg-black/20 backdrop-blur-sm"
-                   onClick={() => setIsSidebarOpen(false)}
-                   initial={{ opacity: 0 }}
-                   animate={{ opacity: 1 }}
-                   exit={{ opacity: 0 }}
-                   transition={{ duration: 0.2 }}
-                   style={{ willChange: 'opacity' }}
-                 />
-                 <motion.div
-                   className="relative h-full w-[62%] z-[2001] overflow-hidden"
-                   initial={{ x: '-100%' }}
-                   animate={{ x: 0 }}
-                   exit={{ x: '-100%' }}
-                   transition={{
-                     type: "tween",
-                     duration: 0.3,
-                     ease: [0.25, 0.1, 0.25, 1]
-                   }}
-                   style={{ willChange: 'transform' }}
-                 >
-                   <ProjectManager
-                     projects={summariesToProjects(projectSummaries)}
-                     currentProjectId={currentProjectId}
-                     onCreateProject={handleCreateProject}
-                     onSelectProject={handleSelectProject}
-                     onDeleteProject={handleDeleteProject}
-                     onUpdateProject={handleUpdateProject}
-                     syncStatus={syncStatus}
-                     isSidebar={true}
-                     onCloseSidebar={() => setIsSidebarOpen(false)}
-                     onBackToHome={() => { setCurrentProjectId(null); }}
-                     viewMode={viewMode}
-                     activeProject={activeProject}
-                     onExportCSV={handleExportCSV}
-                     themeColor={themeColor}
-                     onThemeColorChange={handleThemeColorChange}
-                     currentMapStyle={mapStyle}
-                     onMapStyleChange={handleLocalMapStyleChange}
-                   />
-                 </motion.div>
-               </div>
-          )}
-          </AnimatePresence>
-        </>
-      ) : (
-        /* Welcome/Home Page */
-        <div className="flex-1 flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
-          <div className="text-center max-w-md mx-auto p-8">
-            <div className="mb-8">
-              <div className="w-24 h-24 mx-auto bg-white rounded-2xl shadow-lg flex items-center justify-center mb-6">
-                <MapPin size={40} className="text-blue-500" />
-              </div>
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">Mapping App</h1>
-              <p className="text-gray-600">Create and manage your interactive maps</p>
-            </div>
+          <div className="space-y-4">
+            <button
+              onClick={() => setIsSidebarOpen(true)}
+              className="w-full py-4 px-6 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-semibold transition-colors shadow-lg"
+              style={{ backgroundColor: themeColor }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${themeColor}E6`}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
+            >
+              Open Projects
+            </button>
 
-            <div className="space-y-4">
-              <button
-                onClick={() => setIsSidebarOpen(true)}
-                className="w-full py-3 px-6 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition-colors shadow-lg"
-              >
-                Open Projects
-              </button>
-
-              <div className="text-sm text-gray-500">
-                Select a project to start mapping
-              </div>
+            <div className="text-sm text-gray-500">
+              Select or create a project to start mapping
             </div>
           </div>
         </div>
-      )}
+      </div>
       </div>
     );
   }
