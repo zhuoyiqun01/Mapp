@@ -613,7 +613,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
       // Optional: Fly to the new location
       if (mapInstance) {
-        mapInstance.flyTo([location.lat, location.lng], 16);
+        mapInstance.flyTo([userLocation.lat, userLocation.lng], 16);
       }
 
     } catch (error) {
