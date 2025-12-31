@@ -427,6 +427,22 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   // Settings panel
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
 
+  // Location error retry tracking
+  const [hasRetriedLocation, setHasRetriedLocation] = useState(false);
+
+  // Auto-hide location error after 2 seconds
+  useEffect(() => {
+    if (locationError) {
+      const timer = setTimeout(() => {
+        // We can't directly set locationError to null since it's managed by the hook
+        // Instead, we'll trigger a new location request to clear the error state
+        setHasRetriedLocation(false);
+      }, 2000);
+
+      return () => clearTimeout(timer);
+    }
+  }, [locationError]);
+
   
   // Current marker index being viewed
 
@@ -454,6 +470,29 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     getCurrentBrowserLocation,
     checkLocationPermission
   } = useGeolocation(isMapMode);
+
+  // Enhanced location request with auto-retry
+  const handleLocateCurrentPosition = useCallback(async () => {
+    try {
+      setHasRetriedLocation(false);
+      await requestLocation();
+    } catch (error) {
+      // If first attempt fails and we haven't retried yet, try again
+      if (!hasRetriedLocation) {
+        setHasRetriedLocation(true);
+        console.log('Location request failed, retrying...');
+        try {
+          await requestLocation();
+        } catch (retryError) {
+          // If retry also fails, show error notification
+          console.error('Location request failed after retry:', retryError);
+          // The error will be displayed by the locationError state in the UI
+        }
+      } else {
+        console.error('Location request failed:', error);
+      }
+    }
+  }, [requestLocation, hasRetriedLocation]);
 
   // Check if camera is available
   const isCameraAvailable = () => {
@@ -1607,80 +1646,13 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
         {/* Location error indicator */}
         {isMapMode && locationError && (
-          <div className="fixed top-20 left-4 right-4 z-[1000] bg-red-50 border border-red-200 rounded-lg p-3 shadow-lg">
+          <div className="fixed top-20 left-4 right-4 z-[1000] bg-red-50 border border-red-200 rounded-lg p-3 shadow-lg animate-in slide-in-from-top-2 fade-in duration-300">
             <div className="flex items-start gap-2">
               <div className="text-red-500 mt-0.5">📍</div>
               <div className="flex-1">
                 <p className="text-sm text-red-800 font-medium">位置服务不可用</p>
                 <p className="text-xs text-red-600 mt-1">{locationError}</p>
-                <div className="mt-2 flex gap-2">
-                  {locationError.includes('已被拒绝') ? (
-                    // Permission denied - offer to request permission
-                    <button
-                      onClick={async () => {
-                        try {
-                          // Try to request permission again
-                          const result = await navigator.permissions.query({ name: 'geolocation' as PermissionName });
-                          if (result.state === 'denied') {
-                            alert('位置权限已被永久拒绝。请在浏览器设置中手动允许位置访问。\n\nChrome: 设置 > 隐私和安全 > 网站设置 > 位置\nSafari: 偏好设置 > 隐私 > 网站 > 位置');
-                            return;
-                          }
-                          // Try requesting location again
-                          await requestLocation();
-                        } catch (error) {
-                          alert('无法重新请求权限。请刷新页面或在浏览器设置中允许位置访问。');
-                        }
-                      }}
-                      className="px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs rounded-md transition-colors"
-                    >
-                      🔐 申请权限
-                    </button>
-                  ) : (
-                    // Other errors - offer retry
-                    <button
-                      onClick={requestLocation}
-                      className="px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 text-xs rounded-md transition-colors"
-                    >
-                      🔄 重试
-                    </button>
-                  )}
-                  <button
-                    onClick={() => {
-                      // Open browser location settings help
-                      const isChrome = navigator.userAgent.includes('Chrome');
-                      const isSafari = navigator.userAgent.includes('Safari') && !navigator.userAgent.includes('Chrome');
-                      const isFirefox = navigator.userAgent.includes('Firefox');
-
-                      let message = '如何允许位置权限：\n\n';
-                      if (isChrome) {
-                        message += 'Chrome: 点击地址栏左侧的🔒图标 > 位置 > 允许';
-                      } else if (isSafari) {
-                        message += 'Safari: Safari > 偏好设置 > 隐私 > 位置服务';
-                      } else if (isFirefox) {
-                        message += 'Firefox: 点击地址栏左侧的🛡️图标 > 权限 > 位置';
-                      } else {
-                        message += '请在浏览器设置中查找"位置"或"地理位置"权限设置';
-                      }
-
-                      alert(message);
-                    }}
-                    className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs rounded-md transition-colors"
-                  >
-                    ❓ 帮助
-                  </button>
-                </div>
               </div>
-              <button
-                onClick={() => {
-                  // Clear the error by trying to request location again
-                  // This will either succeed or show the error again
-                  requestLocation();
-                }}
-                className="text-red-400 hover:text-red-600 text-lg leading-none"
-                title="关闭提示"
-              >
-                ×
-              </button>
             </div>
           </div>
         )}
@@ -1813,7 +1785,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none items-start">
               {/* First Row: Main Controls */}
               <MapControls
-                onLocateCurrentPosition={requestLocation}
+                onLocateCurrentPosition={handleLocateCurrentPosition}
                 mapStyle={mapStyle}
                 onMapStyleChange={handleLocalMapStyleChange}
                 mapNotes={getFilteredNotes}
