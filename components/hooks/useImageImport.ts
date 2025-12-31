@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from 'react';
 import { Note } from '../types';
 import { getCurrentBrowserLocation } from './useGeolocation';
+import { loadImage } from '../utils/storage';
 
 export interface ImportPreview {
   file: File;
@@ -34,28 +35,8 @@ const fileToBase64 = (file: File): Promise<string> => {
 // Helper function to get image data for fingerprint calculation
 const getImageDataForFingerprint = async (imageId: string): Promise<string | null> => {
   try {
-    // Get from IndexedDB
-    const dbRequest = indexedDB.open('mapp-db', 1);
-    return new Promise((resolve) => {
-      dbRequest.onsuccess = (event) => {
-        const db = (event.target as IDBOpenDBRequest).result;
-        const transaction = db.transaction(['images'], 'readonly');
-        const store = transaction.objectStore('images');
-        const getRequest = store.get(imageId);
-
-        getRequest.onsuccess = () => {
-          const imageData = getRequest.result;
-          if (imageData && imageData.data) {
-            resolve(imageData.data);
-          } else {
-            resolve(null);
-          }
-        };
-
-        getRequest.onerror = () => resolve(null);
-      };
-      dbRequest.onerror = () => resolve(null);
-    });
+    // Use the storage utility function instead of direct IndexedDB access
+    return await loadImage(imageId);
   } catch (error) {
     console.warn('Failed to get image data for fingerprint:', error);
     return null;
