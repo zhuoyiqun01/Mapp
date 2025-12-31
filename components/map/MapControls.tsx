@@ -35,6 +35,8 @@ export const MapControls: React.FC<MapControlsProps> = ({
   setClusterThreshold,
   onOpenSettings
 }) => {
+  // Debug: Check if onImportFromCamera is passed
+  console.log('MapControls: onImportFromCamera exists:', !!onImportFromCamera);
   const map = useMap();
   const [showLocateMenu, setShowLocateMenu] = useState(false);
   const locateMenuRef = useRef<HTMLDivElement>(null);
