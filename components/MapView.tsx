@@ -135,6 +135,7 @@ import { NoteEditor } from './NoteEditor';
 import { generateId, fileToBase64 } from '../utils';
 import { loadImage } from '../utils/storage';
 import { ZoomSlider } from './ZoomSlider';
+import { ImportPreviewDialog } from './ImportPreviewDialog';
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -454,6 +455,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     deviceHeading,
     hasLocationPermission,
     locationError,
+    setLocationError,
     requestLocation,
     getCurrentBrowserLocation,
     checkLocationPermission
@@ -477,6 +479,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     try {
       setIsLocating(true);
       setHasRetriedLocation(false);
+      setLocationError(null); // Clear any previous errors
       console.log('Requesting current location...');
 
       // Request location
@@ -493,30 +496,33 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           console.warn('Location not available after request');
         }
         setIsLocating(false);
-      }, 100);
+      }, 500); // Increased timeout for mobile devices
 
     } catch (error) {
       console.log('Location request failed, trying retry...');
       // If first attempt fails and we haven't retried yet, try again
       if (!hasRetriedLocation) {
         setHasRetriedLocation(true);
-        try {
-          await requestLocation();
-          // If retry succeeds, navigate
-          setTimeout(() => {
-            if (currentLocation && mapInstance) {
-              console.log('Location obtained after retry, navigating to:', currentLocation);
-              mapInstance.flyTo([currentLocation.lat, currentLocation.lng], 16, {
-                duration: 1.5
-              });
-            }
+        // Wait a moment before retry
+        setTimeout(async () => {
+          try {
+            await requestLocation();
+            // If retry succeeds, navigate
+            setTimeout(() => {
+              if (currentLocation && mapInstance) {
+                console.log('Location obtained after retry, navigating to:', currentLocation);
+                mapInstance.flyTo([currentLocation.lat, currentLocation.lng], 16, {
+                  duration: 1.5
+                });
+              }
+              setIsLocating(false);
+            }, 500);
+          } catch (retryError) {
+            // If retry also fails, show error notification
+            console.error('Location request failed after retry:', retryError);
             setIsLocating(false);
-          }, 100);
-        } catch (retryError) {
-          // If retry also fails, show error notification
-          console.error('Location request failed after retry:', retryError);
-          setIsLocating(false);
-        }
+          }
+        }, 1000); // Wait 1 second before retry
       } else {
         console.error('Location request failed:', error);
         setIsLocating(false);
@@ -1681,8 +1687,41 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               <div className="text-red-500 mt-0.5">📍</div>
               <div className="flex-1">
                 <p className="text-sm text-red-800 font-medium">位置服务不可用</p>
-                <p className="text-xs text-red-600 mt-1">{locationError}</p>
+                <p className="text-xs text-red-600 mt-1 whitespace-pre-line">{locationError}</p>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    onClick={() => handleLocateCurrentPosition()}
+                    disabled={isLocating}
+                    className="px-3 py-1 bg-red-100 hover:bg-red-200 disabled:bg-gray-100 disabled:cursor-not-allowed text-red-700 text-xs rounded transition-colors flex items-center gap-1"
+                  >
+                    {isLocating ? <Loader2 size={12} className="animate-spin" /> : null}
+                    重试
+                  </button>
+                  <button
+                    onClick={() => {
+                      // 手动清除错误状态并停止定位
+                      setLocationError(null);
+                      setHasRetriedLocation(false);
+                      setIsLocating(false);
+                    }}
+                    className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs rounded transition-colors"
+                  >
+                    关闭
+                  </button>
+                </div>
               </div>
+              <button
+                onClick={() => {
+                  // 关闭按钮：清除所有相关状态
+                  setLocationError(null);
+                  setHasRetriedLocation(false);
+                  setIsLocating(false);
+                }}
+                className="text-red-500 hover:text-red-700 p-1 hover:bg-red-100 rounded-full transition-colors"
+                aria-label="关闭位置错误提示"
+              >
+                <X size={16} />
+              </button>
             </div>
           </div>
         )}
@@ -1814,7 +1853,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         {isMapMode && (
           <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none items-start">
               {/* First Row: Main Controls */}
-              <MapControls
+              <MapControls 
                 onLocateCurrentPosition={handleLocateCurrentPosition}
                 isLocating={isLocating}
                 mapStyle={mapStyle}
