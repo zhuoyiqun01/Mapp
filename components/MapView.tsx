@@ -462,17 +462,36 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   } = useGeolocation(isMapMode);
 
   // Auto-hide location error after 2 seconds
+  const locationErrorTimerRef = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
     if (locationError) {
-      const timer = setTimeout(() => {
-        // We can't directly set locationError to null since it's managed by the hook
-        // Instead, we'll trigger a new location request to clear the error state
+      // Clear any existing timer
+      if (locationErrorTimerRef.current) {
+        clearTimeout(locationErrorTimerRef.current);
+      }
+
+      // Set new timer for auto-hide
+      locationErrorTimerRef.current = setTimeout(() => {
+        setLocationError(null);
         setHasRetriedLocation(false);
+        setIsLocating(false);
+        locationErrorTimerRef.current = null;
       }, 2000);
 
-      return () => clearTimeout(timer);
+      return () => {
+        if (locationErrorTimerRef.current) {
+          clearTimeout(locationErrorTimerRef.current);
+          locationErrorTimerRef.current = null;
+        }
+      };
+    } else {
+      // Clear timer if no error
+      if (locationErrorTimerRef.current) {
+        clearTimeout(locationErrorTimerRef.current);
+        locationErrorTimerRef.current = null;
+      }
     }
-  }, [locationError]);
+  }, [locationError, setLocationError]);
 
   // Enhanced location request with auto-retry and navigation
   const handleLocateCurrentPosition = useCallback(async () => {
@@ -1703,6 +1722,11 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                       setLocationError(null);
                       setHasRetriedLocation(false);
                       setIsLocating(false);
+                      // 清除自动隐藏的定时器
+                      if (locationErrorTimerRef.current) {
+                        clearTimeout(locationErrorTimerRef.current);
+                        locationErrorTimerRef.current = null;
+                      }
                     }}
                     className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs rounded transition-colors"
                   >
@@ -1716,6 +1740,11 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                   setLocationError(null);
                   setHasRetriedLocation(false);
                   setIsLocating(false);
+                  // 清除自动隐藏的定时器
+                  if (locationErrorTimerRef.current) {
+                    clearTimeout(locationErrorTimerRef.current);
+                    locationErrorTimerRef.current = null;
+                  }
                 }}
                 className="text-red-500 hover:text-red-700 p-1 hover:bg-red-100 rounded-full transition-colors"
                 aria-label="关闭位置错误提示"
