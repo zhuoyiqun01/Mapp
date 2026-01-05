@@ -109,7 +109,7 @@ const ExportResolutionDialog: React.FC<{
 // Menu dropdown component that adjusts position to avoid going off-screen
 const MenuDropdown: React.FC<{
   project: Project;
-  onRename: (project: Project) => void;
+  onRename: (projectId: string) => void;
   onDuplicate: (project: Project) => void;
   onExportData: (project: Project) => void;
   onExportFullProject: (project: Project) => void;
@@ -351,38 +351,59 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     }
   };
 
-  const handleRename = (project: Project) => {
-    setEditingProjectId(project.id);
-    setEditingProjectName(project.name);
-    setOpenMenuId(null);
+  const handleRename = (projectId: string) => {
+    const project = projects.find(p => p.id === projectId);
+    if (project) {
+      setEditingProjectId(projectId);
+      setEditingProjectName(project.name);
+      setOpenMenuId(null);
+    }
   };
 
-  const handleSaveRename = (project: Project) => {
-    const trimmedName = editingProjectName.trim();
-    console.log('handleSaveRename called:', {
-      originalName: project.name,
-      editingName: editingProjectName,
-      trimmedName,
-      hasUpdateProject: !!onUpdateProject
-    });
+  const handleSaveRename = async () => {
+    if (!editingProjectId || !onUpdateProject) return;
 
-    if (!trimmedName || !onUpdateProject) {
-      console.log('Cancelling rename: empty name or no update function');
+    const trimmedName = editingProjectName.trim();
+    if (!trimmedName) {
       // 如果名称为空，取消重命名
       handleCancelRename();
       return;
     }
 
-    // 如果名称没有变化，不需要保存
-    if (trimmedName === project.name) {
-      console.log('Cancelling rename: name unchanged');
+    const currentProject = projects.find(p => p.id === editingProjectId);
+    if (!currentProject) {
       handleCancelRename();
       return;
     }
 
-    console.log('Saving renamed project:', trimmedName);
+    // 如果名称没有变化，不需要保存
+    if (trimmedName === currentProject.name) {
+      handleCancelRename();
+      return;
+    }
+
+    // 加载完整的项目数据（如果当前项目不是活动项目）
+    let fullProject = currentProject;
+    if (activeProject && activeProject.id === editingProjectId) {
+      // 如果是当前活动项目，使用完整的活动项目数据
+      fullProject = activeProject;
+    } else {
+      // 否则，尝试从存储中加载完整项目数据
+      try {
+        // 这里我们需要导入loadProject函数
+        const { loadProject } = await import('../utils/storage');
+        const loadedProject = await loadProject(editingProjectId, true);
+        if (loadedProject) {
+          fullProject = loadedProject;
+        }
+      } catch (error) {
+        console.error('Failed to load full project data for rename:', error);
+        // 如果加载失败，使用当前可用的数据
+      }
+    }
+
     onUpdateProject({
-      ...project,
+      ...fullProject,
       name: trimmedName
     });
     setEditingProjectId(null);
@@ -1265,15 +1286,16 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                       onChange={(e) => setEditingProjectName(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
-                          handleSaveRename(p);
+                          handleSaveRename();
                         } else if (e.key === 'Escape') {
                           handleCancelRename();
                         }
                       }}
                       onBlur={() => {
-                        // 当输入框失去焦点时，如果名称有变化则保存，否则取消
-                        if (editingProjectName.trim() && editingProjectName.trim() !== p.name) {
-                          handleSaveRename(p);
+                        // 当输入框失去焦点时，自动保存（如果有变化）
+                        const trimmedName = editingProjectName.trim();
+                        if (trimmedName && trimmedName !== p.name) {
+                          handleSaveRename();
                         } else {
                           handleCancelRename();
                         }
@@ -1286,7 +1308,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleSaveRename(p);
+                        handleSaveRename();
                       }}
                       className="p-1 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
                     >
@@ -1366,7 +1388,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                           <div className="text-sm font-bold text-gray-800 truncate">{p.name}</div>
                         </div>
                       <button
-                          onClick={() => handleRename(p)}
+                          onClick={() => handleRename(p.id)}
                         className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
                       >
                           <Edit2 size={16} /> Rename
