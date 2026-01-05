@@ -359,7 +359,15 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
 
   const handleSaveRename = (project: Project) => {
     const trimmedName = editingProjectName.trim();
+    console.log('handleSaveRename called:', {
+      originalName: project.name,
+      editingName: editingProjectName,
+      trimmedName,
+      hasUpdateProject: !!onUpdateProject
+    });
+
     if (!trimmedName || !onUpdateProject) {
+      console.log('Cancelling rename: empty name or no update function');
       // 如果名称为空，取消重命名
       handleCancelRename();
       return;
@@ -367,10 +375,12 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
 
     // 如果名称没有变化，不需要保存
     if (trimmedName === project.name) {
+      console.log('Cancelling rename: name unchanged');
       handleCancelRename();
       return;
     }
 
+    console.log('Saving renamed project:', trimmedName);
     onUpdateProject({
       ...project,
       name: trimmedName

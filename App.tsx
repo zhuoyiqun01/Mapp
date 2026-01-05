@@ -683,14 +683,20 @@ export default function App() {
   };
 
   const handleUpdateProject = async (projectOrId: Project | string, updates?: Partial<Project>) => {
+    console.log('handleUpdateProject called:', { projectOrId, updates });
+
     if (typeof projectOrId === 'string') {
       // Update by id and updates
       const currentProject = activeProject;
       if (currentProject && updates) {
+        console.log('Updating project by id:', projectOrId, 'with updates:', updates);
         await projectState.updateProject({ ...currentProject, ...updates });
+      } else {
+        console.log('Cannot update: no current project or updates');
       }
     } else {
       // Update by full project object
+      console.log('Updating project by object:', projectOrId.name);
       await projectState.updateProject(projectOrId);
     }
   };

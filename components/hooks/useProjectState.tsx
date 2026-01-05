@@ -178,6 +178,13 @@ export const useProjectState = (): UseProjectStateReturn => {
     await saveProject(updatedProject);
     setActiveProject(updatedProject);
     setProjects(prev => prev.map(p => p.id === updatedProject.id ? updatedProject : p));
+
+    // Also update projectSummaries to reflect name changes
+    setProjectSummaries(prev => prev.map(summary =>
+      summary.id === updatedProject.id
+        ? { ...summary, name: updatedProject.name }
+        : summary
+    ));
   }, []);
 
   // Delete project
