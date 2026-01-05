@@ -150,7 +150,7 @@ const MenuDropdown: React.FC<{
       }`}
     >
       <button
-        onClick={() => { onRename(project); onClose(); }}
+        onClick={() => { onRename(project.id); onClose(); }}
         className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
       >
         <Edit2 size={16} /> Rename
