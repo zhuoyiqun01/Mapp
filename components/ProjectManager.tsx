@@ -358,11 +358,22 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   };
 
   const handleSaveRename = (project: Project) => {
-    if (!editingProjectName.trim() || !onUpdateProject) return;
-    
+    const trimmedName = editingProjectName.trim();
+    if (!trimmedName || !onUpdateProject) {
+      // 如果名称为空，取消重命名
+      handleCancelRename();
+      return;
+    }
+
+    // 如果名称没有变化，不需要保存
+    if (trimmedName === project.name) {
+      handleCancelRename();
+      return;
+    }
+
     onUpdateProject({
       ...project,
-      name: editingProjectName.trim()
+      name: trimmedName
     });
     setEditingProjectId(null);
     setEditingProjectName('');
@@ -1249,9 +1260,18 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                           handleCancelRename();
                         }
                       }}
+                      onBlur={() => {
+                        // 当输入框失去焦点时，如果名称有变化则保存，否则取消
+                        if (editingProjectName.trim() && editingProjectName.trim() !== p.name) {
+                          handleSaveRename(p);
+                        } else {
+                          handleCancelRename();
+                        }
+                      }}
                       onClick={(e) => e.stopPropagation()}
                       className="flex-1 px-2 py-1 bg-white border-2 rounded-lg outline-none text-lg font-bold"
                       style={{ borderColor: themeColor }}
+                      placeholder="输入项目名称"
                     />
                     <button
                       onClick={(e) => {
