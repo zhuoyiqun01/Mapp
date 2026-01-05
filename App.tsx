@@ -52,6 +52,7 @@ export default function App() {
     currentProjectId,
     setCurrentProjectId,
     setActiveProject,
+    duplicateProject,
     isLoading,
     isLoadingProject,
     loadingProgress,
@@ -465,11 +466,11 @@ export default function App() {
         e.preventDefault();
       }
     };
-
+    
     const preventGesture = (e: Event) => {
       e.preventDefault();
     };
-
+    
     const preventContextMenu = (e: Event) => {
       e.preventDefault();
     };
@@ -496,7 +497,7 @@ export default function App() {
 
     // Prevent long-press selection on iOS
     document.addEventListener('touchstart', preventLongPress, { passive: true });
-
+    
     return () => {
       document.removeEventListener('touchstart', preventZoom);
       document.removeEventListener('touchmove', preventZoom);
@@ -677,6 +678,10 @@ export default function App() {
     await projectState.deleteProject(id);
   };
 
+  const handleDuplicateProject = async (project: Project) => {
+    await duplicateProject(project);
+  };
+
   const handleUpdateProject = async (projectOrId: Project | string, updates?: Partial<Project>) => {
     if (typeof projectOrId === 'string') {
       // Update by id and updates
@@ -788,13 +793,14 @@ export default function App() {
           />
         )}
 
-      <ProjectManager 
+      <ProjectManager
            projects={summariesToProjects(projectSummaries)}
          currentProjectId={null}
          onCreateProject={handleCreateProject}
            onSelectProject={handleSelectProject}
          onDeleteProject={handleDeleteProject}
          onUpdateProject={handleUpdateProject}
+         onDuplicateProject={handleDuplicateProject}
            onCheckData={handleCheckData}
          themeColor={themeColor}
          onThemeColorChange={handleThemeColorChange}
@@ -866,7 +872,7 @@ export default function App() {
                }}
                style={{ willChange: 'transform' }}
              >
-              <ProjectManager 
+              <ProjectManager
                  isSidebar
                  projects={summariesToProjects(projectSummaries)}
                  currentProjectId={currentProjectId}
@@ -874,6 +880,7 @@ export default function App() {
                  onSelectProject={handleSelectProject}
                  onDeleteProject={handleDeleteProject}
          onUpdateProject={handleUpdateProject}
+                 onDuplicateProject={handleDuplicateProject}
                  onCloseSidebar={() => setIsSidebarOpen(false)}
                   onBackToHome={() => {
                     setCurrentProjectId(null);

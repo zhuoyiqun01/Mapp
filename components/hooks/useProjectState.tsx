@@ -27,6 +27,7 @@ interface UseProjectStateReturn {
   selectProject: (projectId: string) => Promise<void>;
   updateProject: (project: Project) => Promise<void>;
   deleteProject: (projectId: string) => Promise<void>;
+  duplicateProject: (project: Project) => Promise<void>;
   addNoteToProject: (projectId: string, note: Note) => Promise<void>;
   updateNoteInProject: (projectId: string, noteId: string, updates: Partial<Note>) => Promise<void>;
   deleteNoteFromProject: (projectId: string, noteId: string) => Promise<void>;
@@ -197,6 +198,49 @@ export const useProjectState = (): UseProjectStateReturn => {
     }
   }, [currentProjectId]);
 
+  // Duplicate project
+  const duplicateProject = useCallback(async (project: Project) => {
+    // Generate new IDs for all entities
+    const newProjectId = `project_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    const duplicatedProject: Project = {
+      id: newProjectId,
+      name: `${project.name} (Copy)`,
+      type: project.type,
+      createdAt: new Date().toISOString(),
+      backgroundImage: project.backgroundImage,
+      notes: project.notes.map(note => ({
+        ...note,
+        id: `note_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        createdAt: new Date().toISOString()
+      })),
+      frames: project.frames?.map(frame => ({
+        ...frame,
+        id: `frame_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      })),
+      connections: project.connections?.map(conn => ({
+        ...conn,
+        id: `connection_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      })),
+      backgroundOpacity: project.backgroundOpacity,
+      themeColor: project.themeColor
+    };
+
+    await saveProject(duplicatedProject);
+
+    // Update state
+    setProjects(prev => [...prev, duplicatedProject]);
+    setProjectSummaries(prev => [...prev, {
+      id: duplicatedProject.id,
+      name: duplicatedProject.name,
+      type: duplicatedProject.type,
+      createdAt: duplicatedProject.createdAt,
+      noteCount: duplicatedProject.notes.length,
+      hasImages: duplicatedProject.notes.some(note => note.images && note.images.length > 0),
+      storageSize: 0 // Will be calculated when needed
+    }]);
+  }, []);
+
   // Add note to project
   const addNoteToProject = useCallback(async (projectId: string, note: Note) => {
     if (!activeProject || activeProject.id !== projectId) return;
@@ -254,6 +298,7 @@ export const useProjectState = (): UseProjectStateReturn => {
     selectProject,
     updateProject,
     deleteProject,
+    duplicateProject,
     addNoteToProject,
     updateNoteInProject,
     deleteNoteFromProject,

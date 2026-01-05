@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Project, Note } from '../types';
-import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check, Upload, Palette, Settings, ZoomIn } from 'lucide-react';
+import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check, Upload, Palette, Settings, ZoomIn, Copy } from 'lucide-react';
 import { generateId, fileToBase64, formatDate, exportToJpeg, exportToJpegCentered, compressImageFromBase64 } from '../utils';
 import { loadProject, loadNoteImages, loadBackgroundImage, saveProject, loadAllProjects } from '../utils/storage';
 import { getLastSyncTime, type SyncStatus } from '../utils/sync';
@@ -110,13 +110,14 @@ const ExportResolutionDialog: React.FC<{
 const MenuDropdown: React.FC<{
   project: Project;
   onRename: (project: Project) => void;
+  onDuplicate: (project: Project) => void;
   onExportData: (project: Project) => void;
   onExportFullProject: (project: Project) => void;
   onCompressImages: (project: Project) => void;
   onCheckData?: () => Promise<void>;
   onDelete: (id: string) => void;
   onClose: () => void;
-}> = ({ project, onRename, onExportData, onExportFullProject, onCompressImages, onCheckData, onDelete, onClose }) => {
+}> = ({ project, onRename, onDuplicate, onExportData, onExportFullProject, onCompressImages, onCheckData, onDelete, onClose }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<'bottom' | 'top'>('bottom');
 
@@ -148,11 +149,18 @@ const MenuDropdown: React.FC<{
         position === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'
       }`}
     >
-      <button 
+      <button
         onClick={() => { onRename(project); onClose(); }}
         className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
       >
         <Edit2 size={16} /> Rename
+      </button>
+      <div className="h-px bg-gray-100 my-1" />
+      <button
+        onClick={() => { onDuplicate(project); onClose(); }}
+        className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+      >
+        <Copy size={16} /> Duplicate Project
       </button>
       <div className="h-px bg-gray-100 my-1" />
       <button 
@@ -207,6 +215,7 @@ interface ProjectManagerProps {
   onSelectProject: (id: string) => void;
   onDeleteProject: (id: string) => void;
   onUpdateProject?: (project: Project) => void;
+  onDuplicateProject?: (project: Project) => void;
   isSidebar?: boolean;
   onCloseSidebar?: () => void;
   onBackToHome?: () => void;
@@ -221,13 +230,14 @@ interface ProjectManagerProps {
   onMapStyleChange?: (styleId: string) => void;
 }
 
-export const ProjectManager: React.FC<ProjectManagerProps> = ({ 
-  projects, 
-  currentProjectId, 
-  onCreateProject, 
-  onSelectProject, 
+export const ProjectManager: React.FC<ProjectManagerProps> = ({
+  projects,
+  currentProjectId,
+  onCreateProject,
+  onSelectProject,
   onDeleteProject,
   onUpdateProject,
+  onDuplicateProject,
   syncStatus,
   isSidebar = false,
   onCloseSidebar,
@@ -361,6 +371,47 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   const handleCancelRename = () => {
     setEditingProjectId(null);
     setEditingProjectName('');
+  };
+
+  const handleDuplicateProject = async (project: Project) => {
+    if (!onDuplicateProject) return;
+
+    try {
+      // Load the full project with images
+      const fullProject = await loadProject(project.id, true);
+      if (!fullProject) {
+        alert('无法加载项目数据');
+        return;
+      }
+
+      // Create a copy with new ID and name
+      const duplicatedProject: Project = {
+        id: generateId(),
+        name: `${project.name} (Copy)`,
+        type: project.type,
+        backgroundImage: fullProject.backgroundImage,
+        createdAt: Date.now(),
+        notes: fullProject.notes.map(note => ({
+          ...note,
+          id: generateId(),
+          createdAt: Date.now() // Ensure new timestamps
+        })),
+        frames: fullProject.frames?.map(frame => ({
+          ...frame,
+          id: generateId()
+        })),
+        connections: fullProject.connections?.map(conn => ({
+          ...conn,
+          id: generateId()
+        }))
+      };
+
+      onDuplicateProject(duplicatedProject);
+      alert(`项目 "${project.name}" 已复制为 "${duplicatedProject.name}"`);
+    } catch (error) {
+      console.error('Duplicate project failed:', error);
+      alert('复制项目失败，请重试');
+    }
   };
 
   const handleExportData = (project: Project) => {
@@ -1050,9 +1101,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         <>
           <button 
             onClick={() => {
-              console.log('[ProjectManager] Back to home button clicked');
               if (onBackToHome) {
-                console.log('[ProjectManager] Calling onBackToHome');
                 onBackToHome();
               }
               if (onCloseSidebar) {
@@ -1269,9 +1318,10 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                   <>
                     <div className="fixed inset-0 z-[2020] bg-black/20 pointer-events-auto" onClick={() => setOpenMenuId(null)} />
                     {isSidebar ? (
-                      <MenuDropdown 
+                      <MenuDropdown
                         project={p}
                         onRename={handleRename}
+                        onDuplicate={handleDuplicateProject}
                         onExportData={handleExportData}
                         onExportFullProject={handleExportFullProject}
                         onCompressImages={handleCompressImages}
@@ -1285,11 +1335,18 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                           <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Project</div>
                           <div className="text-sm font-bold text-gray-800 truncate">{p.name}</div>
                         </div>
-                      <button 
+                      <button
                           onClick={() => handleRename(p)}
                         className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
                       >
                           <Edit2 size={16} /> Rename
+                      </button>
+                      <div className="h-px bg-gray-100 my-1" />
+                      <button
+                          onClick={() => handleDuplicateProject(p)}
+                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                      >
+                          <Copy size={16} /> Duplicate Project
                       </button>
                       <div className="h-px bg-gray-100 my-1" />
                       <button 
@@ -1493,8 +1550,8 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           width: window.innerWidth,
           height: window.innerHeight
         }}
-        themeColor={themeColor}
-      />
+          themeColor={themeColor}
+        />
 
     </div>
   );
