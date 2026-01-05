@@ -695,16 +695,8 @@ export default function App() {
       let projectToUpdate = projectOrId;
       if (activeProject && activeProject.id === projectOrId.id) {
         // 对于当前活动项目，确保使用完整数据
-        console.log('Merging incomplete project with activeProject data:', {
-          incomingNotes: projectOrId.notes?.length || 0,
-          activeNotes: activeProject.notes?.length || 0
-        });
         projectToUpdate = { ...activeProject, ...projectOrId };
       }
-      console.log('Final project to update:', {
-        name: projectToUpdate.name,
-        notesCount: projectToUpdate.notes?.length || 0
-      });
       await projectState.updateProject(projectToUpdate);
     }
   };
