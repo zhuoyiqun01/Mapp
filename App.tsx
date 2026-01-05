@@ -683,21 +683,29 @@ export default function App() {
   };
 
   const handleUpdateProject = async (projectOrId: Project | string, updates?: Partial<Project>) => {
-    console.log('handleUpdateProject called:', { projectOrId, updates });
-
     if (typeof projectOrId === 'string') {
       // Update by id and updates
       const currentProject = activeProject;
       if (currentProject && updates) {
-        console.log('Updating project by id:', projectOrId, 'with updates:', updates);
         await projectState.updateProject({ ...currentProject, ...updates });
-      } else {
-        console.log('Cannot update: no current project or updates');
       }
     } else {
       // Update by full project object
-      console.log('Updating project by object:', projectOrId.name);
-      await projectState.updateProject(projectOrId);
+      // 如果传入的项目对象不完整（比如notes为空），使用activeProject的数据
+      let projectToUpdate = projectOrId;
+      if (activeProject && activeProject.id === projectOrId.id) {
+        // 对于当前活动项目，确保使用完整数据
+        console.log('Merging incomplete project with activeProject data:', {
+          incomingNotes: projectOrId.notes?.length || 0,
+          activeNotes: activeProject.notes?.length || 0
+        });
+        projectToUpdate = { ...activeProject, ...projectOrId };
+      }
+      console.log('Final project to update:', {
+        name: projectToUpdate.name,
+        notesCount: projectToUpdate.notes?.length || 0
+      });
+      await projectState.updateProject(projectToUpdate);
     }
   };
 
