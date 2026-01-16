@@ -7,6 +7,7 @@ import {
   deleteProject as deleteProjectStorage,
   loadProject,
   loadNoteImages,
+  cleanBrokenReferences,
   ProjectSummary
 } from '../../utils/storage';
 
@@ -107,6 +108,12 @@ export const useProjectState = (): UseProjectStateReturn => {
       } else {
         setLoadingProgress(100);
       }
+
+      // 清理断链的资源引用
+      setLoadingProgress(95);
+      console.log('Cleaning broken resource references...');
+      project.notes = await cleanBrokenReferences(project.notes);
+      setLoadingProgress(100);
 
       return project;
     } catch (error) {

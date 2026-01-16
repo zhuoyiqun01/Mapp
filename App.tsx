@@ -35,12 +35,14 @@ import {
   attemptImageRecovery,
   loadNoteImages,
   findOrphanedData,
-  cleanupOrphanedMedia
+  cleanupOrphanedMedia,
+  cleanBrokenReferences
 } from './utils/storage';
 
 export default function App() {
   // Use custom hooks for state management
   const projectState = useProjectState();
+
   const viewState = useViewState();
   const appState = useAppState();
 
@@ -75,6 +77,11 @@ export default function App() {
     saveMapPosition,
     saveBoardPosition
   } = viewState;
+
+  // 保存board位置（现在只在拖拽结束时调用，类似MapPositionTracker的moveend事件）
+  const saveBoardPositionDirect = useCallback((projectId: string, x: number, y: number, scale: number) => {
+    saveBoardPosition(projectId, x, y, scale);
+  }, [saveBoardPosition]);
 
   const {
     themeColor,
@@ -168,7 +175,7 @@ export default function App() {
       themeColor: themeColor
     }));
   }, []);
-
+  
   // Check and repair project data
   const handleCheckData = useCallback(async () => {
     try {
@@ -249,6 +256,40 @@ export default function App() {
       setLoadingProgress(0);
     }
   }, []);
+
+  // Clean broken resource references in a project
+  const handleCleanupBrokenReferences = useCallback(async (project: Project) => {
+    try {
+      console.log(`Cleaning broken resource references for project: ${project.name}`);
+
+      // Show loading state
+      setIsLoadingProject(true);
+      setLoadingProgress(0);
+
+      // Clean broken references
+      setLoadingProgress(50);
+      const cleanedNotes = await cleanBrokenReferences(project.notes);
+
+      // Update project with cleaned notes
+      setLoadingProgress(80);
+      const cleanedProject = {
+        ...project,
+        notes: cleanedNotes
+      };
+
+      await projectState.updateProject(cleanedProject);
+      setLoadingProgress(100);
+
+      console.log(`Successfully cleaned broken references for project: ${project.name}`);
+      alert(`已清理项目 "${project.name}" 中的断链资源引用`);
+    } catch (error) {
+      console.error('Failed to clean broken references:', error);
+      alert('清理断链引用时出错，请查看控制台日志');
+    } finally {
+      setIsLoadingProject(false);
+      setLoadingProgress(0);
+    }
+  }, [projectState]);
 
   // Project selection handler with loading
   const handleSelectProject = useCallback(async (id: string) => {
@@ -610,6 +651,55 @@ export default function App() {
     await projectState.deleteNoteFromProject(currentProjectId, noteId);
   };
 
+  // 批量删除便签 - 优化版本，一次性处理多个便签
+  const deleteNotesBatch = async (noteIds: string[]) => {
+    if (!currentProjectId || noteIds.length === 0) return;
+
+    console.log('Batch deleting notes:', noteIds);
+
+    // 收集所有要删除的便签
+    const notesToDelete = activeProject?.notes.filter(n => noteIds.includes(n.id)) || [];
+
+    // 批量删除资源
+    for (const noteToDelete of notesToDelete) {
+      // Delete images
+      if (noteToDelete.images && noteToDelete.images.length > 0) {
+        for (const imageData of noteToDelete.images) {
+          if (imageData.startsWith('img-')) {
+            try {
+              await deleteImage(imageData);
+            } catch (error) {
+              console.error('Failed to delete image:', error);
+            }
+          }
+        }
+      }
+
+      // Delete sketch
+      if (noteToDelete.sketch && noteToDelete.sketch.startsWith('img-')) {
+        try {
+          await deleteSketch(noteToDelete.sketch);
+        } catch (error) {
+          console.error('Failed to delete sketch:', error);
+        }
+      }
+    }
+
+    // 清理相关的连接
+    const remainingConnections = activeProject.connections?.filter(conn =>
+      !noteIds.includes(conn.fromNoteId) && !noteIds.includes(conn.toNoteId)
+    ) || [];
+
+    // 一次性更新项目，删除所有便签并清理连接
+    const updatedProject = {
+      ...activeProject,
+      notes: activeProject.notes.filter(note => !noteIds.includes(note.id)),
+      connections: remainingConnections
+    };
+
+    await projectState.updateProject(updatedProject);
+  };
+
   const handleExportCSV = (project: Project) => {
     // 只导出标准便签（不包括小便签和纯文本）
     const standardNotes = project.notes.filter(note => 
@@ -691,13 +781,7 @@ export default function App() {
       }
     } else {
       // Update by full project object
-      // 如果传入的项目对象不完整（比如notes为空），使用activeProject的数据
-      let projectToUpdate = projectOrId;
-      if (activeProject && activeProject.id === projectOrId.id) {
-        // 对于当前活动项目，确保使用完整数据
-        projectToUpdate = { ...activeProject, ...projectOrId };
-      }
-      await projectState.updateProject(projectToUpdate);
+      await projectState.updateProject(projectOrId);
     }
   };
 
@@ -799,7 +883,7 @@ export default function App() {
           />
         )}
 
-      <ProjectManager
+      <ProjectManager 
            projects={summariesToProjects(projectSummaries)}
          currentProjectId={null}
          onCreateProject={handleCreateProject}
@@ -807,7 +891,8 @@ export default function App() {
          onDeleteProject={handleDeleteProject}
          onUpdateProject={handleUpdateProject}
          onDuplicateProject={handleDuplicateProject}
-           onCheckData={handleCheckData}
+          onCheckData={handleCheckData}
+          onCleanupBrokenReferences={handleCleanupBrokenReferences}
          themeColor={themeColor}
          onThemeColorChange={handleThemeColorChange}
       />
@@ -878,7 +963,7 @@ export default function App() {
                }}
                style={{ willChange: 'transform' }}
              >
-              <ProjectManager
+              <ProjectManager 
                  isSidebar
                  projects={summariesToProjects(projectSummaries)}
                  currentProjectId={currentProjectId}
@@ -896,6 +981,7 @@ export default function App() {
                   activeProject={activeProject}
                   onExportCSV={handleExportCSV}
                   syncStatus={syncStatus}
+                  onCleanupBrokenReferences={handleCleanupBrokenReferences}
                   themeColor={themeColor}
                   onThemeColorChange={handleThemeColorChange}
                   currentMapStyle={mapStyle}
@@ -1036,6 +1122,7 @@ export default function App() {
             onAddNote={addNote}
             onUpdateNote={updateNote}
             onDeleteNote={deleteNote}
+            onDeleteNotesBatch={deleteNotesBatch}
             onToggleEditor={setIsEditorOpen}
             onEditModeChange={setIsBoardEditMode}
             connections={activeProject.connections || []}
@@ -1057,7 +1144,7 @@ export default function App() {
             }}
             onTransformChange={(x: number, y: number, scale: number) => {
               if (currentProjectId) {
-                saveBoardPosition(currentProjectId, x, y, scale);
+                saveBoardPositionDirect(currentProjectId, x, y, scale);
               }
             }}
             onSwitchToMapView={(coords?: { lat: number; lng: number; zoom?: number }) => {

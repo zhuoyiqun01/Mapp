@@ -27,6 +27,7 @@ export interface Note {
   // Board View Position
   boardX: number;
   boardY: number;
+  isInitialPosition?: boolean; // 是否处于初始自动分配位置（用于重排）
   
   // Type of note
   variant: 'standard' | 'compact' | 'image';

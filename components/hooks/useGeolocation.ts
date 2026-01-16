@@ -230,10 +230,10 @@ export const useGeolocation = (isMapMode: boolean) => {
 
       if (permission === 'denied') {
         const deniedMessage = isWeChat
-          ? '微信中位置权限被拒绝。请尝试：\n1. 点击地址栏右侧的设置图标\n2. 选择"允许使用位置信息"\n3. 或者在微信设置 > 通用 > 访问权限 中开启位置权限\n4. 刷新页面后重试'
+          ? '位置权限被拒绝。'
           : isAndroid && isEdge
-          ? 'Edge浏览器位置权限被拒绝。请尝试：\n1. 点击地址栏左侧的锁图标\n2. 选择"网站权限" > "位置"\n3. 选择"允许"\n4. 刷新页面后重试'
-          : '位置权限被拒绝。如需使用定位功能，请在浏览器设置中允许位置访问权限。';
+          ? '位置权限被拒绝。'
+          : '位置权限被拒绝。';
         setLocationError(deniedMessage);
         return;
       }

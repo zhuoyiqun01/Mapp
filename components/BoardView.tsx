@@ -31,6 +31,7 @@ interface BoardViewProps {
   onToggleEditor: (isOpen: boolean) => void;
   onAddNote?: (note: Note) => void; 
   onDeleteNote?: (noteId: string) => void;
+  onDeleteNotesBatch?: (noteIds: string[]) => void;
   onEditModeChange?: (isEdit: boolean) => void;
   connections?: Connection[];
   onUpdateConnections?: (connections: Connection[]) => void;
@@ -48,9 +49,21 @@ interface BoardViewProps {
   themeColor?: string;
 }
 
-const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onToggleEditor, onAddNote, onDeleteNote, onEditModeChange, connections = [], onUpdateConnections, frames = [], onUpdateFrames, project, onUpdateProject, onSwitchToMapView, onSwitchToBoardView, navigateToCoords, projectId, onNavigateComplete, onTransformChange, mapViewFileInputRef, themeColor = DEFAULT_THEME_COLOR }) => {
+const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onToggleEditor, onAddNote, onDeleteNote, onDeleteNotesBatch, onEditModeChange, connections = [], onUpdateConnections, frames = [], onUpdateFrames, project, onUpdateProject, onSwitchToMapView, onSwitchToBoardView, navigateToCoords, projectId, onNavigateComplete, onTransformChange, mapViewFileInputRef, themeColor = DEFAULT_THEME_COLOR }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
+  
+  // 指针位置：下一个便签应该放置的位置
+  const [nextNotePosition, setNextNotePosition] = useState({ x: 100, y: 100 });
+
+  // 标记是否已经执行过重排
+  const [hasRearranged, setHasRearranged] = useState(false);
+
+  // 标记是否正在拖拽背景（用于在拖拽结束后保存位置）
+  const [isDraggingBackground, setIsDraggingBackground] = useState(false);
+
+  // 缩放保存的防抖定时器
+  const zoomSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   // Calculate initial transform: cache -> fit all objects -> default
   const calculateInitialTransform = useCallback(() => {
@@ -494,6 +507,68 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
     updateNoteGroups();
   }, [frames]);
 
+  // 重排处于初始位置的便签
+  const rearrangeInitialNotes = useCallback(() => {
+    // 如果已经重排过或者没有初始便签，跳过
+    if (hasRearranged) return;
+
+    const initialNotes = notes.filter(note => note.isInitialPosition);
+    if (initialNotes.length === 0) return;
+
+    console.log('开始重排初始便签:', initialNotes.length);
+
+    // 计算合适的列数：根据容器宽度和便签宽度
+    const containerWidth = containerRef.current?.getBoundingClientRect().width || 1200;
+    const noteWidth = 256; // 标准便签宽度
+    const spacing = 50;
+    const padding = 100;
+
+    // 计算每行可以放多少个便签
+    const availableWidth = containerWidth - padding * 2;
+    const notesPerRow = Math.max(1, Math.floor((availableWidth + spacing) / (noteWidth + spacing)));
+    const totalRows = Math.ceil(initialNotes.length / notesPerRow);
+
+    // 计算起始位置（左上角对齐）
+    const startX = padding;
+    const startY = padding;
+
+    // 重排便签位置
+    const updatedNotes = notes.map(note => {
+      if (!note.isInitialPosition) return note;
+
+      const index = initialNotes.indexOf(note);
+      if (index === -1) return note;
+
+      const row = Math.floor(index / notesPerRow);
+      const col = index % notesPerRow;
+
+      return {
+        ...note,
+        boardX: startX + col * (noteWidth + spacing),
+        boardY: startY + row * (256 + spacing), // 假设标准高度256
+        isInitialPosition: false // 重排后标记为非初始位置
+      };
+    });
+
+    // 批量更新便签
+    updatedNotes.forEach(note => {
+      onUpdateNote(note);
+    });
+
+    // 标记已重排
+    setHasRearranged(true);
+    console.log('重排完成，已更新', initialNotes.length, '个便签');
+  }, [notes, onUpdateNote, hasRearranged]);
+
+  // 当进入board视图时重排初始位置的便签
+  useEffect(() => {
+    // 延迟执行，确保数据完全加载和DOM渲染完成
+    const timer = setTimeout(() => {
+      rearrangeInitialNotes();
+    }, 500); // 增加延迟时间
+    return () => clearTimeout(timer);
+  }, [notes.length]); // 当notes数量改变时重新执行
+
   // 获取连接点位置
   const getConnectionPoint = (note: Note, side: 'top' | 'right' | 'bottom' | 'left', isDragging: boolean, dragOffset: { x: number; y: number }) => {
     const x = note.boardX + (isDragging ? dragOffset.x : 0);
@@ -931,26 +1006,8 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEditMode]);
 
-  // Track transform changes and notify parent (only when transform actually changes)
-  const prevTransformRef = useRef<{ x: number, y: number, scale: number }>(transform);
+  // Track transform changes for restoration detection only (position saving moved to pointer up)
   const isRestoringRef = useRef(false);
-  
-  useEffect(() => {
-    // Only call onTransformChange if transform actually changed and we're not restoring
-    if (onTransformChange && !isRestoringRef.current) {
-      const prev = prevTransformRef.current;
-      if (Math.abs(prev.x - transform.x) > 0.01 || 
-          Math.abs(prev.y - transform.y) > 0.01 || 
-          Math.abs(prev.scale - transform.scale) > 0.001) {
-        onTransformChange(transform.x, transform.y, transform.scale);
-        prevTransformRef.current = { ...transform };
-      }
-    } else if (isRestoringRef.current) {
-      // Update ref after restoration
-      prevTransformRef.current = { ...transform };
-      isRestoringRef.current = false;
-    }
-  }, [transform, onTransformChange]);
 
   // Navigate to specific coordinates when navigateToCoords is set, or restore saved transform
   useEffect(() => {
@@ -1000,14 +1057,18 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
       
       requestAnimationFrame(animate);
     } else if (!navigateToCoords && containerRef.current) {
-      // If no navigate coords, use calculated initial transform
+      // Only restore to initial transform if this is the first load (not during user interaction)
+      // This prevents resetting user's manual transform changes
       const initial = calculateInitialTransform();
-      if (Math.abs(initial.x - transform.x) > 0.01 || 
-          Math.abs(initial.y - transform.y) > 0.01 || 
+      if (Math.abs(initial.x - transform.x) > 0.01 ||
+          Math.abs(initial.y - transform.y) > 0.01 ||
           Math.abs(initial.scale - transform.scale) > 0.001) {
-        isRestoringRef.current = true;
-        setTransform(initial);
-        onNavigateComplete?.();
+        // Only restore if transform is still at default (0,0,1) - meaning it's never been set by user
+        if (transform.x === 0 && transform.y === 0 && transform.scale === 1) {
+          isRestoringRef.current = true;
+          setTransform(initial);
+          onNavigateComplete?.();
+        }
       }
     }
   }, [navigateToCoords, containerRef, transform, onNavigateComplete, calculateInitialTransform]);
@@ -1049,11 +1110,11 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
           mergeOutput: true,    // Flatten all results to single object
           reviveValues: true
         });
-
+        
         // Extract GPS coordinates - prioritize library-calculated standard values
         let lat = null;
         let lng = null;
-
+        
         if (output) {
           // Primary: Use library-calculated standard latitude/longitude (most compatible)
           if (typeof output.latitude === 'number' && typeof output.longitude === 'number') {
@@ -1066,12 +1127,6 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
             if (typeof output.GPSLatitude === 'number' && typeof output.GPSLongitude === 'number') {
               lat = output.GPSLatitude;
               lng = output.GPSLongitude;
-            }
-          }
-              const latRefKey = keys.find(k => k.toLowerCase().includes('lat') && k.toLowerCase().includes('ref'));
-              const lngRefKey = keys.find(k => (k.toLowerCase().includes('lng') || k.toLowerCase().includes('lon')) && k.toLowerCase().includes('ref'));
-              if (latRefKey && exifData[latRefKey] === 'S') lat = -lat;
-              if (lngRefKey && exifData[lngRefKey] === 'W') lng = -lng;
             }
           }
         }
@@ -1645,72 +1700,27 @@ const createNoteAtCenter = (variant: 'compact') => {
      const noteHeight = variant === 'compact' ? 180 : 256;
      const spacing = 50; // Spacing between new note and existing content (reduced from 100)
 
-     let spawnX = centerX - noteWidth / 2;
-     let spawnY = centerY - noteHeight / 2;
+     // 使用指针位置直接放置便签
+     let spawnX = nextNotePosition.x;
+     let spawnY = nextNotePosition.y;
 
-     // New logic: detect bounds of existing content, add to the right or start new row if too wide
-     if (notes.length > 0) {
-        // Calculate bounds of all existing notes
-        let minX = Infinity;
-        let minY = Infinity;
-        let maxX = -Infinity;
-        let maxY = -Infinity;
-        
-        notes.forEach(note => {
-          // Use actual note width based on variant (must match rendered sizes)
-          // compact: 180px, text/standard: 256px
-          const existingNoteWidth = (note.variant === 'compact') ? 180 : 256;
-          const existingNoteHeight = (note.variant === 'compact') ? 180 : 256;
-          const noteLeft = note.boardX;
-          const noteRight = noteLeft + existingNoteWidth;
-          const noteTop = note.boardY;
-          const noteBottom = noteTop + existingNoteHeight;
-          
-          if (noteLeft < minX) minX = noteLeft;
-          if (noteTop < minY) minY = noteTop;
-          if (noteRight > maxX) maxX = noteRight;
-          if (noteBottom > maxY) maxY = noteBottom;
-        });
-        
-        // Ensure we have valid values before using them
-        if (maxX !== -Infinity && minY !== Infinity) {
-          // Check aspect ratio - if too wide, show warning and prevent note creation
-          const contentWidth = maxX - minX;
-          const contentHeight = maxY - minY;
-          const aspectRatioThreshold = 2.5; // If width/height > 2.5, show warning
-          const aspectRatio = contentHeight > 0 ? contentWidth / contentHeight : 0;
-          
-          if (aspectRatio > aspectRatioThreshold) {
-            // Show warning and prevent note creation
-            alert('先整理一下便利贴吧');
-            if (onSwitchToBoardView) {
-              onSwitchToBoardView();
-            }
-            return; // Don't create the note
-          }
-          
-          // Continue current row: add to the right, aligned to top
-          spawnX = maxX + spacing;
-          spawnY = minY;
-        }
-        
-        console.log('createNoteAtCenter calculation:', {
-          variant,
-          noteWidth,
-          noteHeight,
-          maxX,
-          minY,
-          spacing,
-          spawnX,
-          spawnY,
-          existingNotesCount: notes.length,
-          notesPositions: notes.map(n => ({ 
-            id: n.id, 
-            boardX: n.boardX, 
-            boardY: n.boardY, 
-            variant: n.variant,
-            calculatedRight: n.boardX + ((n.variant === 'compact') ? 180 : 500)
-          }))
+     // 更新指针位置：向右移动一个便签宽度 + 间距
+     const newNextX = nextNotePosition.x + noteWidth + spacing;
+     const newNextY = nextNotePosition.y;
+
+     // 检查是否需要换行（超出容器宽度）
+     const containerWidth = containerRef.current?.getBoundingClientRect().width || 1200;
+     if (newNextX + noteWidth > containerWidth - 100) { // 留出右边距
+       // 换行：回到左边，往下移动一行
+       setNextNotePosition({
+         x: 100,
+         y: nextNotePosition.y + noteHeight + spacing
+       });
+     } else {
+       // 继续当前行
+       setNextNotePosition({
+         x: newNextX,
+         y: newNextY
         });
      }
 
@@ -1749,6 +1759,16 @@ const createNoteAtCenter = (variant: 'compact') => {
     const newY = viewCenterY - worldY * newScale;
     
     setTransform({ x: newX, y: newY, scale: newScale });
+
+    // 防抖保存缩放后的位置（500ms后保存，避免频繁保存）
+    if (zoomSaveTimeoutRef.current) {
+      clearTimeout(zoomSaveTimeoutRef.current);
+    }
+    zoomSaveTimeoutRef.current = setTimeout(() => {
+      if (onTransformChange) {
+        onTransformChange(newX, newY, newScale);
+      }
+    }, 500);
   };
 
   const handleWheel = (e: WheelEvent) => {
@@ -1779,6 +1799,9 @@ const createNoteAtCenter = (variant: 'compact') => {
     transformX: number;
     transformY: number;
   } | null>(null);
+
+  // 跟踪上一次的距离和时间，用于计算速度
+  const lastTouchMoveRef = useRef<{ distance: number; time: number } | null>(null);
   
   const [isZooming, setIsZooming] = useState(false);
   
@@ -1823,6 +1846,12 @@ const createNoteAtCenter = (variant: 'compact') => {
             transformX: transform.x,
             transformY: transform.y
           };
+
+          // 初始化速度跟踪
+          lastTouchMoveRef.current = {
+            distance,
+            time: Date.now()
+          };
         }
       }
     };
@@ -1843,7 +1872,41 @@ const createNoteAtCenter = (variant: 'compact') => {
           Math.pow(touch2.clientX - touch1.clientX, 2) + 
           Math.pow(touch2.clientY - touch1.clientY, 2)
         );
-        const scaleRatio = distance / touchStartRef.current.distance;
+
+        // 计算速度（距离变化率）
+        let scaleRatio = distance / touchStartRef.current.distance;
+        const currentTime = Date.now();
+
+        if (lastTouchMoveRef.current) {
+          const timeDelta = currentTime - lastTouchMoveRef.current.time;
+          const distanceDelta = distance - lastTouchMoveRef.current.distance;
+          
+          // 如果时间间隔很小（小于16ms，约60fps），使用速度敏感缩放
+          if (timeDelta > 0 && timeDelta < 100) {
+            // 计算距离变化速度（像素/毫秒）
+            const speed = Math.abs(distanceDelta) / timeDelta;
+            
+            // 速度越快，缩放因子越大（最大2倍加速）
+            // 速度阈值：10像素/毫秒为基准速度
+            const speedFactor = Math.min(1 + (speed / 10), 2);
+            
+            // 应用速度因子：放大时加速放大，缩小时加速缩小
+            if (distanceDelta > 0) {
+              // 放大：增加缩放比例
+              scaleRatio = 1 + (scaleRatio - 1) * speedFactor;
+            } else {
+              // 缩小：减少缩放比例
+              scaleRatio = 1 + (scaleRatio - 1) * speedFactor;
+            }
+          }
+        }
+
+        // 更新上一次的距离和时间
+        lastTouchMoveRef.current = {
+          distance,
+          time: currentTime
+        };
+
         const newScale = Math.min(Math.max(0.2, touchStartRef.current.scale * scaleRatio), 4);
         
         // 计算当前两指中心点（相对于容器）
@@ -1873,6 +1936,7 @@ const createNoteAtCenter = (variant: 'compact') => {
     const handleTouchEnd = (e: TouchEvent) => {
       if (e.touches.length < 2) {
         touchStartRef.current = null;
+        lastTouchMoveRef.current = null; // 清理速度跟踪
         // 延迟重置缩放状态，防止触发误点击
         setTimeout(() => {
           setIsZooming(false);
@@ -1903,6 +1967,8 @@ const createNoteAtCenter = (variant: 'compact') => {
       
       if (isZoomGesture) {
         e.preventDefault();
+        // 速度敏感的缩放：滚轮滚动越快，缩放越多
+        // deltaY越大，缩放速度越快，更符合用户直觉
         const zoomSensitivity = 0.001;
         const delta = -e.deltaY * zoomSensitivity;
         const currentScale = transform.scale;
@@ -1979,6 +2045,7 @@ const createNoteAtCenter = (variant: 'compact') => {
       // Allow panning in both edit and non-edit modes, but not when dragging notes or frames
       if (e.button === 0 && !draggingNoteId && !resizingFrame && !draggingFrameId) { 
           setIsPanning(true);
+          setIsDraggingBackground(true); // 标记开始拖拽背景
           const startPos = { x: e.clientX, y: e.clientY };
           panStartPos.current = startPos; // Save the initial pan position
           lastMousePos.current = startPos;
@@ -2181,21 +2248,21 @@ const createNoteAtCenter = (variant: 'compact') => {
 
   const handleBoardPointerUp = (e: React.PointerEvent) => {
       // 优先处理需要释放状态的操作，避免提前返回导致状态未释放
-      
+
       // 如果正在调整Frame大小，结束调整
       if (resizingFrame) {
           setResizingFrame(null);
           (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
           return;
       }
-      
+
       // 如果正在调整图片大小，结束调整
       if (resizingImage) {
           setResizingImage(null);
           (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
           return;
       }
-      
+
       // 如果正在拖动Frame，结束拖动
       if (draggingFrameId) {
           setDraggingFrameId(null);
@@ -2256,6 +2323,12 @@ const createNoteAtCenter = (variant: 'compact') => {
           lastMousePos.current = null;
           panStartPos.current = null; // Clear pan start position
           (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+
+          // 如果刚才在拖拽背景，现在保存位置（类似MapPositionTracker的moveend事件）
+          if (isDraggingBackground && onTransformChange) {
+              onTransformChange(transform.x, transform.y, transform.scale);
+          }
+          setIsDraggingBackground(false);
       }
       
       // 点击空白处的退出逻辑（只在非拖动/非缩放状态下触发）
@@ -4357,13 +4430,19 @@ const createNoteAtCenter = (variant: 'compact') => {
                       return;
                     }
                     
-                    // Delete all selected notes immediately
+                    // Use batch delete for better performance when deleting multiple notes
+                    if (idsToDelete.length > 1 && onDeleteNotesBatch) {
+                      // Use optimized batch delete
+                      onDeleteNotesBatch(idsToDelete);
+                    } else {
+                      // Fallback to individual deletes for single notes or when batch delete not available
                     idsToDelete.forEach(id => {
                       console.log('Deleting note:', id);
                       if (onDeleteNote) {
                         onDeleteNote(id);
                       }
                     });
+                    }
                     
                     // Clear selection after deletion
                     setSelectedNoteIds(new Set());

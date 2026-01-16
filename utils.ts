@@ -372,12 +372,12 @@ export const exportToJpegCentered = async (elementId: string, fileName: string, 
     // 隐藏所有 UI 元素（包括 absolute、fixed 定位的元素）
     const uiElements = document.querySelectorAll('.fixed, .absolute, [class*="z-["]');
     const originalDisplays: string[] = [];
-
+    
     uiElements.forEach((el, index) => {
       const htmlEl = el as HTMLElement;
       originalDisplays[index] = htmlEl.style.display;
       // 只隐藏按钮、控件、下拉菜单等UI元素，不隐藏地图容器
-      if (htmlEl.tagName === 'BUTTON' ||
+      if (htmlEl.tagName === 'BUTTON' || 
           htmlEl.className.includes('pointer-events-auto') ||
           htmlEl.className.includes('z-[500]') ||
           htmlEl.className.includes('z-[400]') ||

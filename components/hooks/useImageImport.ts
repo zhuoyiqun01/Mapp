@@ -393,7 +393,8 @@ export const useImageImport = ({
           variant: 'image',
           createdAt: Date.now(),
           boardX: 0,
-          boardY: 0
+          boardY: 0,
+          isInitialPosition: true
         };
 
         // Calculate board position (same logic as handleLongPress)

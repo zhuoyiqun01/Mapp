@@ -115,9 +115,10 @@ const MenuDropdown: React.FC<{
   onExportFullProject: (project: Project) => void;
   onCompressImages: (project: Project) => void;
   onCheckData?: () => Promise<void>;
+  onCleanupBrokenReferences?: (project: Project) => Promise<void>;
   onDelete: (id: string) => void;
   onClose: () => void;
-}> = ({ project, onRename, onDuplicate, onExportData, onExportFullProject, onCompressImages, onCheckData, onDelete, onClose }) => {
+}> = ({ project, onRename, onDuplicate, onExportData, onExportFullProject, onCompressImages, onCheckData, onCleanupBrokenReferences, onDelete, onClose }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<'bottom' | 'top'>('bottom');
 
@@ -198,6 +199,20 @@ const MenuDropdown: React.FC<{
           <div className="h-px bg-gray-100 my-1" />
         </>
       )}
+      {onCleanupBrokenReferences && (
+        <>
+          <button
+            onClick={async () => {
+              await onCleanupBrokenReferences(project);
+              onClose();
+            }}
+            className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+          >
+            <Trash2 size={16} /> Clean Broken Links
+          </button>
+          <div className="h-px bg-gray-100 my-1" />
+        </>
+      )}
       <button 
         onClick={(e) => { e.stopPropagation(); onDelete(project.id); onClose(); }}
         className="w-full text-left px-4 py-2.5 text-sm hover:bg-red-50 text-red-500 flex items-center gap-2"
@@ -223,6 +238,7 @@ interface ProjectManagerProps {
   activeProject?: Project | null;
   onExportCSV?: (project: Project) => void;
   onCheckData?: () => Promise<void>;
+  onCleanupBrokenReferences?: (project: Project) => Promise<void>;
   syncStatus?: SyncStatus;
   themeColor?: string;
   onThemeColorChange?: (color: string) => void;
@@ -246,6 +262,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   activeProject,
   onExportCSV,
   onCheckData,
+  onCleanupBrokenReferences,
   themeColor = DEFAULT_THEME_COLOR,
   onThemeColorChange,
   currentMapStyle = 'carto-light-nolabels',
@@ -1378,6 +1395,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                         onExportFullProject={handleExportFullProject}
                         onCompressImages={handleCompressImages}
                         onCheckData={onCheckData}
+                        onCleanupBrokenReferences={onCleanupBrokenReferences}
                         onDelete={onDeleteProject}
                         onClose={() => setOpenMenuId(null)}
                       />

@@ -630,7 +630,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         variant: 'image',
         createdAt: Date.now(),
         boardX: 0,
-        boardY: 0
+        boardY: 0,
+        isInitialPosition: true
       };
 
       // Add the note
@@ -794,7 +795,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       id: generateId(),
       createdAt: Date.now(),
       coords: coords,
-      fontSize: 3, 
+      fontSize: 3,
       emoji: '', // No default emoji
       text: '',
       images: [],
@@ -803,7 +804,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       isFavorite: false,
       color: '#FFFDF5',
       boardX: boardX,
-      boardY: boardY
+      boardY: boardY,
+      isInitialPosition: true
     };
     setEditingNote(newNote);
     setIsEditorOpen(true);

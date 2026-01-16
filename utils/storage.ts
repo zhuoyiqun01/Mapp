@@ -1442,6 +1442,52 @@ export async function loadNoteImages(note: Note): Promise<Note> {
   return loadedNote;
 }
 
+// 清理便签中不存在的图片和草图引用
+export async function cleanBrokenReferences(notes: Note[]): Promise<Note[]> {
+  const cleanedNotes: Note[] = [];
+
+  for (const note of notes) {
+    const cleanedNote = { ...note };
+
+    // 清理不存在的图片引用
+    if (note.images && note.images.length > 0) {
+      const validImages: string[] = [];
+      for (const imageRef of note.images) {
+        const imageId = extractImageId(imageRef);
+        if (imageId) {
+          // 检查图片是否存在
+          const imageData = await loadImage(imageId);
+          if (imageData) {
+            validImages.push(imageRef);
+          } else {
+            console.warn(`Removing broken image reference: ${imageRef} from note ${note.id}`);
+          }
+        } else {
+          // Base64 格式，直接保留
+          validImages.push(imageRef);
+        }
+      }
+      cleanedNote.images = validImages;
+    }
+
+    // 清理不存在的草图引用
+    if (note.sketch) {
+      const sketchId = extractImageId(note.sketch);
+      if (sketchId) {
+        const sketchData = await loadSketch(sketchId);
+        if (!sketchData) {
+          console.warn(`Removing broken sketch reference: ${note.sketch} from note ${note.id}`);
+          cleanedNote.sketch = undefined;
+        }
+      }
+    }
+
+    cleanedNotes.push(cleanedNote);
+  }
+
+  return cleanedNotes;
+}
+
 // 确保项目数据的完整性和兼容性
 function ensureProjectCompatibility(project: Project): Project {
   const fixedProject = { ...project };
