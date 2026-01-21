@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { get } from 'idb-keyval';
 
 interface UseAppStateReturn {
@@ -15,6 +15,12 @@ interface UseAppStateReturn {
   // Map import menu
   showMapImportMenu: boolean;
   setShowMapImportMenu: (show: boolean) => void;
+
+  // Border feature
+  showBorderPanel: boolean;
+  setShowBorderPanel: (show: boolean) => void;
+  borderGeoJSON: any | null;
+  setBorderGeoJSON: (data: any | null) => void;
 
   // File input ref
   mapViewFileInputRef: React.RefObject<HTMLInputElement>;
@@ -38,6 +44,8 @@ export const useAppState = (): UseAppStateReturn => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [sidebarButtonY, setSidebarButtonY] = useState(96);
   const [showMapImportMenu, setShowMapImportMenu] = useState(false);
+  const [showBorderPanel, setShowBorderPanel] = useState(false);
+  const [borderGeoJSON, setBorderGeoJSON] = useState<any | null>(null);
   const [isRunningCleanup, setIsRunningCleanup] = useState(false);
   const [showCleanupMenu, setShowCleanupMenu] = useState(false);
 
@@ -75,6 +83,10 @@ export const useAppState = (): UseAppStateReturn => {
     setSidebarButtonY,
     showMapImportMenu,
     setShowMapImportMenu,
+    showBorderPanel,
+    setShowBorderPanel,
+    borderGeoJSON,
+    setBorderGeoJSON,
     mapViewFileInputRef,
     isRunningCleanup,
     setIsRunningCleanup,

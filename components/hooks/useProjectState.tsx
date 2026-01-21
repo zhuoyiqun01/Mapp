@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Note, ViewMode, Project } from '../types';
+import { Note, ViewMode, Project } from '../../types';
 import {
   loadAllProjects,
   loadProjectSummaries,
@@ -24,7 +24,7 @@ interface UseProjectStateReturn {
 
   // Actions
   loadProjects: () => Promise<void>;
-  createProject: (projectData: { name: string; type: 'mapping' | 'board'; backgroundImage?: string }) => Promise<string>;
+  createProject: (projectData: { name: string; type: 'map' | 'image'; backgroundImage?: string }) => Promise<string>;
   selectProject: (projectId: string) => Promise<void>;
   updateProject: (project: Project) => Promise<void>;
   deleteProject: (projectId: string) => Promise<void>;
@@ -34,6 +34,9 @@ interface UseProjectStateReturn {
   deleteNoteFromProject: (projectId: string, noteId: string) => Promise<void>;
   setCurrentProjectId: (id: string | null) => void;
   setActiveProject: (project: Project | null) => void;
+  setIsLoading: (loading: boolean) => void;
+  setIsLoadingProject: (loading: boolean) => void;
+  setLoadingProgress: (progress: number) => void;
 }
 
 export const useProjectState = (): UseProjectStateReturn => {
@@ -140,18 +143,18 @@ export const useProjectState = (): UseProjectStateReturn => {
   }, [summariesToProjects]);
 
   // Create new project
-  const createProject = useCallback(async (projectData: { name: string; type: 'mapping' | 'board'; backgroundImage?: string }): Promise<string> => {
+  const createProject = useCallback(async (projectData: { name: string; type: 'map' | 'image'; backgroundImage?: string }): Promise<string> => {
     const newProject: Project = {
       id: `project_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       name: projectData.name,
       type: projectData.type,
-      createdAt: new Date().toISOString(),
+      createdAt: Date.now(), // Changed to number to match Project type
       backgroundImage: projectData.backgroundImage,
       notes: [],
       frames: [],
       connections: [],
-      backgroundOpacity: 1,
-      themeColor: '#3B82F6'
+      version: Date.now(),
+      storageVersion: 2
     };
 
     await saveProject(newProject);
@@ -163,9 +166,9 @@ export const useProjectState = (): UseProjectStateReturn => {
       name: newProject.name,
       type: newProject.type,
       createdAt: newProject.createdAt,
-      noteCount: 0,
+      notesCount: 0,
       hasImages: false,
-      storageSize: 0
+      hasSketches: false
     }]);
 
     return newProject.id;
@@ -221,12 +224,12 @@ export const useProjectState = (): UseProjectStateReturn => {
       id: newProjectId,
       name: `${project.name} (Copy)`,
       type: project.type,
-      createdAt: new Date().toISOString(),
+      createdAt: Date.now(),
       backgroundImage: project.backgroundImage,
       notes: project.notes.map(note => ({
         ...note,
         id: `note_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        createdAt: new Date().toISOString()
+        createdAt: Date.now()
       })),
       frames: project.frames?.map(frame => ({
         ...frame,
@@ -249,9 +252,9 @@ export const useProjectState = (): UseProjectStateReturn => {
       name: duplicatedProject.name,
       type: duplicatedProject.type,
       createdAt: duplicatedProject.createdAt,
-      noteCount: duplicatedProject.notes.length,
+      notesCount: duplicatedProject.notes.length,
       hasImages: duplicatedProject.notes.some(note => note.images && note.images.length > 0),
-      storageSize: 0 // Will be calculated when needed
+      hasSketches: duplicatedProject.notes.some(note => !!note.sketch)
     }]);
   }, []);
 
@@ -317,7 +320,10 @@ export const useProjectState = (): UseProjectStateReturn => {
     updateNoteInProject,
     deleteNoteFromProject,
     setCurrentProjectId,
-    setActiveProject
+    setActiveProject,
+    setIsLoading,
+    setIsLoadingProject,
+    setLoadingProgress
   };
 };
 

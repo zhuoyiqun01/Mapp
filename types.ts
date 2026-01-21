@@ -75,6 +75,8 @@ export interface Project {
   standardSizeScale?: number; // Global scale factor for standard note sizes (default 1)
   version?: number; // Version number for incremental sync
   storageVersion?: number; // Storage format version
+  backgroundOpacity?: number; // Background opacity for board view
+  themeColor?: string; // Theme color for project
 }
 
 export type ViewMode = 'map' | 'board' | 'table' | 'gallery';

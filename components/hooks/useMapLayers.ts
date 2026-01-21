@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Note, Frame } from '../types';
+import { Note, Frame } from '../../types';
 
 interface UseMapLayersProps {
   notes: Note[];

@@ -1,9 +1,19 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, ImageOverlay, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, ImageOverlay, GeoJSON, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
+
+const MapClickHandler = ({ onClick }: { onClick: () => void }) => {
+  useMapEvents({
+    click: () => {
+      onClick();
+    },
+  });
+  return null;
+};
 import { Note, Coordinates, Project, Frame } from '../types';
 import { MAP_TILE_URL, MAP_TILE_URL_FALLBACK, MAP_SATELLITE_URL, MAP_ATTRIBUTION, THEME_COLOR, THEME_COLOR_DARK, MAP_STYLE_OPTIONS } from '../constants';
+import { searchRegionBoundaries, fetchRelationGeometry, OverpassElement } from '../utils/overpass';
 import { useMapPosition } from '@/components/hooks/useMapPosition';
 import { useGeolocation } from '@/components/hooks/useGeolocation';
 import { useImageImport } from '@/components/hooks/useImageImport';
@@ -129,7 +139,7 @@ const CustomHorizontalSlider: React.FC<{
     </div>
   );
 };
-import { Search, Locate, Loader2, X, Check, Satellite, Plus, Image as ImageIcon, FileJson, Type, Layers, Settings } from 'lucide-react';
+import { Search, Locate, Loader2, X, Check, Satellite, Plus, Image as ImageIcon, FileJson, Type, Layers, Settings, Globe } from 'lucide-react';
 import exifr from 'exifr';
 import { NoteEditor } from './NoteEditor';
 import { generateId, fileToBase64 } from '../utils';
@@ -161,42 +171,21 @@ interface MapViewProps {
   onMapStyleChange?: (styleId: string) => void;
   showImportMenu?: boolean;
   setShowImportMenu?: (show: boolean) => void;
-          }
-          
+  showBorderPanel?: boolean;
+  setShowBorderPanel?: (show: boolean) => void;
+  borderGeoJSON?: any | null;
+  setBorderGeoJSON?: (data: any | null) => void;
+  onMapClick?: () => void;
+  isUIVisible?: boolean;
+}
+
 // MapLongPressHandler moved to components/map/MapLongPressHandler.tsx
 
 
 
 // Component to block map container from receiving pointer events in capture phase
-const SearchBarContainer = ({ children }: { children: React.ReactNode }) => {
-    const containerRef = useRef<HTMLDivElement>(null);
-    
-    useEffect(() => {
-        const container = containerRef.current;
-        if (!container) return;
-        
-        const handleCaptureStart = (e: Event) => {
-            // Stop event from reaching map container in capture phase
-            e.stopPropagation();
-        };
-        
-        // Use capture phase to intercept events before they reach map container
-        // Mark as passive since we only call stopPropagation(), not preventDefault()
-        container.addEventListener('mousedown', handleCaptureStart, { capture: true, passive: true });
-        container.addEventListener('touchstart', handleCaptureStart, { capture: true, passive: true });
-        container.addEventListener('pointerdown', handleCaptureStart, { capture: true, passive: true });
-        
-        return () => {
-            container.removeEventListener('mousedown', handleCaptureStart, { capture: true });
-            container.removeEventListener('touchstart', handleCaptureStart, { capture: true });
-            container.removeEventListener('pointerdown', handleCaptureStart, { capture: true });
-        };
-    }, []);
-    
-    return <div ref={containerRef}>{children}</div>;
-};
 
-export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, projectId, onNavigateComplete, onSwitchToBoardView, themeColor = THEME_COLOR, mapStyleId = 'carto-light-nolabels', onMapStyleChange, showImportMenu, setShowImportMenu }) => {
+export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, projectId, onNavigateComplete, onSwitchToBoardView, themeColor = THEME_COLOR, mapStyleId = 'carto-light-nolabels', onMapStyleChange, showImportMenu, setShowImportMenu, showBorderPanel, setShowBorderPanel, borderGeoJSON, setBorderGeoJSON, onMapClick, isUIVisible = true }) => {
   if (!project) {
     return null;
         }
@@ -259,10 +248,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
     return (now - photoTime) <= thirtyMinutesInMs;
   };
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isSearching, setIsSearching] = useState(false);
-  const [searchResults, setSearchResults] = useState<any[]>([]);
-  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
   const mapInitRef = useRef<WeakSet<L.Map>>(new WeakSet());
   
@@ -432,6 +417,129 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const [hasRetriedLocation, setHasRetriedLocation] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
 
+  // Border feature local states
+  const [borderSearchQuery, setBorderSearchQuery] = useState('');
+  const [borderSearchResults, setBorderSearchResults] = useState<any[]>([]);
+  const [isSearchingBorder, setIsSearchingBorder] = useState(false);
+  const [borderSearchError, setBorderSearchError] = useState<string | null>(null);
+  const [borderSearchMode, setBorderSearchMode] = useState<'region' | 'place'>('region');
+  
+  // Ghost note state for search results
+  const [pendingPlaceNote, setPendingPlaceNote] = useState<{
+    coords: { lat: number, lng: number },
+    name: string
+  } | null>(null);
+
+  const handleBorderSearch = async () => {
+    if (!borderSearchQuery.trim()) return;
+    
+    setIsSearchingBorder(true);
+    setBorderSearchError(null);
+    setBorderSearchResults([]);
+    
+    try {
+      const query = borderSearchQuery.trim();
+      // Use dynamic limit and address details
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=15&addressdetails=1${borderSearchMode === 'region' ? '&featuretype=settlement,boundary,territory' : ''}`;
+      
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Search failed');
+      const results = await response.json();
+      
+      if (results.length === 0) {
+        setBorderSearchError('No matching results found');
+      } else {
+        // Sort results to prioritize relations and ways for region mode
+        const sortedResults = borderSearchMode === 'region'
+          ? [...results].sort((a, b) => {
+              const score = (item: any) => (item.osm_type === 'relation' ? 2 : item.osm_type === 'way' ? 1 : 0);
+              return score(b) - score(a);
+            })
+          : results;
+        setBorderSearchResults(sortedResults);
+      }
+    } catch (err) {
+      console.error('Search failed:', err);
+      setBorderSearchError('Search failed, please try again');
+    } finally {
+      setIsSearchingBorder(false);
+    }
+  };
+
+  const handleSelectBorder = async (result: any) => {
+    setIsSearchingBorder(true);
+    try {
+      if (borderSearchMode === 'place' || result.osm_type === 'node') {
+        // For places or nodes, just fly to the location
+        const lat = parseFloat(result.lat);
+        const lon = parseFloat(result.lon);
+        const placeName = result.display_name.split(',')[0];
+
+        if (mapInstance) {
+          mapInstance.flyTo([lat, lon], 17, { duration: 1.5 });
+        }
+
+        // Check if a note already exists at this approximate location (within ~10m)
+        const isDuplicate = notes.some(n => 
+          Math.abs(n.coords.lat - lat) < 0.0001 && 
+          Math.abs(n.coords.lng - lon) < 0.0001
+        );
+
+        if (!isDuplicate) {
+          setPendingPlaceNote({ lat, lng: lon, name: placeName });
+        }
+      } else {
+        // For regions, fetch geometry and draw border
+        const geojson = await fetchRelationGeometry(result.osm_id, result.osm_type);
+        if (setBorderGeoJSON) {
+          setBorderGeoJSON(geojson);
+        }
+        
+        // Auto-zoom to the border
+        if (mapInstance && geojson) {
+          const L = await import('leaflet');
+          const layer = L.default.geoJSON(geojson);
+          mapInstance.fitBounds(layer.getBounds(), { padding: [20, 20], duration: 1.5 });
+        }
+      }
+      
+      // Close panel after selection
+      if (setShowBorderPanel) setShowBorderPanel(false);
+      setBorderSearchResults([]);
+      setBorderSearchQuery('');
+    } catch (err) {
+      console.error('Search interaction failed:', err);
+      setBorderSearchError('Failed to fetch details');
+    } finally {
+      setIsSearchingBorder(false);
+    }
+  };
+
+  const handleConvertPendingToNote = () => {
+    if (!pendingPlaceNote) return;
+
+    const newNote: Note = {
+      id: generateId(),
+      coords: { lat: pendingPlaceNote.lat, lng: pendingPlaceNote.lng },
+      text: pendingPlaceNote.name,
+      emoji: '📍',
+      fontSize: 3,
+      images: [],
+      tags: [],
+      variant: 'standard',
+      createdAt: Date.now(),
+      boardX: 0,
+      boardY: 0
+    };
+
+    onAddNote(newNote);
+    setPendingPlaceNote(null);
+  };
+
+  const handleToggleBorderPanel = () => {
+    if (setShowBorderPanel) setShowBorderPanel(!showBorderPanel);
+  };
+
   
   // Current marker index being viewed
 
@@ -462,36 +570,17 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   } = useGeolocation(isMapMode);
 
   // Auto-hide location error after 2 seconds
-  const locationErrorTimerRef = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
     if (locationError) {
-      // Clear any existing timer
-      if (locationErrorTimerRef.current) {
-        clearTimeout(locationErrorTimerRef.current);
-      }
-
-      // Set new timer for auto-hide
-      locationErrorTimerRef.current = setTimeout(() => {
-        setLocationError(null);
+      const timer = setTimeout(() => {
+        // We can't directly set locationError to null since it's managed by the hook
+        // Instead, we'll trigger a new location request to clear the error state
         setHasRetriedLocation(false);
-        setIsLocating(false);
-        locationErrorTimerRef.current = null;
       }, 2000);
 
-      return () => {
-        if (locationErrorTimerRef.current) {
-          clearTimeout(locationErrorTimerRef.current);
-          locationErrorTimerRef.current = null;
-        }
-      };
-    } else {
-      // Clear timer if no error
-      if (locationErrorTimerRef.current) {
-        clearTimeout(locationErrorTimerRef.current);
-        locationErrorTimerRef.current = null;
-      }
+      return () => clearTimeout(timer);
     }
-  }, [locationError, setLocationError]);
+  }, [locationError]);
 
   // Enhanced location request with auto-retry and navigation
   const handleLocateCurrentPosition = useCallback(async () => {
@@ -630,8 +719,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         variant: 'image',
         createdAt: Date.now(),
         boardX: 0,
-        boardY: 0,
-        isInitialPosition: true
+        boardY: 0
       };
 
       // Add the note
@@ -795,7 +883,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       id: generateId(),
       createdAt: Date.now(),
       coords: coords,
-      fontSize: 3,
+      fontSize: 3, 
       emoji: '', // No default emoji
       text: '',
       images: [],
@@ -804,8 +892,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       isFavorite: false,
       color: '#FFFDF5',
       boardX: boardX,
-      boardY: boardY,
-      isInitialPosition: true
+      boardY: boardY
     };
     setEditingNote(newNote);
     setIsEditorOpen(true);
@@ -1012,41 +1099,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     }
   };
 
-  useEffect(() => {
-      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-      if (!searchQuery.trim()) {
-          setSearchResults([]);
-          return;
-      }
-      setIsSearching(true);
-      searchTimeoutRef.current = setTimeout(async () => {
-          try {
-             const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=5&addressdetails=1`);
-             if (response.ok) {
-                 const data = await response.json();
-                 setSearchResults(data);
-             }
-          } catch (e) {
-             console.error(e);
-          } finally {
-             setIsSearching(false);
-          }
-      }, 500); 
-      return () => {
-          if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-      };
-  }, [searchQuery]);
-
-  const selectSearchResult = (result: any) => {
-      if (mapInstance) {
-          const lat = parseFloat(result.lat);
-          const lon = parseFloat(result.lon);
-          mapInstance.flyTo([lat, lon], 16, { duration: 1.5 });
-          setSearchQuery('');
-          setSearchResults([]);
-      }
-  };
-
   // Map slider value (0.5-2.0) to actual pin size (0.2-1.2)
   const mapPinSize = (sliderValue: number): number => {
     // Linear mapping: 0.5 -> 0.2, 2.0 -> 1.2
@@ -1179,6 +1231,15 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       return a.coords.lng - b.coords.lng;
     });
   }, []);
+
+  const handleMapClickInternal = useCallback(() => {
+    if (pendingPlaceNote) {
+      setPendingPlaceNote(null);
+    }
+    if (onMapClick) {
+      onMapClick();
+    }
+  }, [pendingPlaceNote, onMapClick]);
   
   // Pin clustering distance threshold (in screen pixels)
   // Now controlled by user setting - removed constant, use clusterThreshold directly
@@ -1613,6 +1674,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       >
         <MapNavigationHandler coords={navigateToCoords} onComplete={onNavigateComplete} />
         <MapPositionTracker onPositionChange={handleMapPositionChange} />
+        <MapClickHandler onClick={handleMapClickInternal} />
         {isMapMode ? (
                <TileLayer 
                  key={effectiveMapStyle}
@@ -1634,6 +1696,70 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         )}
         
         <MapLongPressHandler onLongPress={handleLongPress} />
+
+        {pendingPlaceNote && (
+          <Marker
+            position={[pendingPlaceNote.lat, pendingPlaceNote.lng]}
+            icon={L.divIcon({
+              className: 'custom-pending-marker',
+              html: `
+                <div class="flex flex-col items-center">
+                  <div style="
+                    background-color: white;
+                    padding: 6px 12px;
+                    border-radius: 12px;
+                    box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+                    border: 2px solid ${themeColor};
+                    white-space: nowrap;
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: #1f2937;
+                    cursor: pointer;
+                    animation: bounce-in 0.3s ease-out;
+                  ">
+                    ${pendingPlaceNote.name}
+                  </div>
+                  <div style="
+                    width: 0;
+                    height: 0;
+                    border-left: 6px solid transparent;
+                    border-right: 6px solid transparent;
+                    border-top: 6px solid ${themeColor};
+                  "></div>
+                </div>
+                <style>
+                  @keyframes bounce-in {
+                    0% { transform: scale(0.3); opacity: 0; }
+                    70% { transform: scale(1.05); opacity: 1; }
+                    100% { transform: scale(1); }
+                  }
+                </style>
+              `,
+              iconSize: [120, 40],
+              iconAnchor: [60, 40]
+            })}
+            eventHandlers={{
+              click: (e) => {
+                L.DomEvent.stopPropagation(e);
+                handleConvertPendingToNote();
+              }
+            }}
+          />
+        )}
+
+        {isMapMode && borderGeoJSON && (
+          <GeoJSON 
+            data={borderGeoJSON} 
+            style={{ 
+              color: themeColor, 
+              weight: 3, 
+              opacity: 0.8,
+              fillColor: themeColor,
+              fillOpacity: 0.1,
+              dashArray: '5, 10'
+            }} 
+          />
+        )}
         
         {isMapMode && (
           <MapCenterHandler 
@@ -1648,6 +1774,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             showTextLabels={showTextLabels}
             pinSize={pinSize}
             themeColor={themeColor}
+            clusteredMarkers={clusteredMarkers}
           />
         )}
 
@@ -1724,11 +1851,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                       setLocationError(null);
                       setHasRetriedLocation(false);
                       setIsLocating(false);
-                      // 清除自动隐藏的定时器
-                      if (locationErrorTimerRef.current) {
-                        clearTimeout(locationErrorTimerRef.current);
-                        locationErrorTimerRef.current = null;
-                      }
                     }}
                     className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs rounded transition-colors"
                   >
@@ -1742,11 +1864,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                   setLocationError(null);
                   setHasRetriedLocation(false);
                   setIsLocating(false);
-                  // 清除自动隐藏的定时器
-                  if (locationErrorTimerRef.current) {
-                    clearTimeout(locationErrorTimerRef.current);
-                    locationErrorTimerRef.current = null;
-                  }
                 }}
                 className="text-red-500 hover:text-red-700 p-1 hover:bg-red-100 rounded-full transition-colors"
                 aria-label="关闭位置错误提示"
@@ -1757,36 +1874,19 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           </div>
         )}
         
-        {isMapMode && (showTextLabels ? (
-          // Text labels mode: show all markers individually without clustering
-          getFilteredNotes.map(note => (
-            <Marker
-              key={note.id}
-              position={[note.coords.lat, note.coords.lng]}
-              icon={createCustomIcon(note, undefined, showTextLabels, pinSize)}
-              zIndexOffset={note.isFavorite ? 200 : 0}
-              eventHandlers={{
-                click: (e) => {
-                  e.originalEvent?.stopPropagation();
-                  e.originalEvent?.stopImmediatePropagation();
-                  handleMarkerClick(note, e);
-                }
-              }}
-            />
-          ))
-        ) : clusteredMarkers.length > 0 && mapInstance ? (
+        {isMapMode && clusteredMarkers.length > 0 && mapInstance ? (
           // Show clustered markers (only show clusters with multiple markers, single markers shown separately)
           clusteredMarkers.map((cluster) => {
             if (cluster.notes.length === 1) {
               // Single marker, display directly
               const note = cluster.notes[0];
               return (
-          <Marker 
-            key={note.id} 
+          <Marker
+            key={note.id}
             position={[note.coords.lat, note.coords.lng]}
                   icon={createCustomIcon(note, undefined, showTextLabels, pinSize)}
                   zIndexOffset={note.isFavorite ? 200 : 0}
-                  eventHandlers={{ 
+                  eventHandlers={{
                     click: (e) => {
                       e.originalEvent?.stopPropagation();
                       e.originalEvent?.stopImmediatePropagation();
@@ -1802,12 +1902,12 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 .sort()
                 .join('-');
               return (
-                <Marker 
+                <Marker
                   key={`cluster-${clusterKey}`}
                   position={cluster.position}
                   icon={createCustomIcon(cluster.notes[0], cluster.notes.length, showTextLabels, pinSize)}
                   zIndexOffset={cluster.notes.some(note => note.isFavorite) ? 200 : 0}
-                  eventHandlers={{ 
+                  eventHandlers={{
                     click: (e) => {
                       e.originalEvent?.stopPropagation();
                       e.originalEvent?.stopImmediatePropagation();
@@ -1835,7 +1935,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               }}
             />
           ))
-        ))}
+        )}
 
         {/* Import preview markers */}
         {isMapMode && showImportDialog && importPreview.filter(p => !p.error && p.lat !== null && p.lng !== null).map((preview, index) => (
@@ -1881,24 +1981,156 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           />
         ))}
 
-        {isMapMode && (
-          <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none items-start">
+        {isMapMode && isUIVisible && (
+          <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none">
               {/* First Row: Main Controls */}
-              <MapControls 
-                onLocateCurrentPosition={handleLocateCurrentPosition}
-                isLocating={isLocating}
-                mapStyle={mapStyle}
-                onMapStyleChange={handleLocalMapStyleChange}
-                mapNotes={getFilteredNotes}
-                themeColor={themeColor}
-                showTextLabels={showTextLabels}
-                setShowTextLabels={setShowTextLabels}
-                pinSize={pinSize}
-                setPinSize={setPinSize}
-                clusterThreshold={clusterThreshold}
-                setClusterThreshold={setClusterThreshold}
-                onOpenSettings={() => setShowSettingsPanel(true)}
-              />
+              <div className="flex justify-between items-start w-full pointer-events-none">
+                <MapControls 
+                  onLocateCurrentPosition={handleLocateCurrentPosition}
+                  isLocating={isLocating}
+                  mapStyle={mapStyle}
+                  onMapStyleChange={handleLocalMapStyleChange}
+                  mapNotes={getFilteredNotes}
+                  themeColor={themeColor}
+                  showTextLabels={showTextLabels}
+                  setShowTextLabels={setShowTextLabels}
+                  pinSize={pinSize}
+                  setPinSize={setPinSize}
+                  clusterThreshold={clusterThreshold}
+                  setClusterThreshold={setClusterThreshold}
+                  onOpenSettings={() => setShowSettingsPanel(true)}
+                />
+
+                {/* Border & Frame Layer Buttons - Top Right (Consolidated) */}
+                <div className="flex items-center gap-1.5 sm:gap-2 pointer-events-auto">
+                  {/* Border Button & Panel */}
+                  <div className="relative">
+                    <button
+                      onClick={handleToggleBorderPanel}
+                      className={`bg-white p-2 sm:p-3 rounded-xl shadow-lg transition-all w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${
+                        borderGeoJSON ? 'text-white' : 'text-gray-700'
+                      } hover:scale-105 active:scale-95`}
+                      style={{ backgroundColor: borderGeoJSON ? themeColor : undefined }}
+                      title={borderGeoJSON ? "Clear Border" : "Region Border"}
+                    >
+                      {borderGeoJSON ? <X size={18} className="sm:w-5 sm:h-5" /> : <Search size={18} className="sm:w-5 sm:h-5" />}
+                    </button>
+
+                    {/* Border Search Panel */}
+                    {showBorderPanel && (
+                      <div
+                        className="absolute right-0 top-full mt-2 w-72 sm:w-80 bg-white rounded-2xl shadow-2xl border border-gray-100 p-4 z-[2000] animate-in fade-in slide-in-from-top-4"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="text-sm font-bold text-gray-800">Region Border</h3>
+                          <button onClick={() => setShowBorderPanel?.(false)} className="text-gray-400 hover:text-gray-600">
+                            <X size={16} />
+                          </button>
+                        </div>
+
+                        <div className="flex gap-2 mb-3">
+                          <div className="relative flex-1">
+                            <input
+                              autoFocus
+                              type="text"
+                              placeholder="Search region (e.g. London)"
+                              value={borderSearchQuery}
+                              onChange={(e) => setBorderSearchQuery(e.target.value)}
+                              onKeyDown={(e) => e.key === 'Enter' && handleBorderSearch()}
+                              className="w-full pl-3 pr-8 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                            />
+                            {isSearchingBorder && (
+                              <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                                <Loader2 size={14} className="animate-spin text-gray-400" />
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            onClick={handleBorderSearch}
+                            disabled={isSearchingBorder || !borderSearchQuery.trim()}
+                            className="px-3 py-2 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50"
+                            style={{ backgroundColor: themeColor }}
+                          >
+                            Search
+                          </button>
+                        </div>
+
+                        {borderSearchError && (
+                          <div className="text-xs text-red-500 mb-3 px-1">{borderSearchError}</div>
+                        )}
+
+                        {borderSearchResults.length > 0 && (
+                          <div className="max-h-60 overflow-y-auto border-results-list pr-1">
+                            <style>{`
+                              .border-results-list::-webkit-scrollbar {
+                                width: 4px;
+                              }
+                              .border-results-list::-webkit-scrollbar-track {
+                                background: transparent;
+                              }
+                              .border-results-list::-webkit-scrollbar-thumb {
+                                background: ${themeColor}44;
+                                border-radius: 10px;
+                              }
+                              .border-results-list::-webkit-scrollbar-thumb:hover {
+                                background: ${themeColor}88;
+                              }
+                            `}</style>
+                            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">Select a region:</div>
+                            <div className="space-y-1">
+                              {borderSearchResults.map((result: any) => (
+                                <button
+                                  key={`${result.osm_type}-${result.osm_id}`}
+                                  onClick={() => handleSelectBorder(result)}
+                                  className="w-full text-left p-2.5 hover:bg-gray-50 rounded-xl transition-colors border border-transparent hover:border-gray-100 flex flex-col gap-0.5"
+                                >
+                                  <div className="text-sm font-medium text-gray-800 flex items-baseline gap-1 flex-wrap">
+                                    <span>{result.display_name.split(',')[0]}</span>
+                                    {(() => {
+                                      const addr = result.address;
+                                      const self = result.display_name.split(',')[0].trim();
+                                      const parts = result.display_name.split(',').map((p: string) => p.trim());
+                                      
+                                      // 1. Try to find parent from address object with wide range of keys
+                                      let parent = addr?.city || addr?.town || addr?.village || 
+                                                  addr?.municipality || addr?.county || 
+                                                  addr?.state_district || addr?.city_district ||
+                                                  addr?.suburb || addr?.neighbourhood || addr?.state;
+
+                                      // 2. If parent is same as self or missing, fallback to display_name parts
+                                      if (!parent || parent === self) {
+                                        // Find the first part that isn't the name itself, isn't a number (zip), and isn't "China"
+                                        parent = parts.find((p: string) => 
+                                          p !== self && 
+                                          !/^\d+$/.test(p) && 
+                                          p !== '中国' && 
+                                          p !== 'China'
+                                        );
+                                      }
+                                      
+                                      if (parent) {
+                                return (
+                                  <span className="text-xs text-gray-400 font-normal italic">
+                                    , {parent}
+                                  </span>
+                                );
+                              }
+                                      return null;
+                                    })()}
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                </div>
+              </div>
 
               {/* Second Row: Sliders (hidden on small screens, available in settings) */}
               <div className="hidden sm:flex gap-1.5 sm:gap-2 pointer-events-auto"
@@ -1957,187 +2189,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                     />
                 </div>
               </div>
-
-              {/* Third Row: Search Bar */}
-              <SearchBarContainer>
-              <div 
-                  className="flex-1 max-w-md relative group pointer-events-auto"
-                  onPointerDown={(e) => {
-                      e.stopPropagation();
-                  }}
-                  onPointerMove={(e) => {
-                      e.stopPropagation();
-                  }}
-                  onPointerUp={(e) => {
-                      e.stopPropagation();
-                  }}
-                  onPointerCancel={(e) => {
-                      e.stopPropagation();
-                  }}
-                  onMouseDown={(e) => {
-                      e.stopPropagation();
-                  }}
-                  onMouseMove={(e) => {
-                      e.stopPropagation();
-                  }}
-                  onMouseUp={(e) => {
-                      e.stopPropagation();
-                  }}
-                  onTouchStart={(e) => {
-                      e.stopPropagation();
-                  }}
-                  onTouchMove={(e) => {
-                      e.stopPropagation();
-                  }}
-                  onTouchEnd={(e) => {
-                      e.stopPropagation();
-                  }}
-                  onDoubleClick={(e) => {
-                      e.stopPropagation();
-                  }}
-              >
-                  <div 
-                      className="bg-white rounded-xl shadow-lg flex items-center px-4 transition-shadow focus-within:shadow-xl relative z-10"
-                      onPointerDown={(e) => {
-                          e.stopPropagation();
-                      }}
-                      onPointerMove={(e) => {
-                          e.stopPropagation();
-                      }}
-                      onPointerUp={(e) => {
-                          e.stopPropagation();
-                      }}
-                      onMouseDown={(e) => {
-                          e.stopPropagation();
-                      }}
-                      onMouseMove={(e) => {
-                          e.stopPropagation();
-                      }}
-                      onMouseUp={(e) => {
-                          e.stopPropagation();
-                      }}
-                      onTouchStart={(e) => {
-                          e.stopPropagation();
-                      }}
-                      onTouchMove={(e) => {
-                          e.stopPropagation();
-                      }}
-                      onTouchEnd={(e) => {
-                          e.stopPropagation();
-                      }}
-                  >
-                      <Search size={18} className="text-gray-400 flex-shrink-0" />
-                      <input 
-                          type="text" 
-                          placeholder="Search city, place..." 
-                          className="w-full p-3 bg-transparent border-none outline-none text-gray-700 placeholder-gray-400"
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                          onPointerDown={(e) => {
-                              e.stopPropagation();
-                          }}
-                          onPointerMove={(e) => {
-                              e.stopPropagation();
-                          }}
-                          onPointerUp={(e) => {
-                              e.stopPropagation();
-                          }}
-                          onMouseDown={(e) => {
-                              e.stopPropagation();
-                          }}
-                          onMouseMove={(e) => {
-                              e.stopPropagation();
-                          }}
-                          onMouseUp={(e) => {
-                              e.stopPropagation();
-                          }}
-                          onTouchStart={(e) => {
-                              e.stopPropagation();
-                          }}
-                          onTouchMove={(e) => {
-                              e.stopPropagation();
-                          }}
-                          onTouchEnd={(e) => {
-                              e.stopPropagation();
-                          }}
-                      />
-                      {isSearching && <Loader2 size={18} className="text-yellow-500 animate-spin" />}
-                  </div>
-                  {searchResults.length > 0 && (
-                      <div 
-                          className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-2 border border-gray-100"
-                          onPointerDown={(e) => {
-                              e.stopPropagation();
-                          }}
-                          onPointerMove={(e) => {
-                              e.stopPropagation();
-                          }}
-                          onPointerUp={(e) => {
-                              e.stopPropagation();
-                          }}
-                          onMouseDown={(e) => {
-                              e.stopPropagation();
-                          }}
-                          onMouseMove={(e) => {
-                              e.stopPropagation();
-                          }}
-                          onMouseUp={(e) => {
-                              e.stopPropagation();
-                          }}
-                          onTouchStart={(e) => {
-                              e.stopPropagation();
-                          }}
-                          onTouchMove={(e) => {
-                              e.stopPropagation();
-                          }}
-                          onTouchEnd={(e) => {
-                              e.stopPropagation();
-                          }}
-                      >
-                          {searchResults.map((result: any, i) => (
-                              <button
-                                  key={i}
-                                  onClick={(e) => {
-                                      e.stopPropagation();
-                                      selectSearchResult(result);
-                                  }}
-                                  onPointerDown={(e) => {
-                                      e.stopPropagation();
-                                  }}
-                                  onPointerMove={(e) => {
-                                      e.stopPropagation();
-                                  }}
-                                  onPointerUp={(e) => {
-                                      e.stopPropagation();
-                                  }}
-                                  onMouseDown={(e) => {
-                                      e.stopPropagation();
-                                  }}
-                                  onMouseMove={(e) => {
-                                      e.stopPropagation();
-                                  }}
-                                  onMouseUp={(e) => {
-                                      e.stopPropagation();
-                                  }}
-                                  onTouchStart={(e) => {
-                                      e.stopPropagation();
-                                  }}
-                                  onTouchMove={(e) => {
-                                      e.stopPropagation();
-                                  }}
-                                  onTouchEnd={(e) => {
-                                      e.stopPropagation();
-                                  }}
-                                  className="w-full text-left px-4 py-3 hover:bg-yellow-50 border-b border-gray-50 last:border-none transition-colors flex flex-col gap-0.5"
-                              >
-                                  <span className="font-medium text-gray-800 text-sm truncate w-full block">{result.display_name.split(',')[0]}</span>
-                                  <span className="text-xs text-gray-400 truncate w-full block">{result.display_name}</span>
-                              </button>
-                          ))}
-                      </div>
-                  )}
-              </div>
-              </SearchBarContainer>
           </div>
         )}
 
@@ -2151,97 +2202,262 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           </div>
         )}
 
-        <div className="fixed bottom-20 sm:bottom-24 left-2 sm:left-4 z-[500]">
-           <MapZoomController 
-             min={isMapMode ? 13 : minImageZoom} 
-             max={isMapMode ? 19 : 4} 
-             themeColor={themeColor}
-           />
-        </div>
+        {isUIVisible && (
+          <div className="fixed bottom-20 sm:bottom-24 left-2 sm:left-4 z-[500]">
+             <MapZoomController
+               min={isMapMode ? 13 : minImageZoom}
+               max={isMapMode ? 19 : 4}
+               themeColor={themeColor}
+             />
+          </div>
+        )}
 
       </MapContainer>
 
-      {/* Frame Layer Button - Outside MapContainer, like BoardView */}
-      {isMapMode && (
+      {/* Border & Frame Layer Buttons - Top Right */}
+      {isMapMode && isUIVisible && (
         <div
-          className="fixed top-2 sm:top-4 right-2 sm:right-4 z-[500] pointer-events-auto flex items-center"
-          style={{ height: '40px' }}
+          className="fixed top-2 sm:top-4 right-2 sm:right-4 z-[500] pointer-events-auto flex items-center gap-1.5 sm:gap-2"
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <div className="relative" ref={frameLayerRef}>
+          {/* Border Button & Panel */}
+          <div className="relative">
             <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowFrameLayerPanel(!showFrameLayerPanel);
-              }}
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                e.currentTarget.style.backgroundColor = themeColor;
-              }}
-              onPointerUp={(e) => {
-                e.stopPropagation();
-                if (!showFrameLayerPanel) {
-                  e.currentTarget.style.backgroundColor = '';
-                }
-              }}
-              onMouseEnter={(e) => {
-                if (!showFrameLayerPanel) {
-                  e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!showFrameLayerPanel) {
-                  e.currentTarget.style.backgroundColor = '';
-                }
-              }}
-              className={`bg-white p-2 sm:p-3 rounded-xl shadow-lg transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${
-                showFrameLayerPanel ? 'text-white' : 'text-gray-700'
-              }`}
-              style={{ backgroundColor: showFrameLayerPanel ? themeColor : undefined }}
-              title="Frame Layers"
+              onClick={handleToggleBorderPanel}
+              className={`bg-white p-2 sm:p-3 rounded-xl shadow-lg transition-all w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${
+                showBorderPanel ? 'text-white' : 'text-gray-700'
+              } hover:scale-105 active:scale-95`}
+              style={{ backgroundColor: showBorderPanel ? themeColor : undefined }}
+              title="Search Region or Place"
             >
-              <Layers size={18} className="sm:w-5 sm:h-5" />
+              <Search size={18} className="sm:w-5 sm:h-5" />
             </button>
-            {showFrameLayerPanel && (
+
+            {/* Border Search Panel */}
+            {showBorderPanel && (
               <div
-                className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-[2000]"
+                className="absolute right-0 top-full mt-2 w-72 sm:w-80 bg-white rounded-2xl shadow-2xl border border-gray-100 p-4 z-[2000] animate-in fade-in slide-in-from-top-4"
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => e.stopPropagation()}
               >
-                <div className="px-3 py-2 text-xs font-bold text-gray-500 uppercase tracking-wide">Frame Layers</div>
-                <div className="h-px bg-gray-100 mb-1" />
-
-                {/* Show All Option */}
-                <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-bold text-gray-800">Map Search</h3>
                   <div className="flex items-center gap-2">
-                    <span className="text-sm text-gray-700 font-medium">Show All</span>
+                    {borderGeoJSON && (
+                      <button
+                        onClick={() => setBorderGeoJSON?.(null)}
+                        className="text-[10px] font-bold px-2 py-1 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors border border-red-100"
+                      >
+                        Clear Border
+                      </button>
+                    )}
+                    <button onClick={() => setShowBorderPanel?.(false)} className="text-gray-400 hover:text-gray-600">
+                      <X size={16} />
+                    </button>
                   </div>
-                  <input
-                    type="checkbox"
-                    checked={showAllFrames}
-                    onChange={(e) => {
-                      e.stopPropagation();
-                      setShowAllFrames(!showAllFrames);
-                    }}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={(e) => e.stopPropagation()}
-                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
-                      showAllFrames
-                        ? ''
-                        : 'bg-transparent'
-                    }`}
-                    style={{
-                      backgroundColor: showAllFrames ? themeColor : 'transparent',
-                      borderColor: themeColor
-                    }}
-                  />
                 </div>
 
-                {/* Frame Options - only show when Show All is disabled */}
-                {!showAllFrames && (
-                  <>
-                    <div className="h-px bg-gray-100 my-1" />
-                    {project.frames.map((frame) => (
+                {/* Mode Switcher Capsule */}
+                <div className="flex p-1 bg-gray-100 rounded-xl mb-4 relative overflow-hidden">
+                  <div 
+                    className="absolute inset-y-1 rounded-lg bg-white shadow-sm transition-all duration-200"
+                    style={{ 
+                      width: 'calc(50% - 4px)',
+                      left: borderSearchMode === 'region' ? '4px' : 'calc(50%)'
+                    }}
+                  />
+                  <button
+                    onClick={() => setBorderSearchMode('region')}
+                    className={`flex-1 py-1.5 text-xs font-bold relative z-10 transition-colors ${
+                      borderSearchMode === 'region' ? 'text-gray-800' : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Region Border
+                  </button>
+                  <button
+                    onClick={() => setBorderSearchMode('place')}
+                    className={`flex-1 py-1.5 text-xs font-bold relative z-10 transition-colors ${
+                      borderSearchMode === 'place' ? 'text-gray-800' : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Place
+                  </button>
+                </div>
+
+                <div className="flex gap-2 mb-3">
+                  <div className="relative flex-1">
+                    <input
+                      autoFocus
+                      type="text"
+                      placeholder={borderSearchMode === 'region' ? "Search region (e.g. London)" : "Search place (e.g. Cafe)"}
+                      value={borderSearchQuery}
+                      onChange={(e) => setBorderSearchQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleBorderSearch()}
+                      className="w-full pl-3 pr-8 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                    {isSearchingBorder && (
+                      <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                        <Loader2 size={14} className="animate-spin text-gray-400" />
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleBorderSearch}
+                    disabled={isSearchingBorder || !borderSearchQuery.trim()}
+                    className="px-3 py-2 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50"
+                    style={{ backgroundColor: themeColor }}
+                  >
+                    Search
+                  </button>
+                </div>
+
+                {borderSearchError && (
+                  <div className="text-xs text-red-500 mb-3 px-1">{borderSearchError}</div>
+                )}
+
+                {borderSearchResults.length > 0 && (
+                  <div className="max-h-60 overflow-y-auto border-results-list pr-1">
+                    <style>{`
+                      .border-results-list::-webkit-scrollbar {
+                        width: 4px;
+                      }
+                      .border-results-list::-webkit-scrollbar-track {
+                        background: transparent;
+                      }
+                      .border-results-list::-webkit-scrollbar-thumb {
+                        background: ${themeColor}44;
+                        border-radius: 10px;
+                      }
+                      .border-results-list::-webkit-scrollbar-thumb:hover {
+                        background: ${themeColor}88;
+                      }
+                    `}</style>
+                    <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">Select a region:</div>
+                    <div className="space-y-1">
+                      {borderSearchResults.map((result: any) => (
+                        <button
+                          key={`${result.osm_type}-${result.osm_id}`}
+                          onClick={() => handleSelectBorder(result)}
+                          className="w-full text-left p-2.5 hover:bg-gray-50 rounded-xl transition-colors border border-transparent hover:border-gray-100 flex flex-col gap-0.5"
+                        >
+                          <div className="text-sm font-medium text-gray-800 flex items-baseline gap-1 flex-wrap">
+                            <span>{result.display_name.split(',')[0]}</span>
+                            {(() => {
+                              const addr = result.address;
+                              const self = result.display_name.split(',')[0].trim();
+                              const parts = result.display_name.split(',').map((p: string) => p.trim());
+                              
+                              // 1. Try to find parent from address object with wide range of keys
+                              let parent = addr?.city || addr?.town || addr?.village || 
+                                           addr?.municipality || addr?.county || 
+                                           addr?.state_district || addr?.city_district ||
+                                           addr?.suburb || addr?.neighbourhood || addr?.state;
+
+                              // 2. If parent is same as self or missing, fallback to display_name parts
+                              if (!parent || parent === self) {
+                                // Find the first part that isn't the name itself, isn't a number (zip), and isn't "China"
+                                parent = parts.find((p: string) => 
+                                  p !== self && 
+                                  !/^\d+$/.test(p) && 
+                                  p !== '中国' && 
+                                  p !== 'China'
+                                );
+                              }
+                              
+                              if (parent && parent !== self) {
+                                return (
+                                  <span className="text-xs text-gray-400 font-normal italic">
+                                    , {parent}
+                                  </span>
+                                );
+                              }
+                              return null;
+                            })()}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {isUIVisible && (
+            <div className="relative" ref={frameLayerRef}>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowFrameLayerPanel(!showFrameLayerPanel);
+                }}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  e.currentTarget.style.backgroundColor = themeColor;
+                }}
+                onPointerUp={(e) => {
+                  e.stopPropagation();
+                  if (!showFrameLayerPanel) {
+                    e.currentTarget.style.backgroundColor = '';
+                  }
+                }}
+                onMouseEnter={(e) => {
+                  if (!showFrameLayerPanel) {
+                    e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!showFrameLayerPanel) {
+                    e.currentTarget.style.backgroundColor = '';
+                  }
+                }}
+                className={`bg-white p-2 sm:p-3 rounded-xl shadow-lg transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${
+                  showFrameLayerPanel ? 'text-white' : 'text-gray-700'
+                }`}
+                style={{ backgroundColor: showFrameLayerPanel ? themeColor : undefined }}
+                title="Frame Layers"
+              >
+                <Layers size={18} className="sm:w-5 sm:h-5" />
+              </button>
+              {showFrameLayerPanel && (
+                <div
+                  className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-[2000]"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="px-3 py-2 text-xs font-bold text-gray-500 uppercase tracking-wide">Frame Layers</div>
+                  <div className="h-px bg-gray-100 mb-1" />
+
+                  {/* Show All Option */}
+                  <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-700 font-medium">Show All</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={showAllFrames}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        setShowAllFrames(!showAllFrames);
+                      }}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => e.stopPropagation()}
+                      className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
+                        showAllFrames
+                          ? ''
+                          : 'bg-transparent'
+                      }`}
+                      style={{
+                        backgroundColor: showAllFrames ? themeColor : 'transparent',
+                        borderColor: themeColor
+                      }}
+                    />
+                  </div>
+
+                  {/* Frame Options - only show when Show All is disabled */}
+                  {!showAllFrames && (
+                    <>
+                      <div className="h-px bg-gray-100 my-1" />
+                      {project.frames.map((frame) => (
                   <div key={frame.id} className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
                     <div className="flex items-center gap-2">
                       <div
@@ -2276,11 +2492,12 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                     />
                   </div>
                 ))}
-                  </>
-                )}
-              </div>
-            )}
-          </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
       

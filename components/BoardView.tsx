@@ -47,9 +47,10 @@ interface BoardViewProps {
   onTransformChange?: (x: number, y: number, scale: number) => void;
   mapViewFileInputRef?: React.RefObject<HTMLInputElement>;
   themeColor?: string;
+  isUIVisible?: boolean;
 }
 
-const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onToggleEditor, onAddNote, onDeleteNote, onDeleteNotesBatch, onEditModeChange, connections = [], onUpdateConnections, frames = [], onUpdateFrames, project, onUpdateProject, onSwitchToMapView, onSwitchToBoardView, navigateToCoords, projectId, onNavigateComplete, onTransformChange, mapViewFileInputRef, themeColor = DEFAULT_THEME_COLOR }) => {
+const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onToggleEditor, onAddNote, onDeleteNote, onDeleteNotesBatch, onEditModeChange, connections = [], onUpdateConnections, frames = [], onUpdateFrames, project, onUpdateProject, onSwitchToMapView, onSwitchToBoardView, navigateToCoords, projectId, onNavigateComplete, onTransformChange, mapViewFileInputRef, themeColor = DEFAULT_THEME_COLOR, isUIVisible = true }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
   
@@ -2333,14 +2334,12 @@ const createNoteAtCenter = (variant: 'compact') => {
       
       // 点击空白处的退出逻辑（只在非拖动/非缩放状态下触发）
       // 如果发生了拖动，不应该触发点击计数
-      // 但如果是在多选拖动后，不要清除多选状态
       if (hasMoved) {
           resetBlankClickCount();
-          // 如果是多选拖动，不清除多选状态
-          if (isMultiSelectDragging) {
+          // 多选拖动的结束逻辑会在后面的代码中处理，不要在这里提前返回
+          if (!isMultiSelectDragging) {
               return;
           }
-          return;
       }
       
       // 如果正在绘制Frame，完成绘制（优先处理，不进行退出编辑模式的计数）
@@ -2361,8 +2360,28 @@ const createNoteAtCenter = (variant: 'compact') => {
               height,
               color: 'rgba(255, 255, 255, 0.5)'
           };
-          
+
           onUpdateFrames?.([...frames, newFrame]);
+
+          // 为被框选的便签添加新frame的groupIds
+          if (selectedNoteIds.size > 0) {
+            selectedNoteIds.forEach(noteId => {
+              const note = notes.find(n => n.id === noteId);
+              if (note) {
+                const currentGroupIds = note.groupIds || (note.groupId ? [note.groupId] : []);
+                const newGroupIds = [...currentGroupIds, newFrame.id];
+                const newGroupNames = [...(note.groupNames || []), newFrame.title];
+
+                const updatedNote = {
+                  ...note,
+                  groupIds: newGroupIds,
+                  groupNames: newGroupNames
+                };
+                onUpdateNote(updatedNote);
+              }
+            });
+          }
+
           setIsDrawingFrame(false);
           setDrawingFrameStart(null);
           setDrawingFrameEnd(null);
@@ -4713,36 +4732,38 @@ const createNoteAtCenter = (variant: 'compact') => {
             <ZoomSlider value={transform.scale} min={0.2} max={3.0} onChange={(val) => zoomAtViewCenter(val)} themeColor={themeColor} />
         </motion.div>
 
-        <div className="fixed top-4 right-4 z-[500] flex gap-3 pointer-events-auto items-center" style={{ height: '40px' }} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
-          {isEditMode && (
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  setIsEditMode(false);
-                }} 
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                }}
-                className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 text-white rounded-xl shadow-lg font-bold h-full"
-                style={{ backgroundColor: themeColor, paddingTop: '6px', paddingBottom: '6px' }}
-                onMouseEnter={(e) => {
-                  const darkR = Math.max(0, Math.floor(parseInt(themeColor.slice(1, 3), 16) * 0.9));
-                  const darkG = Math.max(0, Math.floor(parseInt(themeColor.slice(3, 5), 16) * 0.9));
-                  const darkB = Math.max(0, Math.floor(parseInt(themeColor.slice(5, 7), 16) * 0.9));
-                  const darkHex = '#' + [darkR, darkG, darkB].map(x => {
-                    const hex = x.toString(16);
-                    return hex.length === 1 ? '0' + hex : hex;
-                  }).join('').toUpperCase();
-                  e.currentTarget.style.backgroundColor = darkHex;
-                }}
-                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
-              >
-                  <Check size={18} className="sm:w-5 sm:h-5" />
-                  <span className="hidden sm:inline">Done</span>
-              </button>
-          )}
-        </div>
+        {isUIVisible && (
+          <div className="fixed top-4 right-4 z-[500] flex gap-3 pointer-events-auto items-center" style={{ height: '40px' }} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+            {isEditMode && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    setIsEditMode(false);
+                  }}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                  }}
+                  className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 text-white rounded-xl shadow-lg font-bold h-full"
+                  style={{ backgroundColor: themeColor, paddingTop: '6px', paddingBottom: '6px' }}
+                  onMouseEnter={(e) => {
+                    const darkR = Math.max(0, Math.floor(parseInt(themeColor.slice(1, 3), 16) * 0.9));
+                    const darkG = Math.max(0, Math.floor(parseInt(themeColor.slice(3, 5), 16) * 0.9));
+                    const darkB = Math.max(0, Math.floor(parseInt(themeColor.slice(5, 7), 16) * 0.9));
+                    const darkHex = '#' + [darkR, darkG, darkB].map(x => {
+                      const hex = x.toString(16);
+                      return hex.length === 1 ? '0' + hex : hex;
+                    }).join('').toUpperCase();
+                    e.currentTarget.style.backgroundColor = darkHex;
+                  }}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
+                >
+                    <Check size={18} className="sm:w-5 sm:h-5" />
+                    <span className="hidden sm:inline">Done</span>
+                </button>
+            )}
+          </div>
+        )}
 
         {/* Edit Toolbar: Unified White Buttons at Top Left */}
             <div 

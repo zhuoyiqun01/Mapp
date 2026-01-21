@@ -308,12 +308,12 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
                       if (e.key === 'Escape') setEditingFrameId(null);
                     }}
                     className="bg-white px-3 py-1 rounded-lg border-2 outline-none text-sm"
-                    style={{ borderColor: THEME_COLOR }}
+                    style={{ borderColor: themeColor }}
                   />
                   <button
                     onClick={handleFrameSave}
                     className="p-1 hover:text-yellow-600 transition-colors"
-                    style={{ color: THEME_COLOR }}
+                    style={{ color: themeColor }}
                   >
                     <Check size={16} />
                   </button>
@@ -326,7 +326,7 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
                       <button
                         onClick={() => handleFrameEdit(group.frameId!, group.name)}
                         className="p-0.5 text-gray-400 transition-colors flex-shrink-0"
-                        onMouseEnter={(e) => e.currentTarget.style.color = THEME_COLOR}
+                        onMouseEnter={(e) => e.currentTarget.style.color = themeColor}
                         onMouseLeave={(e) => e.currentTarget.style.color = ''}
                       >
                         <Edit2 size={14} />
@@ -379,7 +379,7 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
                             }
                           }}
                           className="flex-1 p-1 border rounded-lg outline-none resize-none"
-                          style={{ borderColor: THEME_COLOR }}
+                          style={{ borderColor: themeColor }}
                           rows={2}
                         />
                         <button

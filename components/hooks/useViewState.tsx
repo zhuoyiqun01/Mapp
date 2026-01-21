@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { ViewMode } from '../types';
+import { ViewMode } from '../../types';
 import { getViewPositionCache, setViewPositionCache } from '../../utils/storage';
 
 interface NavigationCoords {
@@ -103,9 +103,3 @@ export const useViewState = (): UseViewStateReturn => {
     saveBoardPosition
   };
 };
-
-
-
-
-
-

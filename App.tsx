@@ -25,6 +25,7 @@ import {
   migrateFromOldFormat,
   deleteImage,
   deleteSketch,
+  getViewPositionCache,
   clearViewPositionCache,
   checkStorageUsage,
   checkStorageDetails,
@@ -32,11 +33,14 @@ import {
   cleanupCorruptedImages,
   cleanupLargeImages,
   cleanupDuplicateImages,
+  analyzeDuplicateImages,
   attemptImageRecovery,
   loadNoteImages,
   findOrphanedData,
-  cleanupOrphanedMedia,
-  cleanBrokenReferences
+  cleanupOrphanedData,
+  cleanBrokenReferences,
+  loadAllProjects,
+  ProjectSummary
 } from './utils/storage';
 
 export default function App() {
@@ -56,8 +60,11 @@ export default function App() {
     setActiveProject,
     duplicateProject,
     isLoading,
+    setIsLoading,
     isLoadingProject,
+    setIsLoadingProject,
     loadingProgress,
+    setLoadingProgress,
     isDeletingProject
   } = projectState;
 
@@ -92,6 +99,10 @@ export default function App() {
     setSidebarButtonY,
     showMapImportMenu,
     setShowMapImportMenu,
+    showBorderPanel,
+    setShowBorderPanel,
+    borderGeoJSON,
+    setBorderGeoJSON,
     mapViewFileInputRef,
     isRunningCleanup,
     setIsRunningCleanup,
@@ -127,7 +138,7 @@ export default function App() {
 
       // Step 2: Clean up orphaned data (60%)
       setLoadingProgress(60);
-      const cleanupResult = await cleanupOrphanedMedia();
+      const cleanupResult = await cleanupOrphanedData();
       console.log(`Cleaned up ${cleanupResult.imagesCleaned} orphaned images, ${cleanupResult.sketchesCleaned} orphaned sketches, ${cleanupResult.backgroundsCleaned} orphaned backgrounds, freed ${(cleanupResult.spaceFreed / (1024 * 1024)).toFixed(2)}MB`);
 
       // Step 3: Clean up duplicate images (90%)
@@ -310,6 +321,10 @@ export default function App() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+
+
+  // UI Visibility State (Tab key toggle)
+  const [isUIVisible, setIsUIVisible] = useState(true);
 
   
   // Map Style State
@@ -500,6 +515,7 @@ export default function App() {
     loadProjects();
   }, []);
 
+
   // Disable browser two-finger zoom and long-press interactions
   useEffect(() => {
     const preventZoom = (e: TouchEvent) => {
@@ -507,11 +523,11 @@ export default function App() {
         e.preventDefault();
       }
     };
-    
+
     const preventGesture = (e: Event) => {
       e.preventDefault();
     };
-    
+
     const preventContextMenu = (e: Event) => {
       e.preventDefault();
     };
@@ -521,6 +537,14 @@ export default function App() {
       if (e.touches.length === 1) {
         // For single touch, we'll rely on CSS -webkit-touch-callout: none
         // But we can still prevent other long-press behaviors
+      }
+    };
+
+    // Tab key to toggle UI visibility
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Tab' && !isEditorOpen && !isBoardEditMode) {
+        e.preventDefault();
+        setIsUIVisible(prev => !prev);
       }
     };
 
@@ -538,7 +562,10 @@ export default function App() {
 
     // Prevent long-press selection on iOS
     document.addEventListener('touchstart', preventLongPress, { passive: true });
-    
+
+    // Tab key handler
+    document.addEventListener('keydown', handleKeyDown);
+
     return () => {
       document.removeEventListener('touchstart', preventZoom);
       document.removeEventListener('touchmove', preventZoom);
@@ -547,6 +574,7 @@ export default function App() {
       document.removeEventListener('gestureend', preventGesture);
       document.removeEventListener('contextmenu', preventContextMenu);
       document.removeEventListener('touchstart', preventLongPress);
+      document.removeEventListener('keydown', handleKeyDown);
     };
   }, []);
 
@@ -826,8 +854,9 @@ export default function App() {
     return (
       <div className="w-full min-h-screen relative" style={{ backgroundColor: themeColor }}>
         {/* 右上角清理按钮 */}
-        <div className="absolute top-4 right-4 z-10">
-          <button
+        {isUIVisible && (
+          <div className="absolute top-4 right-4 z-10">
+            <button
             onClick={() => setShowCleanupMenu(!showCleanupMenu)}
             disabled={isRunningCleanup}
             className="p-3 bg-white/90 hover:bg-white rounded-full shadow-lg transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed relative"
@@ -874,6 +903,7 @@ export default function App() {
             </div>
           )}
         </div>
+        )}
 
         {/* 点击其他地方关闭菜单 */}
         {showCleanupMenu && (
@@ -940,7 +970,7 @@ export default function App() {
       )}
       
       <AnimatePresence>
-      {isSidebarOpen && (
+      {isSidebarOpen && isUIVisible && (
           <div className="fixed inset-0 z-[2000] flex overflow-hidden">
              <motion.div 
                className="fixed inset-0 bg-black/20 backdrop-blur-sm" 
@@ -1000,8 +1030,8 @@ export default function App() {
         {/* 同步状态指示器 - 只在侧边栏打开时显示（在侧边栏内） */}
         {/* 主视图中不再显示云图标，统一在侧边栏显示 */}
         
-        {!isEditorOpen && !isBoardEditMode && (
-          <button 
+        {!isEditorOpen && !isBoardEditMode && isUIVisible && (
+          <button
              onClick={(e) => {
                // 只有在没有拖动时才触发点击
                if (!sidebarButtonDragRef.current.isDragging) {
@@ -1115,6 +1145,16 @@ export default function App() {
             onMapStyleChange={setMapStyle}
             showImportMenu={showMapImportMenu}
             setShowImportMenu={setShowMapImportMenu}
+            showBorderPanel={showBorderPanel}
+            setShowBorderPanel={setShowBorderPanel}
+            borderGeoJSON={borderGeoJSON}
+            setBorderGeoJSON={setBorderGeoJSON}
+            onMapClick={() => {
+              if (isEditorOpen) {
+                setIsEditorOpen(false);
+              }
+            }}
+            isUIVisible={isUIVisible}
           />
         ) : viewMode === 'board' ? (
           <BoardView 
@@ -1176,7 +1216,7 @@ export default function App() {
             }}
             onSwitchToBoardView={(coords?: { x: number; y: number }) => {
               if (coords) {
-                setNavigateToBoardCoords(coords);
+                navigateToBoard(coords);
               }
               setViewMode('board');
             }}
@@ -1235,7 +1275,7 @@ export default function App() {
       </div>
 
       {/* Upload Button - only show in mapping view */}
-      {viewMode === 'map' && !isEditorOpen && !isBoardEditMode && activeProject && (
+      {viewMode === 'map' && !isEditorOpen && !isBoardEditMode && activeProject && isUIVisible && (
         <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-4 fade-in">
           <button
             onClick={() => setShowMapImportMenu(!showMapImportMenu)}
@@ -1248,7 +1288,7 @@ export default function App() {
         </div>
       )}
 
-      {!isEditorOpen && !isBoardEditMode && (
+      {!isEditorOpen && !isBoardEditMode && isUIVisible && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-white/90 backdrop-blur-md p-1.5 rounded-2xl shadow-xl border border-white/50 flex gap-1 animate-in slide-in-from-bottom-4 fade-in">
           <button
             onClick={() => !isImportDialogOpen && setViewMode('map')}
