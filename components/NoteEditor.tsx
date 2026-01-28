@@ -78,6 +78,21 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   // Keyboard height detection
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [cursorAtDetail, setCursorAtDetail] = useState(false);
+
+  const updateCursorPosition = useCallback(() => {
+    if (!textareaRef.current) return;
+    const pos = textareaRef.current.selectionStart;
+    const firstNewline = text.indexOf('\n');
+    setCursorAtDetail(firstNewline !== -1 && pos > firstNewline);
+  }, [text]);
+
+  const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setText(e.target.value);
+    updateCursorPosition();
+  };
+
   // Swipe detection for cluster navigation
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const touchEndRef = useRef<{ x: number; y: number } | null>(null);
@@ -283,6 +298,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     if (e.target.files && e.target.files.length > 0) {
       try {
         const files = Array.from(e.target.files) as File[];
+        setIsProcessingImages(true);
         const base64Promises = files.map((file: File) => fileToBase64(file));
         const base64Images = await Promise.all(base64Promises);
         setImages([...images, ...base64Images]);
@@ -290,8 +306,53 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         e.target.value = '';
       } catch (err) {
         console.error("Failed to convert image", err);
+      } finally {
+        setIsProcessingImages(false);
       }
     }
+  };
+
+  const handlePaste = async (e: React.ClipboardEvent) => {
+    const items = Array.from(e.clipboardData.items) as DataTransferItem[];
+    const imageItems = items.filter(item => item.type.startsWith('image/'));
+    const textData = e.clipboardData.getData('text/plain');
+
+    // If there are images or mixed content, handle manually
+    if (imageItems.length > 0) {
+      e.preventDefault();
+      setIsProcessingImages(true);
+
+      try {
+        // 1. Process text if any
+        if (textData && textareaRef.current) {
+          const start = textareaRef.current.selectionStart;
+          const end = textareaRef.current.selectionEnd;
+          const newText = text.substring(0, start) + textData + text.substring(end);
+          setText(newText);
+          
+          // Use setTimeout to ensure the cursor position update happens after React render
+          setTimeout(() => {
+            if (textareaRef.current) {
+              textareaRef.current.selectionStart = textareaRef.current.selectionEnd = start + textData.length;
+            }
+          }, 0);
+        }
+
+        // 2. Process images
+        const imageFiles = imageItems.map(item => item.getAsFile()).filter(file => file !== null) as File[];
+        const base64Promises = imageFiles.map(file => fileToBase64(file));
+        const base64Images = await Promise.all(base64Promises);
+        
+        if (base64Images.length > 0) {
+          setImages(prev => [...prev, ...base64Images]);
+        }
+      } catch (err) {
+        console.error("Failed to process pasted content", err);
+      } finally {
+        setIsProcessingImages(false);
+      }
+    }
+    // If only text is pasted, default behavior will handle it fine
   };
 
   const removeImage = (e: React.MouseEvent, index?: number) => {
@@ -426,16 +487,33 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       }
   };
 
-  const getTextStyles = () => {
-    // Unified scale for all note types: 3rem - 7rem (5 levels)
-    const sizeMap: Record<number, string> = {
-      1: 'text-[3rem]',
-      2: 'text-[4rem]',
-      3: 'text-[5rem]',
-      4: 'text-[6rem]',
-      5: 'text-[7rem]',
+  const getFontSizeRem = (size: number) => {
+    const sizeMap: Record<number, number> = {
+      [-1]: 1.5,
+      [0]: 2.2,
+      [1]: 3,
+      [2]: 4,
+      [3]: 5,
+      [4]: 6,
+      [5]: 7,
     };
-    return `${sizeMap[fontSize] || 'text-[5rem]'} ${isBold ? 'font-black' : 'font-medium'}`;
+    return sizeMap[size] || 5;
+  };
+
+  const getTextStyles = (sizeOverride?: number) => {
+    const s = sizeOverride !== undefined ? sizeOverride : fontSize;
+    // Unified scale for all note types: 3rem - 7rem (5 levels)
+    // Adding 0 and -1 for detail text
+    const sizeMap: Record<number, string> = {
+      [-1]: 'text-[1.5rem]',
+      [0]: 'text-[2.2rem]',
+      [1]: 'text-[3rem]',
+      [2]: 'text-[4rem]',
+      [3]: 'text-[5rem]',
+      [4]: 'text-[6rem]',
+      [5]: 'text-[7rem]',
+    };
+    return `${sizeMap[s] || sizeMap[3]} ${isBold ? 'font-black' : 'font-medium'}`;
   };
 
   const adjustFontSize = (delta: number) => {
@@ -728,29 +806,57 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
               }}
             >
               <div className="grid w-full min-w-0">
-                {/* Invisible Pre-wrap div to force height */}
-                <div 
-                  className={`col-start-1 row-start-1 w-full min-w-0 whitespace-pre-wrap break-words invisible leading-none pb-4 ${getTextStyles()}`}
-                  aria-hidden="true"
-                >
-                   {text + ' '}
-                </div>
-
                 {/* Actual Textarea */}
                 <textarea
+                    ref={textareaRef}
                     autoFocus={false}
                     value={text}
-                    onChange={(e) => setText(e.target.value)}
+                    onChange={handleTextChange}
+                    onPaste={handlePaste}
+                    onSelect={updateCursorPosition}
+                    onKeyUp={updateCursorPosition}
+                    onClick={updateCursorPosition}
                     placeholder="Write here..."
-                    className={`col-start-1 row-start-1 w-full min-w-0 h-full bg-transparent border-none resize-none focus:ring-0 p-0 text-gray-800 placeholder-gray-500/30 leading-none overflow-hidden break-words whitespace-pre-wrap pb-4 ${getTextStyles()}`}
+                    className={`col-start-1 row-start-1 w-full min-w-0 h-full bg-transparent border-none resize-none focus:ring-0 p-0 text-gray-800 placeholder-gray-500/30 leading-none overflow-hidden break-words whitespace-pre-wrap pb-4 ${getTextStyles(cursorAtDetail ? fontSize - 2 : fontSize)}`}
                     spellCheck={false}
                     style={{ 
                       backgroundColor: 'transparent',
                       border: 'none',
                       outline: 'none',
-                      boxShadow: 'none'
+                      boxShadow: 'none',
+                      zIndex: 2,
+                      color: 'transparent',
+                      caretColor: '#1f2937',
+                      // Add padding-top to compensate for font-size difference of the first line
+                      paddingTop: cursorAtDetail ? `${getFontSizeRem(fontSize) - getFontSizeRem(fontSize - 2)}rem` : 0
                     }}
                 />
+                
+                {/* Visual Styled Text Layer */}
+                <div 
+                  className={`col-start-1 row-start-1 w-full min-w-0 h-full whitespace-pre-wrap break-words leading-none pb-4 pointer-events-none z-1`}
+                  aria-hidden="true"
+                >
+                   {text ? (() => {
+                     const firstNewlineIndex = text.indexOf('\n');
+                     if (firstNewlineIndex === -1) {
+                       return <span className={getTextStyles()}>{text + ' '}</span>;
+                     }
+                     const title = text.substring(0, firstNewlineIndex);
+                     const detail = text.substring(firstNewlineIndex);
+                     return (
+                       <>
+                         <span className={getTextStyles()}>{title}</span>
+                         <span className={getTextStyles(fontSize - 2)}>{detail + ' '}</span>
+                       </>
+                     );
+                   })() : ' '}
+                </div>
+                <style>{`
+                  textarea::selection {
+                    background: rgba(59, 130, 246, 0.2);
+                  }
+                `}</style>
               </div>
               
             </div>

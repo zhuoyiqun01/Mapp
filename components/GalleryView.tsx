@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Grid, List, Image as ImageIcon, MapPin, X } from 'lucide-react';
+import { Grid, List, Image as ImageIcon, MapPin, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Note, Project, Frame } from '../types';
 
 interface GalleryViewProps {
@@ -23,6 +23,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
   const [selectedFrame, setSelectedFrame] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [selectedImage, setSelectedImage] = useState<GalleryItem | null>(null);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
   // 获取所有包含图片和坐标的标准note，按frame分组
   const galleryData = useMemo(() => {
@@ -56,6 +57,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
 
   const handleImageClick = (item: GalleryItem) => {
     setSelectedImage(item);
+    setCurrentImageIndex(0);
   };
 
   const handleLocateOnMap = (coords: { lat: number; lng: number }) => {
@@ -165,10 +167,10 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                   <div className="absolute top-1 right-1 bg-black bg-opacity-50 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <MapPin size={12} className="text-white" />
                   </div>
-                  {/* Frame indicator */}
-                  {item.frame && (
-                    <div className="absolute bottom-1 left-1 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded">
-                      {item.frame.title}
+                  {/* Label indicator */}
+                  {item.note.text && (
+                    <div className="absolute bottom-1 left-1 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded max-w-[90%] truncate">
+                      {item.note.text.split('\n')[0].trim()}
                     </div>
                   )}
                 </div>
@@ -193,10 +195,10 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                       className="w-full h-full object-cover"
                       loading="lazy"
                     />
-                    {/* Frame indicator */}
-                    {item.frame && (
-                      <div className="absolute bottom-1 left-1 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded">
-                        {item.frame.title}
+                    {/* Label indicator */}
+                    {item.note.text && (
+                      <div className="absolute bottom-1 left-1 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded max-w-[90%] truncate">
+                        {item.note.text.split('\n')[0].trim()}
                       </div>
                     )}
                   </div>
@@ -214,49 +216,84 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
 
       {/* Image Preview Modal */}
       {selectedImage && (
-        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-4xl max-h-[90vh] overflow-hidden">
-            <div className="flex items-center justify-between p-4 border-b">
-              <div className="flex items-center gap-2">
-                {selectedImage.frame && (
-                  <span className="text-sm text-gray-600">
-                    {selectedImage.frame.title}
-                  </span>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200" onClick={() => setSelectedImage(null)}>
+          <div 
+            className="bg-white rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header style similar to Mapping Preview Panel */}
+            <div className="p-4 pb-2 flex items-start justify-between gap-3 border-b border-gray-100">
+              <div className="flex items-start gap-3 flex-1 min-w-0">
+                {selectedImage.note.emoji && (
+                  <span className="text-2xl mt-0.5 shrink-0">{selectedImage.note.emoji}</span>
                 )}
-                <span className="text-sm text-gray-400">•</span>
-                <span className="text-sm text-gray-600">
-                  {selectedImage.note.text || '无标题'}
-                </span>
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-lg font-bold text-gray-900 leading-tight line-clamp-2 break-words">
+                    {(selectedImage.note.text || '').split('\n')[0].trim() || 'Untitled Note'}
+                  </h3>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleLocateOnMap(selectedImage.note.coords)}
-                  className="flex items-center gap-1 px-3 py-1 text-white rounded-lg hover:opacity-90 transition-colors text-sm"
-                  style={{ backgroundColor: themeColor }}
-                >
-                  <MapPin size={14} />
-                  定位到地图
-                </button>
-                <button
-                  onClick={() => setSelectedImage(null)}
-                  className="p-1 hover:bg-gray-100 rounded"
-                >
-                  <X size={20} />
-                </button>
-              </div>
+              <button
+                onClick={() => setSelectedImage(null)}
+                className="p-2 hover:bg-gray-100 rounded-full transition-colors shrink-0"
+              >
+                <X size={20} className="text-gray-500" />
+              </button>
             </div>
-            <div className="p-4">
-              <img
-                src={getImageUrl(selectedImage.note)}
-                alt={selectedImage.note.text || 'Note image'}
-                className="w-full h-auto max-h-[60vh] object-contain"
-              />
-              {selectedImage.note.text && (
-                <p className="mt-4 text-gray-700">
-                  {selectedImage.note.text}
-                </p>
-              )}
-            </div>
+
+            {/* Large Image with Navigation */}
+            {(() => {
+              const allImages = [...(selectedImage.note.images || [])];
+              if (selectedImage.note.sketch) allImages.push(selectedImage.note.sketch);
+              
+              if (allImages.length === 0) return null;
+
+              return (
+                <div className="relative group aspect-[4/3] bg-gray-100 flex items-center justify-center">
+                  <img
+                    src={allImages[currentImageIndex]}
+                    alt="Preview"
+                    className="w-full h-full object-cover"
+                  />
+                  
+                  {/* Navigation Arrows */}
+                  {allImages.length > 1 && (
+                    <>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCurrentImageIndex(prev => (prev - 1 + allImages.length) % allImages.length);
+                        }}
+                        className="absolute left-4 p-2 bg-black/30 hover:bg-black/50 text-white rounded-full transition-colors backdrop-blur-sm"
+                      >
+                        <ChevronLeft size={24} />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCurrentImageIndex(prev => (prev + 1) % allImages.length);
+                        }}
+                        className="absolute right-4 p-2 bg-black/30 hover:bg-black/50 text-white rounded-full transition-colors backdrop-blur-sm"
+                      >
+                        <ChevronRight size={24} />
+                      </button>
+                      
+                      {/* Indicator dots */}
+                      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-1.5 px-3 py-1.5 bg-black/20 backdrop-blur-md rounded-full">
+                        {allImages.map((_, idx) => (
+                          <div
+                            key={idx}
+                            className={`w-1.5 h-1.5 rounded-full transition-all ${
+                              idx === currentImageIndex ? 'bg-white w-3' : 'bg-white/40'
+                            }`}
+                          />
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

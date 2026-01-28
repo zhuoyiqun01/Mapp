@@ -139,7 +139,7 @@ const CustomHorizontalSlider: React.FC<{
     </div>
   );
 };
-import { Search, Locate, Loader2, X, Check, Satellite, Plus, Image as ImageIcon, FileJson, Type, Layers, Settings, Globe } from 'lucide-react';
+import { Search, Locate, Loader2, X, Check, Satellite, Plus, Image as ImageIcon, FileJson, Type, Layers, Settings, Globe, ChevronLeft, ChevronRight, Copy, Edit3, Save } from 'lucide-react';
 import exifr from 'exifr';
 import { NoteEditor } from './NoteEditor';
 import { generateId, fileToBase64 } from '../utils';
@@ -192,6 +192,37 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const notes = project.notes;
   const [editingNote, setEditingNote] = useState<Partial<Note> | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
+  const [preSelectedNotes, setPreSelectedNotes] = useState<Note[] | null>(null);
+  const [currentPreviewImageIndex, setCurrentPreviewImageIndex] = useState(0);
+  const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const selectedNote = useMemo(() => 
+    selectedNoteId ? notes.find(n => n.id === selectedNoteId) : null
+  , [selectedNoteId, notes]);
+
+  // Reset index when selected note changes
+  useEffect(() => {
+    setCurrentPreviewImageIndex(0);
+  }, [selectedNoteId]);
+
+  // Clear selection when exiting preview mode
+  useEffect(() => {
+    if (isUIVisible) {
+      setSelectedNoteId(null);
+      setPreSelectedNotes(null);
+      setCurrentPreviewImageIndex(0);
+    }
+  }, [isUIVisible]);
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (selectionTimerRef.current) {
+        clearTimeout(selectionTimerRef.current);
+      }
+    };
+  }, []);
 
   // Helper function to convert hex color to RGB
   const hexToRgb = (hex: string): string => {
@@ -404,11 +435,35 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   // Text labels display mode
   const [showTextLabels, setShowTextLabels] = useState(false);
 
+  // Shortcut key T to toggle text labels
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't toggle if user is typing in an input or textarea
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        (e.target as HTMLElement).isContentEditable
+      ) {
+        return;
+      }
+
+      if (e.key.toLowerCase() === 't' && !isEditorOpen) {
+        setShowTextLabels(prev => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isEditorOpen]);
+
     // Pin size control
     const [pinSize, setPinSize] = useState(1.0); // Scale factor for pin size
 
-    // Cluster threshold control
-    const [clusterThreshold, setClusterThreshold] = useState(40); // Distance threshold for clustering
+  // Cluster threshold control
+  const [clusterThreshold, setClusterThreshold] = useState(40); // Distance threshold for clustering
+
+  // Frame description editing state
+  const [editingFrameDescription, setEditingFrameDescription] = useState<string | null>(null);
 
   // Settings panel
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
@@ -538,6 +593,17 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
   const handleToggleBorderPanel = () => {
     if (setShowBorderPanel) setShowBorderPanel(!showBorderPanel);
+  };
+
+  const handleCopyBorder = async () => {
+    if (!borderGeoJSON) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(borderGeoJSON));
+      alert('Border GeoJSON copied to clipboard!');
+    } catch (err) {
+      console.error('Failed to copy border:', err);
+      alert('Failed to copy border to clipboard');
+    }
   };
 
   
@@ -779,6 +845,38 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     projectFrames: project.frames
   });
 
+  // Find single selected frame for description panel
+  const activeFrame = useMemo(() => {
+    if (showAllFrames || !project.frames) return null;
+    const visibleFrameIds = Object.entries(frameLayerVisibility)
+      .filter(([_, visible]) => visible)
+      .map(([id, _]) => id);
+    
+    if (visibleFrameIds.length === 1) {
+      return project.frames.find(f => f.id === visibleFrameIds[0]) || null;
+    }
+    return null;
+  }, [showAllFrames, project.frames, frameLayerVisibility]);
+
+  // Reset frame description editing state when active frame changes
+  useEffect(() => {
+    setEditingFrameDescription(null);
+  }, [activeFrame?.id]);
+
+  const handleSaveFrameDescription = async () => {
+    if (!activeFrame || editingFrameDescription === null) return;
+    
+    const updatedFrames = project.frames?.map(f => 
+      f.id === activeFrame.id ? { ...f, description: editingFrameDescription } : f
+    ) || [];
+    
+    await onUpdateProject?.({
+      ...project,
+      frames: updatedFrames
+    });
+    setEditingFrameDescription(null);
+  };
+
   // Map styling management hook
   const {
     mapStyle,
@@ -906,6 +1004,28 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       e.originalEvent?.stopImmediatePropagation();
     }
 
+    // 预览模式下的特殊交互处理
+    if (!isUIVisible) {
+      if (selectionTimerRef.current) {
+        clearTimeout(selectionTimerRef.current);
+        selectionTimerRef.current = null;
+      }
+      
+      setPreSelectedNotes(null);
+      // 点击点位显示 label，隐藏其他 label
+      if (selectedNoteId === note.id) {
+        setSelectedNoteId(null);
+      } else {
+        setSelectedNoteId(null);
+        // 延迟设置新选中点，确保“先恢复”的视觉效果或逻辑
+        selectionTimerRef.current = setTimeout(() => {
+          setSelectedNoteId(note.id);
+          selectionTimerRef.current = null;
+        }, 50);
+      }
+      return;
+    }
+
     // If we're opening the same note that was just closed, preserve the editing state
     let noteToEdit = note;
     if (editingNote && editingNote.id === note.id) {
@@ -941,6 +1061,18 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       e.originalEvent?.stopImmediatePropagation();
     }
     
+    // 预览模式下点击集合点也恢复状态
+    if (!isUIVisible) {
+      if (selectionTimerRef.current) {
+        clearTimeout(selectionTimerRef.current);
+        selectionTimerRef.current = null;
+      }
+      setSelectedNoteId(null);
+      // 预选中集合中的所有点
+      setPreSelectedNotes(clusterNotes);
+      return;
+    }
+
     // Sort notes: from south to north, from west to east
     const sortedClusterNotes = sortNotes(clusterNotes);
     const firstNote = sortedClusterNotes[0];
@@ -1233,13 +1365,21 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   }, []);
 
   const handleMapClickInternal = useCallback(() => {
+    if (!isUIVisible) {
+      if (selectionTimerRef.current) {
+        clearTimeout(selectionTimerRef.current);
+        selectionTimerRef.current = null;
+      }
+      setSelectedNoteId(null);
+      setPreSelectedNotes(null);
+    }
     if (pendingPlaceNote) {
       setPendingPlaceNote(null);
     }
     if (onMapClick) {
       onMapClick();
     }
-  }, [pendingPlaceNote, onMapClick]);
+  }, [pendingPlaceNote, onMapClick, isUIVisible]);
   
   // Pin clustering distance threshold (in screen pixels)
   // Now controlled by user setting - removed constant, use clusterThreshold directly
@@ -1695,7 +1835,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
            </>
         )}
         
-        <MapLongPressHandler onLongPress={handleLongPress} />
+        <MapLongPressHandler onLongPress={handleLongPress} isPreviewMode={!isUIVisible} />
 
         {pendingPlaceNote && (
           <Marker
@@ -1775,6 +1915,20 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             pinSize={pinSize}
             themeColor={themeColor}
             clusteredMarkers={clusteredMarkers}
+            selectedNoteId={selectedNoteId}
+            preSelectedNotes={preSelectedNotes}
+            isPreviewMode={!isUIVisible}
+            onSelectNote={(noteId) => {
+              const note = notes.find(n => n.id === noteId);
+              if (note) {
+                setPreSelectedNotes(null);
+                setSelectedNoteId(noteId);
+              }
+            }}
+            onClearSelection={() => {
+              setPreSelectedNotes(null);
+              setSelectedNoteId(null);
+            }}
           />
         )}
 
@@ -1981,214 +2135,93 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           />
         ))}
 
-        {isMapMode && isUIVisible && (
+        {isMapMode && (isUIVisible || !isUIVisible) && (
           <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none">
               {/* First Row: Main Controls */}
               <div className="flex justify-between items-start w-full pointer-events-none">
-                <MapControls 
-                  onLocateCurrentPosition={handleLocateCurrentPosition}
-                  isLocating={isLocating}
-                  mapStyle={mapStyle}
-                  onMapStyleChange={handleLocalMapStyleChange}
-                  mapNotes={getFilteredNotes}
-                  themeColor={themeColor}
-                  showTextLabels={showTextLabels}
-                  setShowTextLabels={setShowTextLabels}
-                  pinSize={pinSize}
-                  setPinSize={setPinSize}
-                  clusterThreshold={clusterThreshold}
-                  setClusterThreshold={setClusterThreshold}
-                  onOpenSettings={() => setShowSettingsPanel(true)}
-                />
+                {isUIVisible ? (
+                  <MapControls 
+                    onLocateCurrentPosition={handleLocateCurrentPosition}
+                    isLocating={isLocating}
+                    mapStyle={mapStyle}
+                    onMapStyleChange={handleLocalMapStyleChange}
+                    mapNotes={getFilteredNotes}
+                    themeColor={themeColor}
+                    showTextLabels={showTextLabels}
+                    setShowTextLabels={setShowTextLabels}
+                    pinSize={pinSize}
+                    setPinSize={setPinSize}
+                    clusterThreshold={clusterThreshold}
+                    setClusterThreshold={setClusterThreshold}
+                    onOpenSettings={() => setShowSettingsPanel(true)}
+                  />
+                ) : (
+                  <div />
+                )}
 
-                {/* Border & Frame Layer Buttons - Top Right (Consolidated) */}
-                <div className="flex items-center gap-1.5 sm:gap-2 pointer-events-auto">
-                  {/* Border Button & Panel */}
-                  <div className="relative">
-                    <button
-                      onClick={handleToggleBorderPanel}
-                      className={`bg-white p-2 sm:p-3 rounded-xl shadow-lg transition-all w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${
-                        borderGeoJSON ? 'text-white' : 'text-gray-700'
-                      } hover:scale-105 active:scale-95`}
-                      style={{ backgroundColor: borderGeoJSON ? themeColor : undefined }}
-                      title={borderGeoJSON ? "Clear Border" : "Region Border"}
-                    >
-                      {borderGeoJSON ? <X size={18} className="sm:w-5 sm:h-5" /> : <Search size={18} className="sm:w-5 sm:h-5" />}
-                    </button>
-
-                    {/* Border Search Panel */}
-                    {showBorderPanel && (
-                      <div
-                        className="absolute right-0 top-full mt-2 w-72 sm:w-80 bg-white rounded-2xl shadow-2xl border border-gray-100 p-4 z-[2000] animate-in fade-in slide-in-from-top-4"
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <div className="flex items-center justify-between mb-3">
-                          <h3 className="text-sm font-bold text-gray-800">Region Border</h3>
-                          <button onClick={() => setShowBorderPanel?.(false)} className="text-gray-400 hover:text-gray-600">
-                            <X size={16} />
-                          </button>
-                        </div>
-
-                        <div className="flex gap-2 mb-3">
-                          <div className="relative flex-1">
-                            <input
-                              autoFocus
-                              type="text"
-                              placeholder="Search region (e.g. London)"
-                              value={borderSearchQuery}
-                              onChange={(e) => setBorderSearchQuery(e.target.value)}
-                              onKeyDown={(e) => e.key === 'Enter' && handleBorderSearch()}
-                              className="w-full pl-3 pr-8 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                            />
-                            {isSearchingBorder && (
-                              <div className="absolute right-2 top-1/2 -translate-y-1/2">
-                                <Loader2 size={14} className="animate-spin text-gray-400" />
-                              </div>
-                            )}
-                          </div>
-                          <button
-                            onClick={handleBorderSearch}
-                            disabled={isSearchingBorder || !borderSearchQuery.trim()}
-                            className="px-3 py-2 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50"
-                            style={{ backgroundColor: themeColor }}
-                          >
-                            Search
-                          </button>
-                        </div>
-
-                        {borderSearchError && (
-                          <div className="text-xs text-red-500 mb-3 px-1">{borderSearchError}</div>
-                        )}
-
-                        {borderSearchResults.length > 0 && (
-                          <div className="max-h-60 overflow-y-auto border-results-list pr-1">
-                            <style>{`
-                              .border-results-list::-webkit-scrollbar {
-                                width: 4px;
-                              }
-                              .border-results-list::-webkit-scrollbar-track {
-                                background: transparent;
-                              }
-                              .border-results-list::-webkit-scrollbar-thumb {
-                                background: ${themeColor}44;
-                                border-radius: 10px;
-                              }
-                              .border-results-list::-webkit-scrollbar-thumb:hover {
-                                background: ${themeColor}88;
-                              }
-                            `}</style>
-                            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">Select a region:</div>
-                            <div className="space-y-1">
-                              {borderSearchResults.map((result: any) => (
-                                <button
-                                  key={`${result.osm_type}-${result.osm_id}`}
-                                  onClick={() => handleSelectBorder(result)}
-                                  className="w-full text-left p-2.5 hover:bg-gray-50 rounded-xl transition-colors border border-transparent hover:border-gray-100 flex flex-col gap-0.5"
-                                >
-                                  <div className="text-sm font-medium text-gray-800 flex items-baseline gap-1 flex-wrap">
-                                    <span>{result.display_name.split(',')[0]}</span>
-                                    {(() => {
-                                      const addr = result.address;
-                                      const self = result.display_name.split(',')[0].trim();
-                                      const parts = result.display_name.split(',').map((p: string) => p.trim());
-                                      
-                                      // 1. Try to find parent from address object with wide range of keys
-                                      let parent = addr?.city || addr?.town || addr?.village || 
-                                                  addr?.municipality || addr?.county || 
-                                                  addr?.state_district || addr?.city_district ||
-                                                  addr?.suburb || addr?.neighbourhood || addr?.state;
-
-                                      // 2. If parent is same as self or missing, fallback to display_name parts
-                                      if (!parent || parent === self) {
-                                        // Find the first part that isn't the name itself, isn't a number (zip), and isn't "China"
-                                        parent = parts.find((p: string) => 
-                                          p !== self && 
-                                          !/^\d+$/.test(p) && 
-                                          p !== '中国' && 
-                                          p !== 'China'
-                                        );
-                                      }
-                                      
-                                      if (parent) {
-                                return (
-                                  <span className="text-xs text-gray-400 font-normal italic">
-                                    , {parent}
-                                  </span>
-                                );
-                              }
-                                      return null;
-                                    })()}
-                                  </div>
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                </div>
+                {/* Top Right Spacer */}
+                <div />
               </div>
 
               {/* Second Row: Sliders (hidden on small screens, available in settings) */}
-              <div className="hidden sm:flex gap-1.5 sm:gap-2 pointer-events-auto"
-                onPointerDown={(e) => {
-                  // Don't stop propagation for slider interactions
-                  const target = e.target as Element;
-                  if (target.closest('.custom-horizontal-slider')) {
-                    return; // Let slider handle the event
-                  }
-                  e.stopPropagation();
-                }}
-                onPointerMove={(e) => {
-                  const target = e.target as Element;
-                  if (target.closest('.custom-horizontal-slider')) {
-                    return; // Let slider handle the event
-                  }
-                  e.stopPropagation();
-                }}
-                onPointerUp={(e) => {
-                  const target = e.target as Element;
-                  if (target.closest('.custom-horizontal-slider')) {
-                    return; // Let slider handle the event
-                  }
-                  e.stopPropagation();
-                }}
-              >
-                {/* Pin Size Control */}
-                <div className="bg-white/90 backdrop-blur rounded-lg shadow-lg border border-gray-100 p-2 flex flex-col items-center gap-1">
-                    <span className="text-xs font-medium text-gray-600 whitespace-nowrap">Pin Size</span>
-                    <CustomHorizontalSlider
-                        value={pinSize}
-                        min={0.5}
-                        max={2.0}
-                        step={0.1}
-                        onChange={setPinSize}
-                        themeColor={themeColor}
-                        width={90}
-                        formatValue={(val) => `${val.toFixed(1)}x`}
-                        mapInstance={mapInstance}
-                    />
-                </div>
+              {isUIVisible && (
+                <div className="hidden sm:flex gap-1.5 sm:gap-2 pointer-events-auto"
+                  onPointerDown={(e) => {
+                    // Don't stop propagation for slider interactions
+                    const target = e.target as Element;
+                    if (target.closest('.custom-horizontal-slider')) {
+                      return; // Let slider handle the event
+                    }
+                    e.stopPropagation();
+                  }}
+                  onPointerMove={(e) => {
+                    const target = e.target as Element;
+                    if (target.closest('.custom-horizontal-slider')) {
+                      return; // Let slider handle the event
+                    }
+                    e.stopPropagation();
+                  }}
+                  onPointerUp={(e) => {
+                    const target = e.target as Element;
+                    if (target.closest('.custom-horizontal-slider')) {
+                      return; // Let slider handle the event
+                    }
+                    e.stopPropagation();
+                  }}
+                >
+                  {/* Pin Size Control */}
+                  <div className="bg-white/90 backdrop-blur rounded-lg shadow-lg border border-gray-100 p-2 flex flex-col items-center gap-1">
+                      <span className="text-xs font-medium text-gray-600 whitespace-nowrap">Pin Size</span>
+                      <CustomHorizontalSlider
+                          value={pinSize}
+                          min={0.5}
+                          max={2.0}
+                          step={0.1}
+                          onChange={setPinSize}
+                          themeColor={themeColor}
+                          width={90}
+                          formatValue={(val) => `${val.toFixed(1)}x`}
+                          mapInstance={mapInstance}
+                      />
+                  </div>
 
-                {/* Cluster Threshold Control */}
-                <div className="bg-white/90 backdrop-blur rounded-lg shadow-lg border border-gray-100 p-2 flex flex-col items-center gap-1">
-                    <span className="text-xs font-medium text-gray-600 whitespace-nowrap">Cluster Threshold</span>
-                    <CustomHorizontalSlider
-                        value={clusterThreshold}
-                        min={1}
-                        max={100}
-                        step={5}
-                        onChange={setClusterThreshold}
-                        themeColor={themeColor}
-                        width={90}
-                        formatValue={(val) => `${val}px`}
-                        mapInstance={mapInstance}
-                    />
+                  {/* Cluster Threshold Control */}
+                  <div className="bg-white/90 backdrop-blur rounded-lg shadow-lg border border-gray-100 p-2 flex flex-col items-center gap-1">
+                      <span className="text-xs font-medium text-gray-600 whitespace-nowrap">Cluster Threshold</span>
+                      <CustomHorizontalSlider
+                          value={clusterThreshold}
+                          min={1}
+                          max={100}
+                          step={5}
+                          onChange={setClusterThreshold}
+                          themeColor={themeColor}
+                          width={90}
+                          formatValue={(val) => `${val}px`}
+                          mapInstance={mapInstance}
+                      />
+                  </div>
                 </div>
-              </div>
+              )}
           </div>
         )}
 
@@ -2215,7 +2248,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       </MapContainer>
 
       {/* Border & Frame Layer Buttons - Top Right */}
-      {isMapMode && isUIVisible && (
+      {isMapMode && (isUIVisible || !isUIVisible) && (
         <div
           className="fixed top-2 sm:top-4 right-2 sm:right-4 z-[500] pointer-events-auto flex items-center gap-1.5 sm:gap-2"
           onPointerDown={(e) => e.stopPropagation()}
@@ -2244,12 +2277,21 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                   <h3 className="text-sm font-bold text-gray-800">Map Search</h3>
                   <div className="flex items-center gap-2">
                     {borderGeoJSON && (
-                      <button
-                        onClick={() => setBorderGeoJSON?.(null)}
-                        className="text-[10px] font-bold px-2 py-1 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors border border-red-100"
-                      >
-                        Clear Border
-                      </button>
+                      <>
+                        <button
+                          onClick={handleCopyBorder}
+                          className="p-1.5 rounded-lg bg-gray-50 text-gray-500 hover:bg-gray-100 transition-colors border border-gray-100"
+                          title="Copy Border GeoJSON"
+                        >
+                          <Copy size={14} />
+                        </button>
+                        <button
+                          onClick={() => setBorderGeoJSON?.(null)}
+                          className="text-[10px] font-bold px-2 py-1 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors border border-red-100"
+                        >
+                          Clear Border
+                        </button>
+                      </>
                     )}
                     <button onClick={() => setShowBorderPanel?.(false)} className="text-gray-400 hover:text-gray-600">
                       <X size={16} />
@@ -2383,7 +2425,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             )}
           </div>
 
-          {isUIVisible && (
+          {(isUIVisible || !isUIVisible) && (
             <div className="relative" ref={frameLayerRef}>
               <button
                 onClick={(e) => {
@@ -2419,81 +2461,149 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
                 <Layers size={18} className="sm:w-5 sm:h-5" />
               </button>
               {showFrameLayerPanel && (
-                <div
-                  className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-[2000]"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <div className="px-3 py-2 text-xs font-bold text-gray-500 uppercase tracking-wide">Frame Layers</div>
-                  <div className="h-px bg-gray-100 mb-1" />
-
-                  {/* Show All Option */}
-                  <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-gray-700 font-medium">Show All</span>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={showAllFrames}
-                      onChange={(e) => {
-                        e.stopPropagation();
-                        setShowAllFrames(!showAllFrames);
-                      }}
-                      onPointerDown={(e) => e.stopPropagation()}
+                <div className="absolute right-0 top-full flex gap-2 items-start pointer-events-none mt-2">
+                  {/* Frame Description Panel */}
+                  {activeFrame && (
+                    <div 
+                      className="w-72 sm:w-80 bg-white rounded-xl shadow-xl border border-gray-100 flex flex-col pointer-events-auto overflow-hidden animate-in fade-in slide-in-from-right-4"
+                      style={{ maxHeight: '60vh' }}
                       onClick={(e) => e.stopPropagation()}
-                      className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
-                        showAllFrames
-                          ? ''
-                          : 'bg-transparent'
-                      }`}
-                      style={{
-                        backgroundColor: showAllFrames ? themeColor : 'transparent',
-                        borderColor: themeColor
-                      }}
-                    />
-                  </div>
-
-                  {/* Frame Options - only show when Show All is disabled */}
-                  {!showAllFrames && (
-                    <>
-                      <div className="h-px bg-gray-100 my-1" />
-                      {project.frames.map((frame) => (
-                  <div key={frame.id} className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
-                    <div className="flex items-center gap-2">
-                      <div
-                        className="w-3 h-3 rounded border border-gray-300"
-                        style={{ backgroundColor: frame.color }}
-                      />
-                      <span className="text-sm text-gray-700 truncate" title={frame.title}>
-                        {frame.title}
-                      </span>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={frameLayerVisibility[frame.id] ?? true}
-                      onChange={(e) => {
-                        e.stopPropagation();
-                        setFrameLayerVisibility(prev => ({
-                          ...prev,
-                          [frame.id]: !prev[frame.id]
-                        }));
-                      }}
                       onPointerDown={(e) => e.stopPropagation()}
-                      onClick={(e) => e.stopPropagation()}
-                      className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
-                        frameLayerVisibility[frame.id] ?? true
-                          ? ''
-                          : 'bg-transparent'
-                      }`}
-                      style={{
-                        backgroundColor: (frameLayerVisibility[frame.id] ?? true) ? themeColor : 'transparent',
-                        borderColor: themeColor
-                      }}
-                    />
-                  </div>
-                ))}
-                    </>
+                    >
+                      <div className="p-3 border-b border-gray-100 flex items-center justify-between bg-gray-50/50 shrink-0">
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: activeFrame.color }} />
+                          <h3 className="font-bold text-gray-800 truncate text-xs">{activeFrame.title}</h3>
+                        </div>
+                        {editingFrameDescription === null ? (
+                          <button 
+                            onClick={() => setEditingFrameDescription(activeFrame.description || '')}
+                            className="p-1 hover:bg-gray-200 rounded transition-colors text-gray-500"
+                            title="Edit Description"
+                          >
+                            <Edit3 size={12} />
+                          </button>
+                        ) : (
+                          <button 
+                            onClick={handleSaveFrameDescription}
+                            className="p-1 hover:bg-green-100 text-green-600 rounded transition-colors"
+                            title="Save Description"
+                          >
+                            <Save size={12} />
+                          </button>
+                        )}
+                      </div>
+                      
+                      <div className="flex-1 overflow-y-auto p-3 custom-scrollbar bg-white">
+                        {editingFrameDescription !== null ? (
+                          <textarea
+                            autoFocus
+                            value={editingFrameDescription}
+                            onChange={(e) => setEditingFrameDescription(e.target.value)}
+                            className="w-full h-full min-h-[100px] bg-transparent border-none focus:ring-0 p-0 text-xs text-gray-800 placeholder-gray-400 resize-none"
+                            placeholder="Add a description for this layer..."
+                          />
+                        ) : (
+                          <div className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap break-words">
+                            {activeFrame.description || (
+                              <span className="text-gray-400 italic">No description added yet. Click edit icon.</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   )}
+
+                  {/* Frame List Panel */}
+                  <div
+                    className="w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 pointer-events-auto shrink-0"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="px-3 py-2 text-xs font-bold text-gray-500 uppercase tracking-wide">Frame Layers</div>
+                    <div className="h-px bg-gray-100 mb-1" />
+
+                    {/* Show All Option */}
+                    <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-gray-700 font-medium">Show All</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={showAllFrames}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          setShowAllFrames(!showAllFrames);
+                        }}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
+                        className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
+                          showAllFrames
+                            ? ''
+                            : 'bg-transparent'
+                        }`}
+                        style={{
+                          backgroundColor: showAllFrames ? themeColor : 'transparent',
+                          borderColor: themeColor
+                        }}
+                      />
+                    </div>
+
+                    {/* Frame Options - only show when Show All is disabled */}
+                    {!showAllFrames && (
+                      <>
+                        <div className="h-px bg-gray-100 my-1" />
+                        {project.frames?.map((frame) => (
+                    <div 
+                      key={frame.id} 
+                      className="px-3 py-2 flex items-center justify-between hover:bg-gray-50 cursor-pointer group"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const isMulti = e.ctrlKey || e.metaKey || e.shiftKey;
+                        if (isMulti) {
+                          setFrameLayerVisibility(prev => ({
+                            ...prev,
+                            [frame.id]: !prev[frame.id]
+                          }));
+                        } else {
+                          const newVisibility: Record<string, boolean> = {};
+                          project.frames?.forEach(f => {
+                            newVisibility[f.id] = f.id === frame.id;
+                          });
+                          setFrameLayerVisibility(newVisibility);
+                        }
+                      }}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="w-3 h-3 rounded border border-gray-300"
+                          style={{ backgroundColor: frame.color }}
+                        />
+                        <span className="text-sm text-gray-700 truncate" title={frame.title}>
+                          {frame.title}
+                        </span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={frameLayerVisibility[frame.id] ?? true}
+                        readOnly
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
+                        className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none pointer-events-none ${
+                          frameLayerVisibility[frame.id] ?? true
+                            ? ''
+                            : 'bg-transparent'
+                        }`}
+                        style={{
+                          backgroundColor: (frameLayerVisibility[frame.id] ?? true) ? themeColor : 'transparent',
+                          borderColor: themeColor
+                        }}
+                      />
+                    </div>
+                  ))}
+                      </>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -2515,6 +2625,114 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             onSaveWithoutClose={saveCurrentNoteWithoutClose}
             onSwitchToBoardView={(coords) => onSwitchToBoardView(coords, mapInstance)}
         />
+      )}
+
+      {/* 预览模式选中展示面板 */}
+      {!isUIVisible && selectedNote && (
+        <div 
+          className="fixed top-4 left-4 z-[1000] w-72 sm:w-80 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden animate-in slide-in-from-left-8 duration-500 ease-out pointer-events-auto flex flex-col"
+          style={{ maxHeight: 'calc(100vh - 2rem)' }}
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="p-4 pb-2 flex items-start justify-between gap-3 border-b border-gray-100 shrink-0">
+            <div className="flex items-start gap-3 flex-1 min-w-0">
+              {selectedNote.emoji && (
+                <span className="text-2xl mt-0.5 shrink-0">{selectedNote.emoji}</span>
+              )}
+              <div className="min-w-0 flex-1">
+                <h3 className="text-lg font-bold text-gray-900 leading-tight line-clamp-2 break-words">
+                  {(selectedNote.text || '').split('\n')[0].trim() || 'Untitled Note'}
+                </h3>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto custom-scrollbar">
+            {/* 文字内容 - 第一个回车后的内容作为正文 */}
+            {selectedNote.text && (() => {
+              const firstNewlineIndex = selectedNote.text.indexOf('\n');
+              if (firstNewlineIndex === -1) return null;
+              
+              const displayDetailText = selectedNote.text.substring(firstNewlineIndex).trim();
+              if (!displayDetailText) return null;
+
+              return (
+                <div className="px-4 py-3 text-gray-800 text-sm leading-relaxed whitespace-pre-wrap break-words border-b border-gray-50 bg-gray-50/30">
+                  {displayDetailText}
+                </div>
+              );
+            })()}
+
+            {/* Large Image with Navigation */}
+            {(() => {
+              const allImages = [...(selectedNote.images || [])];
+              if (selectedNote.sketch) allImages.push(selectedNote.sketch);
+              
+              if (allImages.length === 0) return null;
+
+              return (
+                <div className="relative group aspect-[4/3] bg-gray-100 flex items-center justify-center shrink-0">
+                  <img
+                    src={allImages[currentPreviewImageIndex]}
+                    alt="Preview"
+                    className="w-full h-full object-cover"
+                  />
+                  
+                  {/* Navigation Arrows */}
+                  {allImages.length > 1 && (
+                    <>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCurrentPreviewImageIndex(prev => (prev - 1 + allImages.length) % allImages.length);
+                        }}
+                        className="absolute left-2 p-1.5 bg-black/30 hover:bg-black/50 text-white rounded-full transition-colors backdrop-blur-sm"
+                      >
+                        <ChevronLeft size={18} />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCurrentPreviewImageIndex(prev => (prev + 1) % allImages.length);
+                        }}
+                        className="absolute right-2 p-1.5 bg-black/30 hover:bg-black/50 text-white rounded-full transition-colors backdrop-blur-sm"
+                      >
+                        <ChevronRight size={18} />
+                      </button>
+                      
+                      {/* Indicator dots */}
+                      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1 px-2 py-1 bg-black/20 backdrop-blur-md rounded-full">
+                        {allImages.map((_, idx) => (
+                          <div
+                            key={idx}
+                            className={`w-1 h-1 rounded-full transition-all ${
+                              idx === currentPreviewImageIndex ? 'bg-white w-2' : 'bg-white/40'
+                            }`}
+                          />
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+          
+          <style>{`
+            .custom-scrollbar::-webkit-scrollbar {
+              width: 4px;
+            }
+            .custom-scrollbar::-webkit-scrollbar-track {
+              background: transparent;
+            }
+            .custom-scrollbar::-webkit-scrollbar-thumb {
+              background: #E5E7EB;
+              border-radius: 10px;
+            }
+          `}</style>
+        </div>
       )}
 
       {/* 隐藏的文件输入 */}

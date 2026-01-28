@@ -4,9 +4,10 @@ import { Coordinates } from '../../types';
 
 interface MapLongPressHandlerProps {
   onLongPress: (coords: Coordinates) => void;
+  isPreviewMode?: boolean;
 }
 
-export const MapLongPressHandler: React.FC<MapLongPressHandlerProps> = ({ onLongPress }) => {
+export const MapLongPressHandler: React.FC<MapLongPressHandlerProps> = ({ onLongPress, isPreviewMode = false }) => {
   const map = useMap();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startPosRef = useRef<{ x: number, y: number } | null>(null);
@@ -89,6 +90,7 @@ export const MapLongPressHandler: React.FC<MapLongPressHandlerProps> = ({ onLong
     };
 
     const handleStart = (e: TouchEvent | MouseEvent) => {
+      if (isPreviewMode) return;
       if (e instanceof MouseEvent && e.button !== 0) return;
 
       // Check if clicked on UI element

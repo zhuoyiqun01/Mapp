@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { get } from 'idb-keyval';
+import { Note } from '../../types';
 
 interface UseAppStateReturn {
   // Theme
@@ -37,6 +38,12 @@ interface UseAppStateReturn {
     startY: number;
     startButtonY: number;
   }>;
+
+  // Route planning
+  isRouteMode: boolean;
+  setIsRouteMode: (mode: boolean) => void;
+  waypoints: Note[];
+  setWaypoints: (waypoints: Note[]) => void;
 }
 
 export const useAppState = (): UseAppStateReturn => {
@@ -48,6 +55,10 @@ export const useAppState = (): UseAppStateReturn => {
   const [borderGeoJSON, setBorderGeoJSON] = useState<any | null>(null);
   const [isRunningCleanup, setIsRunningCleanup] = useState(false);
   const [showCleanupMenu, setShowCleanupMenu] = useState(false);
+
+  // Route planning
+  const [isRouteMode, setIsRouteMode] = useState(false);
+  const [waypoints, setWaypoints] = useState<Note[]>([]);
 
   const mapViewFileInputRef = useRef<HTMLInputElement | null>(null);
   const sidebarButtonDragRef = useRef({ isDragging: false, startY: 0, startButtonY: 0 });
@@ -92,7 +103,11 @@ export const useAppState = (): UseAppStateReturn => {
     setIsRunningCleanup,
     showCleanupMenu,
     setShowCleanupMenu,
-    sidebarButtonDragRef
+    sidebarButtonDragRef,
+    isRouteMode,
+    setIsRouteMode,
+    waypoints,
+    setWaypoints
   };
 };
 

@@ -56,6 +56,7 @@ export interface Connection {
 export interface Frame {
   id: string;
   title: string;
+  description?: string; // 图层描述
   x: number;
   y: number;
   width: number;

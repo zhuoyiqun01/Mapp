@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Map as MapIcon, Grid, Menu, Loader2, Table2, Cloud, CloudOff, CheckCircle2, AlertCircle, RefreshCw, Image as ImageIcon, Plus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapView } from './components/MapView';
@@ -44,6 +44,10 @@ import {
 } from './utils/storage';
 
 export default function App() {
+  const emptyNotes = useMemo(() => [], []);
+  const emptyFrames = useMemo(() => [], []);
+  const emptyConnections = useMemo(() => [], []);
+
   // Use custom hooks for state management
   const projectState = useProjectState();
 
@@ -108,7 +112,11 @@ export default function App() {
     setIsRunningCleanup,
     showCleanupMenu,
     setShowCleanupMenu,
-    sidebarButtonDragRef
+    sidebarButtonDragRef,
+    isRouteMode,
+    setIsRouteMode,
+    waypoints,
+    setWaypoints
   } = appState;
   
 
@@ -1155,22 +1163,26 @@ export default function App() {
               }
             }}
             isUIVisible={isUIVisible}
+            isRouteMode={isRouteMode}
+            setIsRouteMode={setIsRouteMode}
+            waypoints={waypoints}
+            setWaypoints={setWaypoints}
           />
         ) : viewMode === 'board' ? (
           <BoardView 
-            notes={activeProject.notes}
+            notes={activeProject.notes || emptyNotes}
             onAddNote={addNote}
             onUpdateNote={updateNote}
             onDeleteNote={deleteNote}
             onDeleteNotesBatch={deleteNotesBatch}
             onToggleEditor={setIsEditorOpen}
             onEditModeChange={setIsBoardEditMode}
-            connections={activeProject.connections || []}
+            connections={activeProject.connections || emptyConnections}
             onUpdateConnections={async (connections) => {
               if (!currentProjectId || !activeProject) return;
               await projectState.updateProject({ ...activeProject, connections });
             }}
-            frames={activeProject.frames || []}
+            frames={activeProject.frames || emptyFrames}
             onUpdateFrames={async (frames) => {
               if (!currentProjectId || !activeProject) return;
               await projectState.updateProject({ ...activeProject, frames });

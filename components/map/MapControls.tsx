@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useMap } from 'react-leaflet';
 import { Note, Frame } from '../../types';
 import { THEME_COLOR } from '../../constants';
-import { Search, Locate, Loader2, X, Check, Satellite, Type, Settings, MapPin } from 'lucide-react';
+import { Search, Locate, Loader2, X, Check, Satellite, Type, Settings, MapPin, Route } from 'lucide-react';
 
 interface MapControlsProps {
   onLocateCurrentPosition: () => void;
@@ -209,7 +209,6 @@ export const MapControls: React.FC<MapControlsProps> = ({
       >
         <Type size={18} className="sm:w-5 sm:h-5" />
       </button>
-
 
       <button
         onClick={(e) => {

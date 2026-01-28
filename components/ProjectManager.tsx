@@ -16,75 +16,71 @@ const ExportResolutionDialog: React.FC<{
   currentDimensions: { width: number; height: number };
   themeColor: string;
 }> = ({ isOpen, onClose, onConfirm, currentDimensions, themeColor }) => {
-  const [selectedRatio, setSelectedRatio] = useState(1);
+  const [selectedRatio, setSelectedRatio] = useState(2); // 默认 2x 效果更好
 
   if (!isOpen) return null;
 
   const ratios = [
-    { label: '1x', value: 1 },
-    { label: '2x', value: 2 },
-    { label: '3x', value: 3 },
-    { label: '4x', value: 4 }
+    { label: '1x (标准)', value: 1 },
+    { label: '2x (清晰)', value: 2 },
+    { label: '3x (高清)', value: 3 },
+    { label: '4x (超清)', value: 4 }
   ];
 
-  const selectedOption = ratios.find(r => r.value === selectedRatio);
   const finalWidth = Math.round(currentDimensions.width * selectedRatio);
   const finalHeight = Math.round(currentDimensions.height * selectedRatio);
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[3000]" onClick={onClose}>
       <div
-        className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6"
+        className="bg-white rounded-2xl shadow-2xl max-w-[320px] w-full mx-4 p-5 animate-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-3 mb-4">
-          <ZoomIn className="w-6 h-6" style={{ color: themeColor }} />
-          <h3 className="text-lg font-semibold text-gray-900">导出图片</h3>
+        <div className="flex items-center gap-2.5 mb-4">
+          <div className="p-2 rounded-lg" style={{ backgroundColor: `${themeColor}15` }}>
+            <ImageIcon className="w-5 h-5" style={{ color: themeColor }} />
+          </div>
+          <h3 className="text-base font-bold text-gray-900">导出当前视图</h3>
         </div>
 
-        <div className="mb-4">
-          <p className="text-sm text-gray-600 mb-2">当前屏幕尺寸：</p>
-          <p className="font-mono text-sm bg-gray-50 px-3 py-2 rounded">
-            {currentDimensions.width} × {currentDimensions.height} 像素
-          </p>
-        </div>
+        <div className="space-y-4 mb-6">
+          <div>
+            <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 ml-0.5">
+              选择分辨率
+            </label>
+            <select
+              value={selectedRatio}
+              onChange={(e) => setSelectedRatio(Number(e.target.value))}
+              className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm font-medium outline-none transition-all cursor-pointer hover:border-gray-300"
+              style={{ focusRingColor: themeColor } as any}
+              onFocus={(e) => e.currentTarget.style.borderColor = themeColor}
+              onBlur={(e) => e.currentTarget.style.borderColor = '#E5E7EB'}
+            >
+              {ratios.map((ratio) => (
+                <option key={ratio.value} value={ratio.value}>
+                  {ratio.label}
+                </option>
+              ))}
+            </select>
+          </div>
 
-        <div className="mb-6">
-          <p className="text-sm text-gray-600 mb-3">选择分辨率倍数：</p>
-          <div className="space-y-2">
-            {ratios.map((ratio) => (
-              <label
-                key={ratio.value}
-                className="flex items-start gap-3 p-3 rounded-lg border cursor-pointer hover:bg-gray-50 transition-colors"
-                style={{
-                  borderColor: selectedRatio === ratio.value ? themeColor : '#E5E7EB',
-                  backgroundColor: selectedRatio === ratio.value ? `${themeColor}15` : 'transparent'
-                }}
-              >
-                <input
-                  type="radio"
-                  name="resolution"
-                  value={ratio.value}
-                  checked={selectedRatio === ratio.value}
-                  onChange={() => setSelectedRatio(ratio.value)}
-                  className="mt-0.5 focus:ring-blue-500"
-                  style={{ color: themeColor }}
-                />
-                <div className="flex-1">
-                  <div className="font-medium text-sm">{ratio.label}</div>
-                  <div className="font-mono text-xs text-gray-600 mt-0.5">
-                    {Math.round(currentDimensions.width * ratio.value)} × {Math.round(currentDimensions.height * ratio.value)}
-                  </div>
-                </div>
-              </label>
-            ))}
+          <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
+            <div className="flex justify-between items-center mb-1">
+              <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">预计尺寸</span>
+              <span className="text-[10px] px-1.5 py-0.5 bg-white border border-gray-200 rounded-md text-gray-500 font-mono">
+                {selectedRatio}x
+              </span>
+            </div>
+            <p className="font-mono text-sm text-gray-700 font-bold">
+              {finalWidth} × {finalHeight} <span className="text-[10px] font-normal text-gray-400 ml-1">px</span>
+            </p>
           </div>
         </div>
 
         <div className="flex gap-3">
           <button
             onClick={onClose}
-            className="flex-1 px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+            className="flex-1 px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors text-sm font-medium"
           >
             取消
           </button>
@@ -93,7 +89,7 @@ const ExportResolutionDialog: React.FC<{
               onConfirm(selectedRatio);
               onClose();
             }}
-            className="flex-1 px-4 py-2 text-white rounded-lg transition-colors"
+            className="flex-1 px-4 py-2 text-white rounded-lg transition-colors text-sm font-medium"
             style={{ backgroundColor: themeColor }}
             onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${themeColor}E6`}
             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
