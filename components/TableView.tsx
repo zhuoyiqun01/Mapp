@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Note, Project, Frame } from '../types';
 import { GripVertical, Edit2, Check, Plus, X, ExternalLink } from 'lucide-react';
 import { TAG_COLORS } from '../constants';
-import { generateId } from '../utils';
+import { generateId, parseNoteContent } from '../utils';
 import { NoteEditor } from './NoteEditor';
 
 interface TableViewProps {
@@ -402,7 +402,7 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
                         onClick={() => handleTextEdit(note)}
                         className="flex-1 text-gray-800 cursor-pointer hover:bg-yellow-50 p-1 rounded-lg transition-colors whitespace-nowrap overflow-hidden text-ellipsis"
                       >
-                        {note.text || <span className="text-gray-400 italic">Click to edit...</span>}
+                        {parseNoteContent(note.text || '').title || <span className="text-gray-400 italic">Click to edit...</span>}
                       </div>
                     )}
                   </div>
@@ -536,7 +536,7 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
                         className="flex px-4 py-3 border-b border-gray-100 hover:bg-gray-50 transition-colors"
                       >
                         <div className="flex-1 text-gray-800 whitespace-pre-wrap break-words">
-                          {note.text || <span className="text-gray-400 italic">Empty note</span>}
+                          {parseNoteContent(note.text || '').title || <span className="text-gray-400 italic">Empty note</span>}
                         </div>
                       </div>
                     ))

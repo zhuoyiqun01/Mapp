@@ -1,5 +1,18 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+@source "./**/*.{js,ts,jsx,tsx,html}";
+
+@theme {
+  --color-theme: #FFDD00;
+  --color-theme-dark: #E6C700;
+}
+
 html, body, #root {
   height: 100%;
+}
+
+body {
+  @apply bg-gray-50 text-gray-800 antialiased;
 }
 
 .app-root {
@@ -53,5 +66,3 @@ html, body, #root {
     max-width: 256px;
   }
 }
-
-

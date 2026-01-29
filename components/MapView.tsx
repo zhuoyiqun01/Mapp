@@ -140,6 +140,8 @@ const CustomHorizontalSlider: React.FC<{
   );
 };
 import { Search, Locate, Loader2, X, Check, Satellite, Plus, Image as ImageIcon, FileJson, Type, Layers, Settings, Globe, ChevronLeft, ChevronRight, Copy, Edit3, Save } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import { parseNoteContent } from '../utils';
 import exifr from 'exifr';
 import { NoteEditor } from './NoteEditor';
 import { generateId, fileToBase64 } from '../utils';
@@ -2643,24 +2645,33 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               )}
               <div className="min-w-0 flex-1">
                 <h3 className="text-lg font-bold text-gray-900 leading-tight line-clamp-2 break-words">
-                  {(selectedNote.text || '').split('\n')[0].trim() || 'Untitled Note'}
+                  {parseNoteContent(selectedNote.text || '').title || 'Untitled Note'}
                 </h3>
               </div>
             </div>
           </div>
 
           <div className="flex-1 overflow-y-auto custom-scrollbar">
-            {/* 文字内容 - 第一个回车后的内容作为正文 */}
+            {/* 文字内容 - Markdown 渲染 */}
             {selectedNote.text && (() => {
-              const firstNewlineIndex = selectedNote.text.indexOf('\n');
-              if (firstNewlineIndex === -1) return null;
-              
-              const displayDetailText = selectedNote.text.substring(firstNewlineIndex).trim();
-              if (!displayDetailText) return null;
+              const { detail } = parseNoteContent(selectedNote.text);
+              if (!detail.trim()) return null;
 
               return (
-                <div className="px-4 py-3 text-gray-800 text-sm leading-relaxed whitespace-pre-wrap break-words border-b border-gray-50 bg-gray-50/30">
-                  {displayDetailText}
+                <div className="px-4 py-3 text-gray-800 text-sm leading-relaxed break-words border-b border-gray-50 bg-gray-50/30 mapping-preview-markdown">
+                  <ReactMarkdown>{detail}</ReactMarkdown>
+                  <style>{`
+                    .mapping-preview-markdown p { margin-bottom: 0.5rem; }
+                    .mapping-preview-markdown p:last-child { margin-bottom: 0; }
+                    .mapping-preview-markdown h1 { font-size: 1.25rem; font-weight: 800; margin: 0.8rem 0 0.4rem; }
+                    .mapping-preview-markdown h2 { font-size: 1.1rem; font-weight: 700; margin: 0.7rem 0 0.3rem; }
+                    .mapping-preview-markdown h3 { font-size: 1rem; font-weight: 600; margin: 0.6rem 0 0.2rem; }
+                    .mapping-preview-markdown ul, .mapping-preview-markdown ol { margin-bottom: 0.5rem; padding-left: 1.2rem; }
+                    .mapping-preview-markdown li { margin-bottom: 0.2rem; }
+                    .mapping-preview-markdown blockquote { border-left: 3px solid #e5e7eb; padding-left: 0.8rem; color: #6b7280; font-style: italic; margin: 0.5rem 0; }
+                    .mapping-preview-markdown code { background: #f3f4f6; padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.85em; font-family: monospace; }
+                    .mapping-preview-markdown pre { background: #f9fafb; padding: 0.5rem; border-radius: 6px; overflow-x: auto; margin: 0.5rem 0; border: 1px solid #f3f4f6; }
+                  `}</style>
                 </div>
               );
             })()}

@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Grid, List, Image as ImageIcon, MapPin, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Note, Project, Frame } from '../types';
+import { parseNoteContent } from '../utils';
 
 interface GalleryViewProps {
   project: Project;
@@ -170,7 +171,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                   {/* Label indicator */}
                   {item.note.text && (
                     <div className="absolute bottom-1 left-1 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded max-w-[90%] truncate">
-                      {item.note.text.split('\n')[0].trim()}
+                      {parseNoteContent(item.note.text).title}
                     </div>
                   )}
                 </div>
@@ -198,7 +199,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                     {/* Label indicator */}
                     {item.note.text && (
                       <div className="absolute bottom-1 left-1 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded max-w-[90%] truncate">
-                        {item.note.text.split('\n')[0].trim()}
+                        {parseNoteContent(item.note.text).title}
                       </div>
                     )}
                   </div>
@@ -229,7 +230,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                 )}
                 <div className="min-w-0 flex-1">
                   <h3 className="text-lg font-bold text-gray-900 leading-tight line-clamp-2 break-words">
-                    {(selectedImage.note.text || '').split('\n')[0].trim() || 'Untitled Note'}
+                    {parseNoteContent(selectedImage.note.text || '').title || 'Untitled Note'}
                   </h3>
                 </div>
               </div>

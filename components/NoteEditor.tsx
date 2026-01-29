@@ -3,10 +3,16 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom';
 import { Note, Tag } from '../types';
 import { EMOJI_LIST, EMOJI_CATEGORIES, TAG_COLORS, THEME_COLOR } from '../constants';
-import { createTag, fileToBase64, generateId } from '../utils';
-import { X, Camera, Plus, Check, PenTool, Minus, Bold, Image as ImageIcon, Trash2, ArrowLeft, ArrowRight, Locate, ArrowUp, Star } from 'lucide-react';
+import { createTag, fileToBase64, generateId, parseNoteContent } from '../utils';
+import { X, Camera, PenTool, Trash2, ArrowLeft, ArrowRight, Locate, ArrowUp, Star, Check, Eye, Code, Zap } from 'lucide-react';
 import { DrawingCanvas } from './DrawingCanvas';
 import { motion } from 'framer-motion';
+import ReactMarkdown from 'react-markdown';
+import { useEditor, EditorContent } from '@tiptap/react';
+import { Extension } from '@tiptap/core';
+import StarterKit from '@tiptap/starter-kit';
+import Placeholder from '@tiptap/extension-placeholder';
+import { Markdown } from 'tiptap-markdown';
 
 interface NoteEditorProps {
   initialNote?: Partial<Note>;
@@ -23,15 +29,44 @@ interface NoteEditorProps {
   onSwitchToBoardView?: (coords?: { x: number; y: number }, mapInstance?: any) => void;
 }
 
-const DEFAULT_BG = '#FFFDF5';
-const PASTEL_COLORS = [
-  '#FFFDF5', // Default Off-white/Yellowish
-  '#FEF3C7', // Amber-100
-  '#D1FAE5', // Emerald-100
-  '#DBEAFE', // Blue-100
-  '#F3E8FF', // Purple-100
-  '#FFE4E6', // Rose-100
-];
+const DEFAULT_BG = '#FFFFFF';
+
+// Custom extension to handle Feishu-like backspace behavior
+const SmartBackspace = Extension.create({
+  name: 'smartBackspace',
+  priority: 1100, // 极高优先级
+  addKeyboardShortcuts() {
+    return {
+      Backspace: ({ editor }) => {
+        const { selection } = editor.state;
+        const { $from, empty } = selection;
+
+        // 只有在光标处且在当前块的最开始时处理
+        if (!empty || $from.parentOffset !== 0) {
+          return false;
+        }
+
+        // 优先级 1: 处理列表项（飞书最常用的操作）
+        if (editor.isActive('listItem')) {
+          // 强制提升列表项，这会破除列表格式变回普通文本
+          return editor.commands.liftListItem('listItem');
+        }
+
+        // 优先级 2: 处理标题
+        if (editor.isActive('heading')) {
+          return editor.commands.setParagraph();
+        }
+
+        // 优先级 3: 处理引用
+        if (editor.isActive('blockquote')) {
+          return editor.commands.toggleBlockquote();
+        }
+
+        return false;
+      },
+    };
+  },
+});
 
 export const NoteEditor: React.FC<NoteEditorProps> = ({ 
   initialNote, 
@@ -51,13 +86,55 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [selectedEmojiCategory, setSelectedEmojiCategory] = useState<keyof typeof EMOJI_CATEGORIES>('Recent');
   const [text, setText] = useState(initialNote?.text || '');
-  const [fontSize, setFontSize] = useState<number>(initialNote?.fontSize || 3); 
-  const [isBold, setIsBold] = useState(initialNote?.isBold || false);
+  
+  // Initialize TipTap editor for Feishu-like experience
+  const editor = useEditor({
+    extensions: [
+      SmartBackspace,
+      StarterKit.configure({
+        heading: {
+          levels: [1, 2, 3],
+        },
+      }),
+      Placeholder.configure({
+        placeholder: '在此输入内容 (支持 Markdown 语法)...',
+      }),
+      Markdown.configure({
+        html: false,
+        tightLists: true,
+      }),
+    ],
+    content: text,
+    onUpdate: ({ editor }) => {
+      // @ts-ignore
+      const markdown = editor.storage.markdown.getMarkdown();
+      setText(markdown);
+    },
+    editorProps: {
+      attributes: {
+        class: 'prose focus:outline-none min-h-[300px] p-6 text-gray-800 leading-relaxed max-w-none tiptap-editor',
+      },
+    },
+  });
+
+  // Sync external text changes to editor only when switching notes
+  useEffect(() => {
+    if (editor && initialNote?.id) {
+      const currentMarkdown = (editor.storage.markdown as any).getMarkdown();
+      if (initialNote.text !== currentMarkdown) {
+        editor.commands.setContent(initialNote.text || '');
+      }
+    }
+  }, [initialNote?.id, editor]);
+
+  const fontSize = 3; 
+  const isBold = false;
   const [isFavorite, setIsFavorite] = useState<boolean>(initialNote?.isFavorite ?? false);
-  const [color, setColor] = useState(initialNote?.color || DEFAULT_BG);
+  const color = '#FFFFFF';
   const [tags, setTags] = useState<Tag[]>(initialNote?.tags || []);
   const [images, setImages] = useState<string[]>(initialNote?.images || []);
   const [sketch, setSketch] = useState<string | undefined>(initialNote?.sketch);
+  const [isPreviewMode, setIsPreviewMode] = useState(true);
   
   // Image processing state
   const [isProcessingImages, setIsProcessingImages] = useState(false);
@@ -79,18 +156,13 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [cursorAtDetail, setCursorAtDetail] = useState(false);
 
   const updateCursorPosition = useCallback(() => {
     if (!textareaRef.current) return;
-    const pos = textareaRef.current.selectionStart;
-    const firstNewline = text.indexOf('\n');
-    setCursorAtDetail(firstNewline !== -1 && pos > firstNewline);
-  }, [text]);
+  }, []);
 
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setText(e.target.value);
-    updateCursorPosition();
   };
 
   // Swipe detection for cluster navigation
@@ -203,10 +275,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     if (isOpen && (noteId !== prevNoteIdRef.current || prevIsOpenRef.current !== isOpen)) {
       setEmoji(initialNote?.emoji || '');
       setText(initialNote?.text || '');
-      setFontSize(initialNote?.fontSize || 3);
-      setIsBold(initialNote?.isBold || false);
       setIsFavorite(initialNote?.isFavorite ?? false);
-      setColor(initialNote?.color || DEFAULT_BG);
       setTags(initialNote?.tags || []);
       setImages(initialNote?.images || []);
       setSketch(initialNote?.sketch);
@@ -487,39 +556,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       }
   };
 
-  const getFontSizeRem = (size: number) => {
-    const sizeMap: Record<number, number> = {
-      [-1]: 1.5,
-      [0]: 2.2,
-      [1]: 3,
-      [2]: 4,
-      [3]: 5,
-      [4]: 6,
-      [5]: 7,
-    };
-    return sizeMap[size] || 5;
-  };
-
-  const getTextStyles = (sizeOverride?: number) => {
-    const s = sizeOverride !== undefined ? sizeOverride : fontSize;
-    // Unified scale for all note types: 3rem - 7rem (5 levels)
-    // Adding 0 and -1 for detail text
-    const sizeMap: Record<number, string> = {
-      [-1]: 'text-[1.5rem]',
-      [0]: 'text-[2.2rem]',
-      [1]: 'text-[3rem]',
-      [2]: 'text-[4rem]',
-      [3]: 'text-[5rem]',
-      [4]: 'text-[6rem]',
-      [5]: 'text-[7rem]',
-    };
-    return `${sizeMap[s] || sizeMap[3]} ${isBold ? 'font-black' : 'font-medium'}`;
-  };
-
-  const adjustFontSize = (delta: number) => {
-    setFontSize(prev => Math.max(1, Math.min(5, prev + delta)));
-  };
-
   if (!isOpen) return null;
 
   return (
@@ -557,9 +593,8 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0 }}
         // Explicit width w-[500px] to prevent auto-growing behavior. min-h-[500px] added when sketching to ensure full canvas.
-          className={`w-[500px] max-w-[95vw] flex flex-col relative transition-colors duration-300 max-h-[90vh] min-h-[300px] ${isSketching ? 'min-h-[500px]' : ''}`}
+          className={`w-[500px] max-w-[95vw] flex flex-col relative transition-colors duration-300 max-h-[90vh] min-h-[300px] bg-white ${isSketching ? 'min-h-[500px]' : ''}`}
         style={{ 
-            backgroundColor: color,
               boxShadow: '0 25px 50px 12px rgba(0, 0, 0, 0.15)',
               overflow: 'hidden'
         }}
@@ -584,26 +619,25 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
           </div>
         )}
         
-        {/* Font Control buttons - topmost z-20 */}
-        <div
-          className="absolute left-3 flex justify-center items-center gap-2 pointer-events-auto"
-          style={{ 
-            top: isCompactMode ? '8px' : '12px',
-            zIndex: 20
-          }}
-        >
-          <div className="flex items-center gap-1 bg-white rounded-xl shadow-lg p-2" style={{ border: 'none' }}>
-            <button onClick={() => { setShowEmojiPicker(false); adjustFontSize(1); }} className="p-1 bg-gray-50 text-gray-600 rounded-lg transition-all" style={{ border: 'none', outline: 'none' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = `${THEME_COLOR}1A`; e.currentTarget.style.color = THEME_COLOR; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; }}><Plus size={18}/></button>
-            <button onClick={() => { setShowEmojiPicker(false); adjustFontSize(-1); }} className="p-1 bg-gray-50 text-gray-600 rounded-lg transition-all" style={{ border: 'none', outline: 'none' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = `${THEME_COLOR}1A`; e.currentTarget.style.color = THEME_COLOR; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = ''; e.currentTarget.style.color = ''; }}><Minus size={18}/></button>
-            <div className="w-px h-6 bg-gray-200 mx-1"></div>
-            <button onClick={() => { setShowEmojiPicker(false); setIsBold(!isBold); }} className={`p-1 rounded-lg transition-all ${isBold ? 'text-white' : 'bg-gray-50 text-gray-600'}`} style={{ border: 'none', outline: 'none', backgroundColor: isBold ? THEME_COLOR : undefined }} onMouseEnter={(e) => !isBold && (e.currentTarget.style.backgroundColor = `${THEME_COLOR}1A`)} onMouseLeave={(e) => !isBold && (e.currentTarget.style.backgroundColor = '')}><Bold size={18}/></button>
-          </div>
-        </div>
-        
         <div className={`flex flex-col flex-1 h-full ${isSketching ? 'invisible' : ''}`} style={{ zIndex: 10 }}>
             {/* Header - middle layer z-10 (inherits from parent) */}
             <div className={`flex justify-between items-start p-4 pb-2 relative flex-shrink-0`}>
-                <div></div>
+                <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+                    <button
+                      onClick={() => setIsPreviewMode(true)}
+                      className={`p-1.5 rounded-md transition-all ${isPreviewMode ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+                      title="即时模式 (飞书感)"
+                    >
+                      <Zap size={18} />
+                    </button>
+                    <button
+                      onClick={() => setIsPreviewMode(false)}
+                      className={`p-1.5 rounded-md transition-all ${!isPreviewMode ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+                      title="源码模式 (Markdown)"
+                    >
+                      <Code size={18} />
+                    </button>
+                </div>
                 
                 <div className="flex items-center gap-2">
                     <button
@@ -805,58 +839,60 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                 }
               }}
             >
-              <div className="grid w-full min-w-0">
-                {/* Actual Textarea */}
-                <textarea
-                    ref={textareaRef}
-                    autoFocus={false}
-                    value={text}
-                    onChange={handleTextChange}
-                    onPaste={handlePaste}
-                    onSelect={updateCursorPosition}
-                    onKeyUp={updateCursorPosition}
-                    onClick={updateCursorPosition}
-                    placeholder="Write here..."
-                    className={`col-start-1 row-start-1 w-full min-w-0 h-full bg-transparent border-none resize-none focus:ring-0 p-0 text-gray-800 placeholder-gray-500/30 leading-none overflow-hidden break-words whitespace-pre-wrap pb-4 ${getTextStyles(cursorAtDetail ? fontSize - 2 : fontSize)}`}
-                    spellCheck={false}
-                    style={{ 
-                      backgroundColor: 'transparent',
-                      border: 'none',
-                      outline: 'none',
-                      boxShadow: 'none',
-                      zIndex: 2,
-                      color: 'transparent',
-                      caretColor: '#1f2937',
-                      // Add padding-top to compensate for font-size difference of the first line
-                      paddingTop: cursorAtDetail ? `${getFontSizeRem(fontSize) - getFontSizeRem(fontSize - 2)}rem` : 0
-                    }}
-                />
-                
-                {/* Visual Styled Text Layer */}
-                <div 
-                  className={`col-start-1 row-start-1 w-full min-w-0 h-full whitespace-pre-wrap break-words leading-none pb-4 pointer-events-none z-1`}
-                  aria-hidden="true"
-                >
-                   {text ? (() => {
-                     const firstNewlineIndex = text.indexOf('\n');
-                     if (firstNewlineIndex === -1) {
-                       return <span className={getTextStyles()}>{text + ' '}</span>;
-                     }
-                     const title = text.substring(0, firstNewlineIndex);
-                     const detail = text.substring(firstNewlineIndex);
-                     return (
-                       <>
-                         <span className={getTextStyles()}>{title}</span>
-                         <span className={getTextStyles(fontSize - 2)}>{detail + ' '}</span>
-                       </>
-                     );
-                   })() : ' '}
-                </div>
-                <style>{`
-                  textarea::selection {
-                    background: rgba(59, 130, 246, 0.2);
-                  }
-                `}</style>
+              <div className="grid w-full min-w-0 h-full">
+              {!isPreviewMode ? (
+                  <textarea
+                      ref={textareaRef}
+                      autoFocus={false}
+                      value={text}
+                      onChange={handleTextChange}
+                      onPaste={handlePaste}
+                      onSelect={updateCursorPosition}
+                      onKeyUp={updateCursorPosition}
+                      onClick={updateCursorPosition}
+                      placeholder="在此输入内容 (支持 Markdown 语法)..."
+                      className="w-full h-full bg-white border-none resize-none focus:ring-0 p-6 text-gray-800 placeholder-gray-400 leading-relaxed overflow-y-auto break-words whitespace-pre-wrap text-[1.1rem]"
+                      spellCheck={false}
+                      style={{ 
+                        border: 'none',
+                        outline: 'none',
+                        boxShadow: 'none',
+                        zIndex: 2,
+                        minHeight: '300px'
+                      }}
+                  />
+                ) : (
+                  <div className="w-full h-full bg-white overflow-y-auto min-h-[300px]">
+                    <EditorContent editor={editor} />
+                    <style>{`
+                      .tiptap-editor {
+                        outline: none !important;
+                      }
+                      .tiptap-editor p {
+                        margin-top: 0 !important;
+                        margin-bottom: 0.5rem !important;
+                      }
+                      .tiptap-editor p.is-editor-empty:first-child::before {
+                        content: attr(data-placeholder);
+                        float: left;
+                        color: #adb5bd;
+                        pointer-events: none;
+                        height: 0;
+                      }
+                      .tiptap-editor h1 { font-size: 1.8rem; font-weight: 800; margin: 1.5rem 0 1rem; border-bottom: 1px solid #eee; padding-bottom: 0.3rem; }
+                      .tiptap-editor h2 { font-size: 1.5rem; font-weight: 700; margin: 1.2rem 0 0.8rem; }
+                      .tiptap-editor h3 { font-size: 1.25rem; font-weight: 600; margin: 1rem 0 0.6rem; }
+                      .tiptap-editor ul, .tiptap-editor ol { margin: 0.5rem 0 1rem; padding-left: 1.5rem; }
+                      .tiptap-editor ul { list-style-type: disc; }
+                      .tiptap-editor ol { list-style-type: decimal; }
+                      .tiptap-editor li { margin-bottom: 0.25rem; }
+                      .tiptap-editor li p { margin: 0 !important; }
+                      .tiptap-editor blockquote { border-left: 4px solid #e5e7eb; padding-left: 1rem; color: #6b7280; font-style: italic; margin: 1rem 0; }
+                      .tiptap-editor code { background: #f3f4f6; padding: 0.2rem 0.4rem; border-radius: 4px; font-size: 0.9em; font-family: monospace; }
+                      .tiptap-editor pre { background: #f9fafb; padding: 1rem; border-radius: 8px; overflow-x: auto; margin: 1rem 0; border: 1px solid #f3f4f6; }
+                    `}</style>
+                  </div>
+                )}
               </div>
               
             </div>
@@ -1172,20 +1208,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                 )}
 
                 <div className="h-px w-full mt-2 bg-black/5"></div>
-
-                {/* Color Row */}
-                <div className="px-4 py-4 flex justify-start items-center">
-                    <div className="flex gap-2">
-                        {PASTEL_COLORS.map(c => (
-                            <button
-                                key={c}
-                                onClick={() => setColor(c)}
-                                className={`w-6 h-6 rounded-full shadow-sm transition-transform ${color === c ? 'scale-125 ring-2 ring-gray-400 ring-offset-1' : 'hover:scale-110'}`}
-                                style={{ backgroundColor: c, border: 'none' }}
-                            />
-                        ))}
-                    </div>
-                </div>
               </div>
             )}
             

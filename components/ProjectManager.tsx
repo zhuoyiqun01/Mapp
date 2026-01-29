@@ -12,11 +12,17 @@ import { ThemeColorPicker } from './ThemeColorPicker';
 const ExportResolutionDialog: React.FC<{
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (pixelRatio: number) => void;
+  onConfirm: (pixelRatio: number, options: { includeBackground: boolean; includeBorder: boolean; includePins: boolean }) => void;
   currentDimensions: { width: number; height: number };
   themeColor: string;
 }> = ({ isOpen, onClose, onConfirm, currentDimensions, themeColor }) => {
-  const [selectedRatio, setSelectedRatio] = useState(2); // 默认 2x 效果更好
+  const [selectedRatio, setSelectedRatio] = useState(2);
+  const [exportOptions, setExportOptions] = useState({
+    includeBackground: true,
+    includeBorder: true,
+    includePins: true
+  });
+  const [showOptions, setShowOptions] = useState(false);
 
   if (!isOpen) return null;
 
@@ -29,6 +35,15 @@ const ExportResolutionDialog: React.FC<{
 
   const finalWidth = Math.round(currentDimensions.width * selectedRatio);
   const finalHeight = Math.round(currentDimensions.height * selectedRatio);
+
+  const toggleOption = (option: keyof typeof exportOptions) => {
+    setExportOptions(prev => ({
+      ...prev,
+      [option]: !prev[option]
+    }));
+  };
+
+  const selectedOptionsCount = Object.values(exportOptions).filter(Boolean).length;
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[3000]" onClick={onClose}>
@@ -46,7 +61,51 @@ const ExportResolutionDialog: React.FC<{
         <div className="space-y-4 mb-6">
           <div>
             <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 ml-0.5">
-              选择分辨率
+              导出内容
+            </label>
+            <div className="relative">
+              <button
+                onClick={() => setShowOptions(!showOptions)}
+                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm font-medium outline-none transition-all flex items-center justify-between hover:border-gray-300"
+              >
+                <span className="truncate">
+                  {selectedOptionsCount === 0 ? '未选择内容' : 
+                   selectedOptionsCount === 3 ? '全部内容' : 
+                   `已选择 ${selectedOptionsCount} 项`}
+                </span>
+                <div className={`transition-transform duration-200 ${showOptions ? 'rotate-180' : ''}`}>
+                  <MoreHorizontal size={14} className="rotate-90" />
+                </div>
+              </button>
+
+              {showOptions && (
+                <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-100 rounded-xl shadow-xl z-10 py-1 animate-in fade-in slide-in-from-top-2">
+                  {[
+                    { id: 'includeBackground', label: '背景 (Background)' },
+                    { id: 'includeBorder', label: '边界 (Border)' },
+                    { id: 'includePins', label: '标记 (Pin)' }
+                  ].map((option) => (
+                    <button
+                      key={option.id}
+                      onClick={() => toggleOption(option.id as any)}
+                      className="w-full px-4 py-2.5 text-sm flex items-center justify-between hover:bg-gray-50 transition-colors"
+                    >
+                      <span className={exportOptions[option.id as keyof typeof exportOptions] ? 'font-bold' : 'text-gray-500'}>
+                        {option.label}
+                      </span>
+                      {exportOptions[option.id as keyof typeof exportOptions] && (
+                        <Check size={14} style={{ color: themeColor }} />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 ml-0.5">
+              分辨率倍数
             </label>
             <select
               value={selectedRatio}
@@ -68,7 +127,7 @@ const ExportResolutionDialog: React.FC<{
             <div className="flex justify-between items-center mb-1">
               <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">预计尺寸</span>
               <span className="text-[10px] px-1.5 py-0.5 bg-white border border-gray-200 rounded-md text-gray-500 font-mono">
-                {selectedRatio}x
+                {!exportOptions.includeBackground ? 'PNG' : 'JPG'}
               </span>
             </div>
             <p className="font-mono text-sm text-gray-700 font-bold">
@@ -86,15 +145,16 @@ const ExportResolutionDialog: React.FC<{
           </button>
           <button
             onClick={() => {
-              onConfirm(selectedRatio);
+              onConfirm(selectedRatio, exportOptions);
               onClose();
             }}
-            className="flex-1 px-4 py-2 text-white rounded-lg transition-colors text-sm font-medium"
+            disabled={selectedOptionsCount === 0}
+            className="flex-1 px-4 py-2 text-white rounded-lg transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ backgroundColor: themeColor }}
             onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${themeColor}E6`}
             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
           >
-            导出图片
+            开始导出
           </button>
         </div>
       </div>
@@ -351,11 +411,11 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     }
   };
 
-  const handleExportConfirm = async (pixelRatio: number) => {
+  const handleExportConfirm = async (pixelRatio: number, options: { includeBackground: boolean; includeBorder: boolean; includePins: boolean }) => {
     if (!pendingExport) return;
 
     try {
-      await exportToJpegCentered(pendingExport.elementId, pendingExport.fileName, pixelRatio);
+      await exportToJpegCentered(pendingExport.elementId, pendingExport.fileName, pixelRatio, options);
     } catch (error) {
       console.error('Export failed:', error);
       alert('导出失败，请重试');

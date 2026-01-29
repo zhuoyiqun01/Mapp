@@ -5,10 +5,11 @@ import { NoteEditor } from './NoteEditor';
 import { ZoomSlider } from './ZoomSlider';
 import { Square, StickyNote, X, Pencil, Check, Minus, Move, ArrowUp, Hash, Plus, Image as ImageIcon, FileJson, Locate, Layers, GitBranch } from 'lucide-react';
 import exifr from 'exifr';
-import { generateId, fileToBase64 } from '../utils';
+import { generateId, fileToBase64, parseNoteContent } from '../utils';
 import { DEFAULT_THEME_COLOR } from '../constants';
 import { saveImage, saveSketch, loadNoteImages, getViewPositionCache } from '../utils/storage';
 import { compressImageToBase64 } from '../utils/board-utils';
+import ReactMarkdown from 'react-markdown';
 import {
   CONNECTION_OFFSET,
   CONNECTION_POINT_SIZE,
@@ -2663,10 +2664,14 @@ const createNoteAtCenter = (variant: 'compact') => {
         (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
         
         if (multiSelectDragOffset.x !== 0 || multiSelectDragOffset.y !== 0) {
-          // Update all selected notes
+          // 批量更新所有选中的便签，避免多次触发 onUpdateNote 导致的覆盖问题
+          const updatedNotes = [...notes];
+          let hasChanges = false;
+
           selectedNoteIds.forEach(id => {
-            const selectedNote = notes.find(n => n.id === id);
-            if (selectedNote) {
+            const noteIndex = updatedNotes.findIndex(n => n.id === id);
+            if (noteIndex !== -1) {
+              const selectedNote = updatedNotes[noteIndex];
               // 计算新的位置
               const newBoardX = selectedNote.boardX + multiSelectDragOffset.x;
               const newBoardY = selectedNote.boardY + multiSelectDragOffset.y;
@@ -2687,22 +2692,22 @@ const createNoteAtCenter = (variant: 'compact') => {
                 centerY <= frame.y + frame.height
               );
               
-              // 更新便签，包括位置和frame关系（支持多frame）
+              // 更新便签对象
               if (containingFrames.length > 0) {
                 const groupIds = containingFrames.map(f => f.id);
                 const groupNames = containingFrames.map(f => f.title);
                 const singleFrame = containingFrames[0];
-                onUpdateNote({
+                updatedNotes[noteIndex] = {
                   ...selectedNote,
                   boardX: newBoardX,
                   boardY: newBoardY,
                   groupIds,
                   groupNames,
-                  groupId: singleFrame.id, // 向后兼容
-                  groupName: singleFrame.title // 向后兼容
-                });
+                  groupId: singleFrame.id,
+                  groupName: singleFrame.title
+                };
               } else {
-                onUpdateNote({
+                updatedNotes[noteIndex] = {
                   ...selectedNote,
                   boardX: newBoardX,
                   boardY: newBoardY,
@@ -2710,10 +2715,18 @@ const createNoteAtCenter = (variant: 'compact') => {
                   groupNames: undefined,
                   groupId: undefined,
                   groupName: undefined
-                });
+                };
               }
+              hasChanges = true;
             }
           });
+
+          if (hasChanges && project) {
+            onUpdateProject({
+              ...project,
+              notes: updatedNotes
+            });
+          }
         }
         
         setIsMultiSelectDragging(false);
@@ -3151,6 +3164,24 @@ const createNoteAtCenter = (variant: 'compact') => {
                 : 'none'
         }}
     >
+      <style>{`
+        .markdown-board-preview p { margin: 0; }
+        .markdown-board-preview h1, 
+        .markdown-board-preview h2, 
+        .markdown-board-preview h3, 
+        .markdown-board-preview h4, 
+        .markdown-board-preview h5, 
+        .markdown-board-preview h6 { 
+          margin: 0; 
+          font-size: inherit; 
+          font-weight: bold;
+        }
+        .markdown-board-preview ul, .markdown-board-preview ol { margin: 0; padding-left: 1.2rem; }
+        .markdown-board-preview blockquote { border-left: 2px solid #ccc; padding-left: 0.5rem; margin: 0; font-style: italic; }
+        .markdown-board-preview code { background: rgba(0,0,0,0.05); padding: 0.1rem 0.2rem; border-radius: 3px; font-size: 0.9em; }
+        .markdown-board-preview pre { background: rgba(0,0,0,0.05); padding: 0.5rem; border-radius: 5px; overflow-x: auto; margin: 0.5rem 0; }
+        .markdown-board-preview pre code { background: transparent; padding: 0; }
+      `}</style>
       <div 
         ref={containerRef}
         className={`w-full h-full overflow-hidden bg-gray-50 relative touch-none select-none ${
@@ -3539,6 +3570,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                       borderRadius: '2px',
                       transform: `scale(${1 / transform.scale})`,
                       transformOrigin: 'top left',
+                      zIndex: 2000, // 确保高于标题层
                     }}
                     onPointerDown={(e) => {
                       e.stopPropagation();
@@ -3580,6 +3612,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                       borderRadius: '2px',
                       transform: `scale(${1 / transform.scale})`,
                       transformOrigin: 'top right',
+                      zIndex: 2000,
                     }}
                     onPointerDown={(e) => {
                       e.stopPropagation();
@@ -3619,6 +3652,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                       borderRadius: '2px',
                       transform: `scale(${1 / transform.scale})`,
                       transformOrigin: 'bottom left',
+                      zIndex: 2000,
                     }}
                     onPointerDown={(e) => {
                       e.stopPropagation();
@@ -3658,6 +3692,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                       borderRadius: '2px',
                       transform: `scale(${1 / transform.scale})`,
                       transformOrigin: 'bottom right',
+                      zIndex: 2000,
                     }}
                     onPointerDown={(e) => {
                       e.stopPropagation();
@@ -3746,7 +3781,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                 style={{ 
                   left: `${displayX}px`,
                   top: `${displayY - 32}px`,
-                  zIndex: selectedFrameId === frame.id ? 1002 : 201,
+                  zIndex: selectedFrameId === frame.id ? 1500 : 201,
                   cursor: draggingFrameId === frame.id ? 'grabbing' : 'grab',
                   transform: `scale(${1 / transform.scale})`,
                   transformOrigin: 'top left',
@@ -3807,6 +3842,14 @@ const createNoteAtCenter = (variant: 'compact') => {
               }}
               onPointerUp={(e) => {
                 e.stopPropagation(); // 阻止传播到背景
+                
+                // 处理通过标题拖拽移动 Frame 的最终保存逻辑
+                if (draggingFrameId === frame.id && localDraggingFramePos) {
+                  onUpdateFrames?.(frames.map(f => 
+                    f.id === frame.id ? { ...f, x: localDraggingFramePos.x, y: localDraggingFramePos.y } : f
+                  ));
+                }
+
                 // 结束拖拽
                 if (draggingFrameId === frame.id) {
                   setDraggingFrameId(null);
@@ -4415,18 +4458,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                                     className={`text-gray-800 leading-none flex-1 overflow-hidden break-words whitespace-pre-wrap ${clampClass} ${note.isBold ? 'font-bold' : 'font-medium'}`} 
                                   >
                                       {note.text ? (() => {
-                                          const firstNewlineIndex = note.text.indexOf('\n');
-                                          if (firstNewlineIndex === -1) {
-                                              return (
-                                                  <span style={{ 
-                                                      fontSize: note.fontSize === 1 ? '1.2rem' : note.fontSize === 2 ? '1.6rem' : note.fontSize === 3 ? '2.2rem' : note.fontSize === 4 ? '2.4rem' : '3.0rem'
-                                                  }}>
-                                                      {note.text}
-                                                  </span>
-                                              );
-                                          }
-                                          const title = note.text.substring(0, firstNewlineIndex);
-                                          const detail = note.text.substring(firstNewlineIndex + 1);
+                                          const { title, detail } = parseNoteContent(note.text);
                                           
                                           const getBoardFontSize = (size: number) => {
                                               const sizes: Record<number, string> = {
@@ -4442,9 +4474,11 @@ const createNoteAtCenter = (variant: 'compact') => {
                                           };
 
                                           return (
-                                              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                                                   <span style={{ fontSize: getBoardFontSize(note.fontSize || 3) }}>{title}</span>
-                                                  <span style={{ fontSize: getBoardFontSize((note.fontSize || 3) - 2), opacity: 0.9 }}>{detail}</span>
+                                                  <div className="markdown-board-preview" style={{ fontSize: getBoardFontSize((note.fontSize || 3) - 2), opacity: 0.9 }}>
+                                                      <ReactMarkdown>{detail || ' '}</ReactMarkdown>
+                                                  </div>
                                               </div>
                                           );
                                       })() : <span className="text-gray-400 italic font-normal text-base">Empty...</span>}
@@ -4534,7 +4568,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                                     className={`text-gray-800 leading-none flex-1 overflow-hidden break-words whitespace-pre-wrap ${clampClass} ${note.isBold ? 'font-bold' : 'font-medium'}`} 
                                   >
                                       {note.text ? (() => {
-                                          const firstNewlineIndex = note.text.indexOf('\n');
+                                          const { title, detail } = parseNoteContent(note.text);
                                           
                                           const getBoardFontSize = (size: number) => {
                                               const sizes: Record<number, string> = {
@@ -4549,20 +4583,12 @@ const createNoteAtCenter = (variant: 'compact') => {
                                               return sizes[size] || sizes[3];
                                           };
 
-                                          if (firstNewlineIndex === -1) {
-                                              return (
-                                                  <span style={{ fontSize: getBoardFontSize(note.fontSize || 3) }}>
-                                                      {note.text}
-                                                  </span>
-                                              );
-                                          }
-                                          const title = note.text.substring(0, firstNewlineIndex);
-                                          const detail = note.text.substring(firstNewlineIndex);
-                                          
                                           return (
-                                              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                                                   <span style={{ fontSize: getBoardFontSize(note.fontSize || 3) }}>{title}</span>
-                                                  <span style={{ fontSize: getBoardFontSize((note.fontSize || 3) - 2), opacity: 0.9 }}>{detail}</span>
+                                                  <div className="markdown-board-preview" style={{ fontSize: getBoardFontSize((note.fontSize || 3) - 2), opacity: 0.9 }}>
+                                                      <ReactMarkdown>{detail || ' '}</ReactMarkdown>
+                                                  </div>
                                               </div>
                                           );
                                       })() : <span className="text-gray-400 italic font-normal text-base">Empty...</span>}
