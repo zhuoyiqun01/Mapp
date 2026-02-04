@@ -1492,15 +1492,9 @@ export async function cleanBrokenReferences(notes: Note[]): Promise<Note[]> {
 function ensureProjectCompatibility(project: Project): Project {
   const fixedProject = { ...project };
   
-  // 确保项目类型有效
-  if (!fixedProject.type || (fixedProject.type !== 'map' && fixedProject.type !== 'image')) {
-    // 默认根据是否有 notes 和 coords 来判断类型
-    if (fixedProject.notes && fixedProject.notes.some(note => note.coords)) {
-      fixedProject.type = 'map';
-    } else {
-      fixedProject.type = 'image';
-    }
-  }
+  // 始终使用 map 类型（图片模式已移除）
+  fixedProject.type = 'map';
+  delete fixedProject.backgroundImage;
   
   // 确保 notes 数组存在
   if (!fixedProject.notes) {
@@ -1525,17 +1519,6 @@ export async function saveProject(project: Project): Promise<void> {
   migratedProject.notes = await Promise.all(
     compatibleProject.notes.map(note => migrateNoteImages(note))
   );
-  
-  // 迁移背景图片
-  if (compatibleProject.backgroundImage) {
-    const existingId = extractImageId(compatibleProject.backgroundImage);
-    if (!existingId) {
-      // 是 Base64，需要保存
-      await saveBackgroundImage(compatibleProject.id, compatibleProject.backgroundImage);
-      // 项目数据中不存储 Base64，只标记有背景图片
-      migratedProject.backgroundImage = 'stored'; // 标记为已存储
-    }
-  }
   
   // 2. 添加版本号
   const projectWithVersion = {
@@ -1567,14 +1550,6 @@ export async function loadProject(projectId: string, loadImages: boolean = false
   
   // 如果需要加载图片，则加载所有图片
   if (loadImages) {
-    // 加载背景图片
-    if (compatibleProject.backgroundImage === 'stored') {
-      const bgImage = await loadBackgroundImage(projectId);
-      if (bgImage) {
-        compatibleProject.backgroundImage = bgImage;
-      }
-    }
-    
     // 加载所有 notes 的图片
     compatibleProject.notes = await Promise.all(
       compatibleProject.notes.map(note => loadNoteImages(note))
@@ -1593,7 +1568,7 @@ export async function loadProjectList(): Promise<string[]> {
 export interface ProjectSummary {
   id: string;
   name: string;
-  type: 'map' | 'image';
+  type: 'map';
   createdAt: number;
   notesCount: number;
   hasImages: boolean;

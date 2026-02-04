@@ -24,7 +24,7 @@ interface UseProjectStateReturn {
 
   // Actions
   loadProjects: () => Promise<void>;
-  createProject: (projectData: { name: string; type: 'map' | 'image'; backgroundImage?: string }) => Promise<string>;
+  createProject: (projectData: { name: string }) => Promise<string>;
   selectProject: (projectId: string) => Promise<void>;
   updateProject: (project: Project) => Promise<void>;
   deleteProject: (projectId: string) => Promise<void>;
@@ -143,13 +143,12 @@ export const useProjectState = (): UseProjectStateReturn => {
   }, [summariesToProjects]);
 
   // Create new project
-  const createProject = useCallback(async (projectData: { name: string; type: 'map' | 'image'; backgroundImage?: string }): Promise<string> => {
+  const createProject = useCallback(async (projectData: { name: string }): Promise<string> => {
     const newProject: Project = {
       id: `project_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       name: projectData.name,
-      type: projectData.type,
-      createdAt: Date.now(), // Changed to number to match Project type
-      backgroundImage: projectData.backgroundImage,
+      type: 'map',
+      createdAt: Date.now(),
       notes: [],
       frames: [],
       connections: [],
@@ -223,9 +222,8 @@ export const useProjectState = (): UseProjectStateReturn => {
     const duplicatedProject: Project = {
       id: newProjectId,
       name: `${project.name} (Copy)`,
-      type: project.type,
+      type: 'map',
       createdAt: Date.now(),
-      backgroundImage: project.backgroundImage,
       notes: project.notes.map(note => ({
         ...note,
         id: `note_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,

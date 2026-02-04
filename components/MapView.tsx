@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, ImageOverlay, GeoJSON, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, GeoJSON, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 
 const MapClickHandler = ({ onClick }: { onClick: () => void }) => {
@@ -283,9 +283,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   };
   const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
   const mapInitRef = useRef<WeakSet<L.Map>>(new WeakSet());
-  
-  const [imageDimensions, setImageDimensions] = useState<[number, number] | null>(null);
-  const [minImageZoom, setMinImageZoom] = useState(-20);
   
   // Marker clustering related state
   const [clusteredMarkers, setClusteredMarkers] = useState<Array<{ notes: Note[], position: [number, number] }>>([]);
@@ -612,7 +609,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   // Current marker index being viewed
 
   const defaultCenter: [number, number] = [28.1847, 112.9467];
-  const isMapMode = project.type === 'map';
   const mapNotes = useMemo(() => 
     notes.filter(n => 
       n.variant === 'standard' && 
@@ -635,7 +631,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     requestLocation,
     getCurrentBrowserLocation,
     checkLocationPermission
-  } = useGeolocation(isMapMode);
+  } = useGeolocation(true);
 
   // Auto-hide location error after 2 seconds
   useEffect(() => {
@@ -806,7 +802,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
   // Map position management hook
   const { initialMapPosition, handleMapPositionChange } = useMapPosition({
-    isMapMode,
+    isMapMode: true,
     projectId,
     navigateToCoords,
     mapNotes,
@@ -893,40 +889,6 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     onMapStyleChange
   });
 
-
-  // Load Image Dimensions and persistence
-  useEffect(() => {
-    if (project.type === 'image' && project.backgroundImage) {
-        // Reset only if ID changes to prevent flicker
-        const img = new Image();
-        img.src = project.backgroundImage;
-        img.onload = () => {
-            setImageDimensions([img.naturalHeight, img.naturalWidth]);
-        };
-    } else {
-        setImageDimensions(null);
-    }
-  }, [project.id, project.type, project.backgroundImage]);
-
-
-  // Calculate dynamic min zoom for image
-  useEffect(() => {
-    if (project.type === 'image' && mapInstance && imageDimensions) {
-        const bounds = L.latLngBounds([0,0], imageDimensions);
-        // "inside=true" means fit the bounds inside the view
-        const fitZoom = mapInstance.getBoundsZoom(bounds, true);
-        
-        setMinImageZoom(fitZoom);
-        mapInstance.setMinZoom(fitZoom);
-        
-        // Initially fit bounds if first load or logic dictates
-        mapInstance.fitBounds(bounds);
-    }
-  }, [mapInstance, imageDimensions, project.type]);
-
-  const imageBounds: L.LatLngBoundsExpression = imageDimensions 
-      ? [[0, 0], imageDimensions] 
-      : [[0, 0], [1000, 1000]];
 
   const handleLongPress = (coords: Coordinates) => {
     // Calculate boardX and boardY for board view placement
@@ -1472,7 +1434,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   
   // Update clustered markers
   useEffect(() => {
-    if (!isMapMode || !mapInstance || mapNotes.length === 0) {
+    if (!mapInstance || mapNotes.length === 0) {
       setClusteredMarkers([]);
       return;
     }
@@ -1598,7 +1560,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         mapInstance.off('moveend', handleMoveEnd);
       }
     };
-  }, [mapInstance, getFilteredNotes, isMapMode, clusterThreshold, detectClusters]);
+  }, [mapInstance, getFilteredNotes, clusterThreshold, detectClusters]);
 
   // Drag and drop handlers
   const handleDragEnter = (e: React.DragEvent) => {
@@ -1744,17 +1706,13 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       )}
       <MapContainer 
         key={projectId || 'no-project'}
-        center={
-          isMapMode 
-            ? (initialMapPosition?.center || defaultCenter)
-            : [0, 0]
-        } 
-        zoom={isMapMode ? (initialMapPosition?.zoom ?? 16) : -8}
-        minZoom={isMapMode ? 6 : -20} 
-        maxZoom={isMapMode ? 19 : 2}
-        zoomSnap={0.1}  // Enable fractional zoom levels
-        zoomDelta={0.1}  // Allow smaller zoom increments
-        crs={isMapMode ? L.CRS.EPSG3857 : L.CRS.Simple}
+        center={initialMapPosition?.center || defaultCenter}
+        zoom={initialMapPosition?.zoom ?? 16}
+        minZoom={6}
+        maxZoom={19}
+        zoomSnap={0.1}
+        zoomDelta={0.1}
+        crs={L.CRS.EPSG3857}
         style={{ height: '100%', width: '100%' }}
         zoomControl={false}
         ref={(map) => {
@@ -1763,7 +1721,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
             setMapInstance(map);
           }
           
-          if (map && isMapMode && !mapInitRef.current.has(map)) {
+          if (map && !mapInitRef.current.has(map)) {
             // Mark this map instance as initialized
             mapInitRef.current.add(map);
             
@@ -1817,25 +1775,14 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         <MapNavigationHandler coords={navigateToCoords} onComplete={onNavigateComplete} />
         <MapPositionTracker onPositionChange={handleMapPositionChange} />
         <MapClickHandler onClick={handleMapClickInternal} />
-        {isMapMode ? (
-               <TileLayer 
-                 key={effectiveMapStyle}
-            {...tileLayerConfig}
-                 maxNativeZoom={19}
-                 maxZoom={19}
-                 tileSize={256}
-                 zoomOffset={0}
-               />
-        ) : (
-           <>
-              {project.backgroundImage && imageDimensions && (
-                  <ImageOverlay
-                    url={project.backgroundImage}
-                    bounds={imageBounds}
-                  />
-              )}
-           </>
-        )}
+        <TileLayer 
+          key={effectiveMapStyle}
+          {...tileLayerConfig}
+          maxNativeZoom={19}
+          maxZoom={19}
+          tileSize={256}
+          zoomOffset={0}
+        />
         
         <MapLongPressHandler onLongPress={handleLongPress} isPreviewMode={!isUIVisible} />
 
@@ -1889,7 +1836,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           />
         )}
 
-        {isMapMode && borderGeoJSON && (
+        {borderGeoJSON && (
           <GeoJSON 
             data={borderGeoJSON} 
             style={{ 
@@ -1903,15 +1850,12 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           />
         )}
         
-        {isMapMode && (
-          <MapCenterHandler 
-            center={initialMapPosition?.center || defaultCenter}
-            zoom={initialMapPosition?.zoom ?? 16}
-          />
-        )}
+        <MapCenterHandler 
+          center={initialMapPosition?.center || defaultCenter}
+          zoom={initialMapPosition?.zoom ?? 16}
+        />
         
-        {isMapMode && (
-          <TextLabelsLayer
+        <TextLabelsLayer
             notes={getFilteredNotes}
             showTextLabels={showTextLabels}
             pinSize={pinSize}
@@ -1932,10 +1876,9 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               setSelectedNoteId(null);
             }}
           />
-        )}
 
         {/* User Location Indicator - only show if location permission is granted */}
-        {isMapMode && hasLocationPermission && currentLocation && mapInstance && (
+        {hasLocationPermission && currentLocation && mapInstance && (
           <Marker
             position={[currentLocation.lat, currentLocation.lng]}
             icon={L.divIcon({
@@ -1985,7 +1928,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         )}
 
         {/* Location error indicator */}
-        {isMapMode && locationError && (
+        {locationError && (
           <div className="fixed top-20 left-4 right-4 z-[1000] bg-red-50 border border-red-200 rounded-lg p-3 shadow-lg animate-in slide-in-from-top-2 fade-in duration-300">
             <div className="flex items-start gap-2">
               <div className="text-red-500 mt-0.5">📍</div>
@@ -2030,7 +1973,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           </div>
         )}
         
-        {isMapMode && clusteredMarkers.length > 0 && mapInstance ? (
+        {clusteredMarkers.length > 0 && mapInstance ? (
           // Show clustered markers (only show clusters with multiple markers, single markers shown separately)
           clusteredMarkers.map((cluster) => {
             if (cluster.notes.length === 1) {
@@ -2094,7 +2037,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         )}
 
         {/* Import preview markers */}
-        {isMapMode && showImportDialog && importPreview.filter(p => !p.error && p.lat !== null && p.lng !== null).map((preview, index) => (
+        {showImportDialog && importPreview.filter(p => !p.error && p.lat !== null && p.lng !== null).map((preview, index) => (
           <Marker
             key={`preview-${index}`}
             position={[preview.lat, preview.lng]}
@@ -2137,7 +2080,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           />
         ))}
 
-        {isMapMode && (isUIVisible || !isUIVisible) && (
+        {(isUIVisible || !isUIVisible) && (
           <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none">
               {/* First Row: Main Controls */}
               <div className="flex justify-between items-start w-full pointer-events-none">
@@ -2240,8 +2183,8 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         {isUIVisible && (
           <div className="fixed bottom-20 sm:bottom-24 left-2 sm:left-4 z-[500]">
              <MapZoomController
-               min={isMapMode ? 13 : minImageZoom}
-               max={isMapMode ? 19 : 4}
+               min={13}
+               max={19}
                themeColor={themeColor}
              />
           </div>
@@ -2250,7 +2193,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       </MapContainer>
 
       {/* Border & Frame Layer Buttons - Top Right */}
-      {isMapMode && (isUIVisible || !isUIVisible) && (
+      {(isUIVisible || !isUIVisible) && (
         <div
           className="fixed top-2 sm:top-4 right-2 sm:right-4 z-[500] pointer-events-auto flex items-center gap-1.5 sm:gap-2"
           onPointerDown={(e) => e.stopPropagation()}

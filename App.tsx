@@ -790,9 +790,7 @@ export default function App() {
 
   const handleCreateProject = async (project: Project) => {
     const projectId = await projectState.createProject({
-      name: project.name,
-      type: project.type,
-      backgroundImage: project.backgroundImage
+      name: project.name
     });
 
     setViewMode('map');

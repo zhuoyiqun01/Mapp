@@ -2,8 +2,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Project, Note } from '../types';
 import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check, Upload, Palette, Settings, ZoomIn, Copy } from 'lucide-react';
-import { generateId, fileToBase64, formatDate, exportToJpeg, exportToJpegCentered, compressImageFromBase64 } from '../utils';
-import { loadProject, loadNoteImages, loadBackgroundImage, saveProject, loadAllProjects } from '../utils/storage';
+import { generateId, formatDate, exportToJpeg, exportToJpegCentered, compressImageFromBase64 } from '../utils';
+import { loadProject, loadNoteImages, saveProject, loadAllProjects } from '../utils/storage';
 import { getLastSyncTime, type SyncStatus } from '../utils/sync';
 import { DEFAULT_THEME_COLOR } from '../constants';
 import { ThemeColorPicker } from './ThemeColorPicker';
@@ -343,8 +343,6 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   const themeColorDark = getDarkerColor(themeColor);
   const [isCreating, setIsCreating] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
-  const [newProjectType, setNewProjectType] = useState<'map' | 'image'>('map');
-  const [bgImage, setBgImage] = useState<string | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingProjectName, setEditingProjectName] = useState('');
@@ -362,8 +360,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     const newProject: Project = {
       id: generateId(),
       name: newProjectName,
-      type: newProjectType,
-      backgroundImage: bgImage || undefined,
+      type: 'map',
       createdAt: Date.now(),
       notes: []
     };
@@ -371,23 +368,10 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     onCreateProject(newProject);
     setIsCreating(false);
     setNewProjectName('');
-    setBgImage(null);
-    setNewProjectType('map');
     
     // If in sidebar mode, close sidebar after creation
     if (isSidebar && onCloseSidebar) {
       onCloseSidebar();
-    }
-  };
-
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      try {
-        const base64 = await fileToBase64(e.target.files[0]);
-        setBgImage(base64);
-      } catch (err) {
-        console.error(err);
-      }
     }
   };
 
@@ -503,8 +487,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       const duplicatedProject: Project = {
         id: generateId(),
         name: `${project.name} (Copy)`,
-        type: project.type,
-        backgroundImage: fullProject.backgroundImage,
+        type: 'map',
         createdAt: Date.now(),
         notes: fullProject.notes.map(note => ({
           ...note,
@@ -541,18 +524,13 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       return;
     }
 
-    // Determine coordinate format based on project type
-    const isMapProject = project.type === 'map';
-    const coordHeader = isMapProject ? 'Latitude, Longitude' : 'X, Y';
+    const coordHeader = 'Latitude, Longitude';
     
     // Create CSV content
     // Support multiple groups: Group1, Group2, Group3
     const headers = [coordHeader, 'Text Content', 'Tag1', 'Tag2', 'Tag3', 'Group1', 'Group2', 'Group3'];
     const rows = standardNotes.map(note => {
-      // Coordinates: select based on project type
-      const coords = isMapProject 
-        ? `${note.coords.lat.toFixed(6)}, ${note.coords.lng.toFixed(6)}`
-        : `${note.boardX.toFixed(2)}, ${note.boardY.toFixed(2)}`;
+      const coords = `${note.coords.lat.toFixed(6)}, ${note.coords.lng.toFixed(6)}`;
       
       // Text content
       const text = note.text || '';
@@ -655,7 +633,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       let duplicateCount = 0;
       const dedupedNotes: Note[] = [];
       for (const note of project.notes) {
-        const found = dedupedNotes.find((n) => isDuplicateNote(n, note, project.type));
+        const found = dedupedNotes.find((n) => isDuplicateNote(n, note));
         if (found) {
           duplicateCount++;
           continue;
@@ -704,22 +682,9 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         })
       );
 
-      // Compress background image if exists
-      let compressedBackground = project.backgroundImage;
-      if (project.backgroundImage) {
-        try {
-          compressedBackground = await compressImageFromBase64(project.backgroundImage);
-          compressedCount++;
-        } catch (error) {
-          console.error('Error compressing background image:', error);
-          errorCount++;
-        }
-      }
-
       const updatedProject: Project = {
         ...project,
-        notes: updatedNotes,
-        backgroundImage: compressedBackground
+        notes: updatedNotes
       };
 
       onUpdateProject(updatedProject);
@@ -737,21 +702,11 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   };
 
   // Check if two notes are duplicates (same location and content)
-  const isDuplicateNote = (note1: any, note2: any, projectType: 'map' | 'image'): boolean => {
-    // Compare text content
+  const isDuplicateNote = (note1: any, note2: any): boolean => {
     if (note1.text !== note2.text) return false;
-    
-    if (projectType === 'map') {
-      // For map projects: compare coordinates (within 0.0001 degree tolerance)
-      const latDiff = Math.abs(note1.coords?.lat - note2.coords?.lat);
-      const lngDiff = Math.abs(note1.coords?.lng - note2.coords?.lng);
-      return latDiff < 0.0001 && lngDiff < 0.0001;
-    } else {
-      // For board projects: compare board positions (within 10px tolerance)
-      const xDiff = Math.abs(note1.boardX - note2.boardX);
-      const yDiff = Math.abs(note1.boardY - note2.boardY);
-      return xDiff < 10 && yDiff < 10;
-    }
+    const latDiff = Math.abs(note1.coords?.lat - note2.coords?.lat);
+    const lngDiff = Math.abs(note1.coords?.lng - note2.coords?.lng);
+    return latDiff < 0.0001 && lngDiff < 0.0001;
   };
 
   // Import project from JSON data
@@ -772,8 +727,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       const newProject: Project = {
         id: newProjectId,
         name: `${importedProject.name} (Imported)`,
-        type: importedProject.type || 'map',
-        backgroundImage: importedProject.backgroundImage,
+        type: 'map',
         createdAt: Date.now(),
         notes: importedProject.notes || [],
         frames: importedProject.frames || [],
@@ -823,12 +777,12 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           }
         });
         
-        // For map projects: merge notes with duplicate detection
-        if (activeProject.type === 'map' && newProject.type === 'map') {
+        // Merge notes with duplicate detection
+        if (activeProject) {
           // Filter out duplicate notes
           const uniqueImportedNotes = importedNotes.filter(importedNote => {
             return !activeProject.notes.some(existingNote => 
-              isDuplicateNote(importedNote, existingNote, 'map')
+              isDuplicateNote(importedNote, existingNote)
             );
           });
           
@@ -853,170 +807,6 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           } else {
             alert(`Successfully merged ${uniqueImportedNotes.length} new note(s).`);
           }
-        }
-        // For board projects: offset board positions to the right, aligned to top
-        else if (activeProject.type === 'image' && newProject.type === 'image') {
-          // Calculate rightmost position and topmost position of existing notes
-          // Use same logic as BoardView's createNoteAtCenter
-          let maxX = -Infinity;
-          let minY = Infinity;
-          const spacing = 50; // Same spacing as BoardView
-          
-          if (activeProject.notes.length > 0) {
-            // Calculate maxX and minY considering actual note widths
-            activeProject.notes.forEach(n => {
-              // Use actual note width (must match rendered sizes)
-              // compact: 180px, text/standard: 256px
-              const noteWidth = (n.variant === 'compact') ? 180 : 256;
-              const noteRight = n.boardX + noteWidth;
-              const noteTop = n.boardY;
-              
-              if (noteRight > maxX) maxX = noteRight;
-              if (noteTop < minY) minY = noteTop;
-            });
-          }
-          
-          // Calculate topmost position of imported notes (before offset)
-          let importedMinY = Infinity;
-          if (importedNotes.length > 0) {
-            importedMinY = Math.min(...importedNotes.map(n => n.boardY));
-          }
-          
-          // Calculate offset: place imported notes to the right with spacing, aligned to top
-          let offsetX = 100; // Default if no existing notes
-          let offsetY = 0;
-          
-          if (maxX !== -Infinity && minY !== Infinity) {
-            // Position to the right of existing content with spacing
-            offsetX = maxX + spacing;
-            // Align to top of existing content
-            offsetY = (importedMinY !== Infinity) ? minY - importedMinY : 0;
-          } else if (importedMinY !== Infinity) {
-            // If no existing notes, keep imported notes at their original Y position
-            offsetY = 0;
-          }
-          
-          console.log('Board import offset calculation:', {
-            maxX,
-            minY,
-            importedMinY,
-            offsetX,
-            offsetY,
-            spacing,
-            existingNotesCount: activeProject.notes.length,
-            importedNotesCount: importedNotes.length
-          });
-          
-          const offsetNotes = importedNotes.map(note => {
-            // 确保variant存在
-            let variant: 'standard' | 'compact' | 'image' = note.variant || 'standard';
-            if (!note.variant) {
-              if (note.imageWidth && note.imageHeight && note.images && note.images.length > 0) {
-                variant = 'image';
-              } else if (!note.emoji || note.emoji === '') {
-                variant = 'compact';
-              } else {
-                variant = 'standard';
-              }
-            }
-            return {
-              ...note,
-              variant,
-              boardX: note.boardX + offsetX,
-              boardY: note.boardY + offsetY,
-              createdAt: Date.now() + Math.random() // Ensure new timestamps
-            };
-          });
-          
-          // Update connection IDs and note references
-          const importedConnections = (newProject.connections || []).map(conn => {
-            const newId = generateId();
-            return {
-              ...conn,
-              id: newId,
-              fromNoteId: noteIdMap.get(conn.fromNoteId) || conn.fromNoteId,
-              toNoteId: noteIdMap.get(conn.toNoteId) || conn.toNoteId
-            };
-          });
-          
-          // Filter out duplicate notes before merging
-          const uniqueImportedNotes = offsetNotes.filter(importedNote => {
-            return !activeProject.notes.some(existingNote => 
-              isDuplicateNote(importedNote, existingNote, 'image')
-            );
-          });
-          
-          // Filter duplicate frames (by name and position)
-          const uniqueImportedFrames = importedFrames.filter(importedFrame => {
-            return !(activeProject.frames || []).some(existingFrame => 
-              existingFrame.title === importedFrame.title &&
-              Math.abs(existingFrame.x - importedFrame.x) < 10 &&
-              Math.abs(existingFrame.y - importedFrame.y) < 10
-            );
-          });
-          
-          const mergedNotes = [...activeProject.notes, ...uniqueImportedNotes];
-          const mergedFrames = [
-            ...(activeProject.frames || []),
-            ...uniqueImportedFrames
-          ];
-          const mergedConnections = [
-            ...(activeProject.connections || []),
-            ...importedConnections
-          ];
-          
-          const updatedProject = {
-            ...activeProject,
-            notes: mergedNotes,
-            frames: mergedFrames,
-            connections: mergedConnections
-          };
-          
-          // Save project using new storage system (this will handle image separation)
-          await saveProject(updatedProject);
-          
-          // Reload the project to get the version with image IDs (not Base64)
-          const savedProject = await loadProject(updatedProject.id, false);
-          if (savedProject && onUpdateProject) {
-            onUpdateProject(savedProject);
-          } else if (onUpdateProject) {
-            // Fallback: use original project if reload fails
-            onUpdateProject(updatedProject);
-          }
-          
-          const duplicateNoteCount = offsetNotes.length - uniqueImportedNotes.length;
-          const duplicateFrameCount = importedFrames.length - uniqueImportedFrames.length;
-          
-          let message = `Successfully merged `;
-          const parts = [];
-          if (uniqueImportedNotes.length > 0) {
-            parts.push(`${uniqueImportedNotes.length} note(s)`);
-          }
-          if (uniqueImportedFrames.length > 0) {
-            parts.push(`${uniqueImportedFrames.length} frame(s)`);
-          }
-          if (importedConnections.length > 0) {
-            parts.push(`${importedConnections.length} connection(s)`);
-          }
-          
-          if (parts.length > 0) {
-            message += parts.join(', ') + '.';
-          } else {
-            message += 'data.';
-          }
-          
-          if (duplicateNoteCount > 0 || duplicateFrameCount > 0) {
-            const duplicateParts = [];
-            if (duplicateNoteCount > 0) {
-              duplicateParts.push(`${duplicateNoteCount} note(s)`);
-            }
-            if (duplicateFrameCount > 0) {
-              duplicateParts.push(`${duplicateFrameCount} frame(s)`);
-            }
-            message += ` ${duplicateParts.join(' and ')} were skipped as duplicates.`;
-          }
-          
-          alert(message);
         }
       } else {
         // Create as new project - regenerate all IDs
@@ -1406,7 +1196,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                       {p.name}
                     </div>
                     <div className="text-xs flex items-center gap-1 mt-1" style={{ color: 'rgba(0,0,0,0.4)' }}>
-                  {p.type === 'map' ? <MapIcon size={12}/> : <ImageIcon size={12}/>}
+                  <MapIcon size={12}/>
                   {formatDate(p.createdAt)}
                 </div>
                   </>
@@ -1541,51 +1331,6 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-bold text-gray-600 mb-2">Mode</label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button 
-                    onClick={() => setNewProjectType('map')}
-                    className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${newProjectType === 'map' ? '' : 'border-gray-100 text-gray-400 hover:border-gray-200'}`}
-                    style={newProjectType === 'map' ? { borderColor: themeColor, backgroundColor: `${themeColor}1A`, color: themeColor } : undefined}
-                  >
-                    <MapIcon size={24} />
-                    <span className="font-bold text-sm">Map Based</span>
-                  </button>
-                  <button 
-                    onClick={() => setNewProjectType('image')}
-                    className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${newProjectType === 'image' ? '' : 'border-gray-100 text-gray-400 hover:border-gray-200'}`}
-                    style={newProjectType === 'image' ? { borderColor: themeColor, backgroundColor: `${themeColor}1A`, color: themeColor } : undefined}
-                  >
-                    <ImageIcon size={24} />
-                    <span className="font-bold text-sm">Image Based</span>
-                  </button>
-                </div>
-              </div>
-
-              {newProjectType === 'image' && (
-                <div>
-                   <label className="block text-sm font-bold text-gray-600 mb-2">Background Image (Optional)</label>
-                   <label 
-                     className="block w-full p-4 border-2 border-dashed border-gray-300 rounded-xl text-center cursor-pointer hover:bg-gray-50 transition-colors"
-                     onMouseEnter={(e) => e.currentTarget.style.borderColor = themeColor}
-                     onMouseLeave={(e) => e.currentTarget.style.borderColor = ''}
-                   >
-                      {bgImage ? (
-                        <div className="relative h-32 w-full">
-                           <img src={bgImage} className="w-full h-full object-contain" alt="preview"/>
-                           <button onClick={(e) => {e.preventDefault(); setBgImage(null)}} className="absolute top-0 right-0 bg-red-500 text-white p-1 rounded-full"><X size={12}/></button>
-                        </div>
-                      ) : (
-                        <div className="text-gray-400 flex flex-col items-center">
-                           <ImageIcon size={24} className="mb-2"/>
-                           <span className="text-sm">Click to upload image</span>
-                        </div>
-                      )}
-                      <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
-                   </label>
-                </div>
-              )}
             </div>
 
 

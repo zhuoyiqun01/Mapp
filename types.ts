@@ -67,8 +67,8 @@ export interface Frame {
 export interface Project {
   id: string;
   name: string;
-  type: 'map' | 'image';
-  backgroundImage?: string; // Base64 string for image mode, or 'stored' if stored separately
+  type: 'map';
+  backgroundImage?: string; // Deprecated, no longer used
   createdAt: number;
   notes: Note[];
   connections?: Connection[]; // Connections between notes in board view
