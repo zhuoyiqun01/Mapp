@@ -6,6 +6,7 @@ import { ZoomSlider } from './ZoomSlider';
 import { Square, StickyNote, X, Pencil, Check, Minus, Move, ArrowUp, Hash, Plus, Image as ImageIcon, FileJson, Locate, Layers, GitBranch } from 'lucide-react';
 import exifr from 'exifr';
 import { generateId, fileToBase64, parseNoteContent } from '../utils';
+import { calculateImageFingerprint, calculateFingerprintFromBase64 } from '../utils/imageProcessing';
 import { DEFAULT_THEME_COLOR } from '../constants';
 import { saveImage, saveSketch, loadNoteImages, getViewPositionCache } from '../utils/storage';
 import { compressImageToBase64 } from '../utils/board-utils';
@@ -267,124 +268,6 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
     isDuplicate?: boolean;
     imageFingerprint?: string;
   }>>([]);
-  
-  // Image fingerprint: GPS coordinates + 3 sampled pixels (top-left, bottom-left, bottom-right)
-  // Format: lat_lng_topLeftPixel_bottomLeftPixel_bottomRightPixel
-  const calculateImageFingerprint = async (file: File, imageUrl: string, lat: number | null, lng: number | null): Promise<string> => {
-    try {
-      // Load image
-      const img = new Image();
-      img.src = imageUrl;
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = reject;
-      });
-      
-      const width = img.naturalWidth;
-      const height = img.naturalHeight;
-      
-      // Sample 3 pixels: top-left, bottom-left, bottom-right
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        // Fallback: return GPS only if available
-        return lat !== null && lng !== null ? `${lat.toFixed(6)}_${lng.toFixed(6)}` : 'no_gps';
-      }
-      
-      // Draw image
-      ctx.drawImage(img, 0, 0, width, height);
-      
-      // Sample top-left pixel (0, 0)
-      const topLeftData = ctx.getImageData(0, 0, 1, 1).data;
-      const topLeft = topLeftData.length >= 3 
-        ? `${topLeftData[0]},${topLeftData[1]},${topLeftData[2]}` 
-        : '0,0,0';
-      
-      // Sample bottom-left pixel (0, height-1)
-      const bottomLeftData = ctx.getImageData(0, height - 1, 1, 1).data;
-      const bottomLeft = bottomLeftData.length >= 3 
-        ? `${bottomLeftData[0]},${bottomLeftData[1]},${bottomLeftData[2]}` 
-        : '0,0,0';
-      
-      // Sample bottom-right pixel (width-1, height-1)
-      const bottomRightData = ctx.getImageData(width - 1, height - 1, 1, 1).data;
-      const bottomRight = bottomRightData.length >= 3 
-        ? `${bottomRightData[0]},${bottomRightData[1]},${bottomRightData[2]}` 
-        : '0,0,0';
-      
-      // Create fingerprint: lat_lng_topLeft_bottomLeft_bottomRight
-      const gpsPart = lat !== null && lng !== null 
-        ? `${lat.toFixed(6)}_${lng.toFixed(6)}` 
-        : 'no_gps';
-      return `${gpsPart}_${topLeft}_${bottomLeft}_${bottomRight}`;
-    } catch (error) {
-      console.error('Error calculating image fingerprint:', error);
-      return lat !== null && lng !== null ? `${lat.toFixed(6)}_${lng.toFixed(6)}` : 'unknown';
-    }
-  };
-  
-  // Fingerprint from base64 image (extract GPS from note if available)
-  const calculateFingerprintFromBase64 = async (base64Image: string, note?: Note): Promise<string> => {
-    try {
-      // Extract GPS from note if available
-      const lat = note?.coords?.lat ?? null;
-      const lng = note?.coords?.lng ?? null;
-      
-      const img = new Image();
-      img.src = base64Image;
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = reject;
-      });
-      
-      const width = img.naturalWidth;
-      const height = img.naturalHeight;
-      
-      // Sample 3 pixels: top-left, bottom-left, bottom-right
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        // Fallback: return GPS only if available
-        return lat !== null && lng !== null ? `${lat.toFixed(6)}_${lng.toFixed(6)}` : 'no_gps';
-      }
-      
-      // Draw image
-      ctx.drawImage(img, 0, 0, width, height);
-      
-      // Sample top-left pixel (0, 0)
-      const topLeftData = ctx.getImageData(0, 0, 1, 1).data;
-      const topLeft = topLeftData.length >= 3 
-        ? `${topLeftData[0]},${topLeftData[1]},${topLeftData[2]}` 
-        : '0,0,0';
-      
-      // Sample bottom-left pixel (0, height-1)
-      const bottomLeftData = ctx.getImageData(0, height - 1, 1, 1).data;
-      const bottomLeft = bottomLeftData.length >= 3 
-        ? `${bottomLeftData[0]},${bottomLeftData[1]},${bottomLeftData[2]}` 
-        : '0,0,0';
-      
-      // Sample bottom-right pixel (width-1, height-1)
-      const bottomRightData = ctx.getImageData(width - 1, height - 1, 1, 1).data;
-      const bottomRight = bottomRightData.length >= 3 
-        ? `${bottomRightData[0]},${bottomRightData[1]},${bottomRightData[2]}` 
-        : '0,0,0';
-      
-      // Create fingerprint: lat_lng_topLeft_bottomLeft_bottomRight
-      const gpsPart = lat !== null && lng !== null 
-        ? `${lat.toFixed(6)}_${lng.toFixed(6)}` 
-        : 'no_gps';
-      return `${gpsPart}_${topLeft}_${bottomLeft}_${bottomRight}`;
-    } catch (error) {
-      console.error('Error calculating fingerprint from base64:', error);
-      const lat = note?.coords?.lat ?? null;
-      const lng = note?.coords?.lng ?? null;
-      return lat !== null && lng !== null ? `${lat.toFixed(6)}_${lng.toFixed(6)}` : 'unknown';
-    }
-  };
   
   const [showImportDialog, setShowImportDialog] = useState(false);
   const imageFileInputRef = useRef<HTMLInputElement | null>(null);
