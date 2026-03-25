@@ -122,3 +122,33 @@ body {
     max-width: 256px;
   }
 }
+
+@keyframes graph-save-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.graph-save-overlay-in {
+  animation: graph-save-overlay-in 0.3s ease-out forwards;
+  opacity: 0;
+}
+
+@keyframes graph-save-overlay-content-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.35rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.graph-save-overlay-content-in {
+  animation: graph-save-overlay-content-in 0.3s ease-out 0.05s forwards;
+  opacity: 0;
+}

@@ -78,7 +78,7 @@ export interface Frame {
 export interface GraphLayerState {
   order: string[];
   hidden: string[];
-  /** 各标签组环形/时间轴纵轴权重，范围 0.1～1，越大离圆心越远、时间线纵轴越靠上 */
+  /** 各分组环形/时间轴纵轴权重，范围 0.1～1，越大离圆心越远、时间线纵轴越靠上 */
   weights?: Record<string, number>;
 }
 
@@ -98,6 +98,10 @@ export interface Project {
   themeColor?: string; // Theme color for project
   /** 图谱视图：标签组排序与隐藏（影响标签网格布局的组顺序） */
   graphLayers?: GraphLayerState;
+  /** 图谱视图：分层标准（影响时间轴与环形视图的分组依据） */
+  graphLayerStandard?: 'tag' | 'frame';
+  /** 图谱视图：帧组排序与显隐 / 半径权重（仅用于 `graphLayerStandard='frame'`） */
+  graphFrameLayers?: GraphLayerState;
   /** 图谱节点圆直径（px，4～36） */
   graphNodeSize?: number;
   /** 图谱节点下方标题字号（px，4～16） */
@@ -118,7 +122,7 @@ export interface Project {
    * 无会话内布局缓存时，打开图谱使用的默认二级布局（与底部四钮一致）。
    * 同会话内仍以 sessionStorage 与底部工具栏为准。
    */
-  graphDefaultLayoutMode?: 'tagGrid' | 'circle' | 'time' | 'cose';
+  graphDefaultLayoutMode?: 'tagGrid' | 'circle' | 'time' | 'cose' | 'frameCluster';
   /** 关联面板「新建」时起点侧默认是否带箭头 */
   graphNewConnectionFromArrow?: 'arrow' | 'none';
   /** 关联面板「新建」时终点侧默认是否带箭头 */

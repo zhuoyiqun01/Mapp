@@ -496,6 +496,35 @@ export const TableView: React.FC<TableViewProps> = ({
     setPanelEditingKey('new');
   }, [connections, onUpdateConnections, panelEditingKey]);
 
+  /** 与 GraphView 关联面板一致：行末减号需可清草稿并退出点选（无画布时仅改 state） */
+  const clearTableConnectionPanelGraphAndDraft = useCallback(() => {
+    setPickTarget(null);
+    if (panelEditingKey === 'new') {
+      setConnectionDraft((d) => ({ ...d, fromNoteId: '', toNoteId: '' }));
+    } else {
+      setPanelEditingKey('new');
+      setConnectionDraft({
+        fromNoteId: '',
+        toNoteId: '',
+        label: '',
+        fromArrow: 'none',
+        toArrow: 'arrow'
+      });
+    }
+  }, [panelEditingKey]);
+
+  const clearTableConnectionFromOnly = useCallback(() => {
+    setPickTarget(null);
+    setPanelEditingKey('new');
+    setConnectionDraft((d) => ({ ...d, fromNoteId: '' }));
+  }, []);
+
+  const clearTableConnectionToOnly = useCallback(() => {
+    setPickTarget(null);
+    setPanelEditingKey('new');
+    setConnectionDraft((d) => ({ ...d, toNoteId: '' }));
+  }, []);
+
   /** 与左上角设置、系统状态栏错开，避免分组标题紧贴视口顶 */
   const tableScrollTopPad =
     'max(5.5rem, calc(env(safe-area-inset-top, 0px) + 3.25rem))';
@@ -890,6 +919,12 @@ export const TableView: React.FC<TableViewProps> = ({
           onBeginEndpointEdit={handleNewConnection}
           disableGraphPick
           graphPickDisabledHint="请到 GraphView 选点"
+          onClearGraphAndDraftSelection={clearTableConnectionPanelGraphAndDraft}
+          onClearFromSelection={clearTableConnectionFromOnly}
+          onClearToSelection={clearTableConnectionToOnly}
+          showClearSelection={
+            !!pickTarget || !!connectionDraft.fromNoteId || !!connectionDraft.toNoteId
+          }
           onClose={() => {
             setShowConnectionPanel(false);
             setPickTarget(null);

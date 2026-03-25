@@ -26,14 +26,17 @@ export function useTiptapEditor({ noteId, content, onMarkdownChange }: UseTiptap
     }
   });
 
-  // Sync external text changes to editor only when switching notes
+  // Sync external text changes to editor.
+  // This is important because `EditorArea` uses a textarea in "source mode";
+  // while the textarea is updating `content`, the hidden tiptap editor must
+  // keep up so that switching to "preview mode" shows the latest text.
   useEffect(() => {
-    if (!editor || !noteId) return;
+    if (!editor) return;
     const currentMarkdown = (editor.storage.markdown as any).getMarkdown();
     if (content !== currentMarkdown) {
       editor.commands.setContent(content || '');
     }
-  }, [noteId, editor]);
+  }, [noteId, editor, content]);
 
   return { editor: editor as Editor | null };
 }

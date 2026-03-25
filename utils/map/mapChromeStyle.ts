@@ -24,6 +24,18 @@ export function mapChromeSurfaceStyle(opacity: number, blurPx: number): CSSPrope
   return style;
 }
 
+/** 图谱 frameCluster 圆形底衬：填充与 mapChromeSurfaceStyle 一致，描边随不透明度略提亮 */
+export function mapChromeHaloFillAndBorder(opacity: number, blurPx: number): { fill: string; border: string } {
+  const surface = mapChromeSurfaceStyle(opacity, blurPx);
+  const fill =
+    typeof surface.backgroundColor === 'string'
+      ? surface.backgroundColor
+      : `rgba(255, 255, 255, ${DEFAULT_MAP_UI_CHROME_OPACITY})`;
+  const o = Math.min(1, Math.max(0, opacity));
+  const border = `rgba(255, 255, 255, ${Math.min(1, o + 0.1)})`;
+  return { fill, border };
+}
+
 export function mapChromeHoverBackground(opacity: number): string {
   const o = Math.min(1, Math.max(0, opacity) + 0.1);
   return `rgba(255, 255, 255, ${o})`;

@@ -4,7 +4,8 @@ import { ChromeIconButton } from '../ui/ChromeIconButton';
 import { GraphLayerPanel } from './GraphLayerPanel';
 import { LayerToolbarIcon } from '../ui/LayerToolbarIcon';
 import { GraphToolbarSliders } from './GraphToolbarSliders';
-import type { GraphLayerState, Note } from '../../types';
+import type { Frame, GraphLayerState, Note } from '../../types';
+import type { GraphLayerGroupStandard } from '../../utils/graph/graphRuntimeCore';
 
 type Props = {
   isUIVisible: boolean;
@@ -17,10 +18,14 @@ type Props = {
   canShowLayer: boolean;
   panelChromeStyle?: React.CSSProperties;
   mergedGraphLayers: GraphLayerState;
+  layerGroupStandard: GraphLayerGroupStandard;
+  onLayerGroupStandardChange: (standard: GraphLayerGroupStandard) => void;
   onGraphLayersChange: (next: GraphLayerState) => void;
   isGraphToolbarEditMode: boolean;
   notes: Note[];
   onUpdateNote: (note: Note) => void;
+  onBatchUpdateNotes?: (nextNotes: Note[]) => void | Promise<void>;
+  frames: Frame[];
   chainLength: number;
   onChainLengthChange: (value: number) => void;
   quickStyleValues?: {
@@ -42,10 +47,14 @@ export const GraphTopLeftToolbar: React.FC<Props> = ({
   canShowLayer,
   panelChromeStyle,
   mergedGraphLayers,
+  layerGroupStandard,
+  onLayerGroupStandardChange,
   onGraphLayersChange,
   isGraphToolbarEditMode,
   notes,
   onUpdateNote,
+  onBatchUpdateNotes,
+  frames,
   chainLength,
   onChainLengthChange,
   quickStyleValues,
@@ -89,7 +98,7 @@ export const GraphTopLeftToolbar: React.FC<Props> = ({
                 setShowSettingsPanel(false);
               }}
               onPointerDown={(e) => e.stopPropagation()}
-              title="图层（标签组顺序、显隐、半径权重）"
+              title={layerGroupStandard === 'tag' ? '图层（标签组顺序、显隐、半径权重）' : '图层（帧组顺序、显隐、半径权重）'}
             >
               <LayerToolbarIcon />
             </ChromeIconButton>
@@ -98,9 +107,13 @@ export const GraphTopLeftToolbar: React.FC<Props> = ({
                 themeColor={themeColor}
                 panelChromeStyle={panelChromeStyle}
                 merged={mergedGraphLayers}
+                layerGroupStandard={layerGroupStandard}
+                onLayerGroupStandardChange={onLayerGroupStandardChange}
                 onStateChange={onGraphLayersChange}
                 notes={notes}
                 onUpdateNote={onUpdateNote}
+                onBatchUpdateNotes={onBatchUpdateNotes}
+                frames={frames}
               />
             ) : null}
           </div>

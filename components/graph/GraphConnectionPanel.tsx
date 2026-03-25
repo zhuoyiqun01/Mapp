@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Link2, Minus, MousePointer2, X } from 'lucide-react';
+import { CheckCircle2, Link2, Minus, MousePointer2, Plus, X } from 'lucide-react';
 import type { Note } from '../../types';
 
 export interface ConnectionDraft {
@@ -46,10 +46,18 @@ interface GraphConnectionPanelProps {
   showClearSelection?: boolean;
   /** 点击已选便签标题时在图中定位该节点 */
   onFocusNoteOnGraph?: (noteId: string) => void;
+  /** GraphView：图中单击选中的节点；仅在「非点选状态」下点选按钮可一键填入 */
+  graphFocusedNoteId?: string | null;
+  /** 一键写入起点/终点（与图中点节点后的副作用一致） */
+  onAddEndpointFromGraph?: (which: 'from' | 'to', noteId: string) => void;
   /** 禁用图中点选入口（例如 table 视图） */
   disableGraphPick?: boolean;
   /** 禁用点选时的提示文案 */
   graphPickDisabledHint?: string;
+  /** 保存成功后递增，触发一次面板成功动效（GraphView 保存不关面板时传入） */
+  saveSuccessNonce?: number;
+  /** 保存成功后的动效/重置草稿期间，禁止再次提交 */
+  commitDisabled?: boolean;
 }
 
 export const GraphConnectionPanel: React.FC<GraphConnectionPanelProps> = ({
@@ -73,13 +81,19 @@ export const GraphConnectionPanel: React.FC<GraphConnectionPanelProps> = ({
   onClearToSelection,
   showClearSelection,
   onFocusNoteOnGraph,
+  graphFocusedNoteId = null,
+  onAddEndpointFromGraph,
   disableGraphPick = false,
-  graphPickDisabledHint = '请到 GraphView 选点'
+  graphPickDisabledHint = '请到 GraphView 选点',
+  saveSuccessNonce,
+  commitDisabled = false
 }) => {
   const panelRootRef = useRef<HTMLDivElement>(null);
   const [qFrom, setQFrom] = useState('');
   const [qTo, setQTo] = useState('');
   const pickNoncePrev = useRef<number | undefined>(undefined);
+  const saveNoncePrev = useRef<number | undefined>(undefined);
+  const [saveFlashActive, setSaveFlashActive] = useState(false);
 
   useEffect(() => {
     if (graphPickNonce === undefined) return;
@@ -98,6 +112,19 @@ export const GraphConnectionPanel: React.FC<GraphConnectionPanelProps> = ({
       });
     }
   }, [graphPickNonce]);
+
+  useEffect(() => {
+    if (saveSuccessNonce === undefined) return;
+    if (saveNoncePrev.current === undefined) {
+      saveNoncePrev.current = saveSuccessNonce;
+      return;
+    }
+    if (saveNoncePrev.current === saveSuccessNonce) return;
+    saveNoncePrev.current = saveSuccessNonce;
+    setSaveFlashActive(true);
+    const t = window.setTimeout(() => setSaveFlashActive(false), 1200);
+    return () => clearTimeout(t);
+  }, [saveSuccessNonce]);
 
   const filteredFrom = useMemo(() => {
     const q = qFrom.trim().toLowerCase();
@@ -118,21 +145,73 @@ export const GraphConnectionPanel: React.FC<GraphConnectionPanelProps> = ({
   const fromNote = draft.fromNoteId ? notes.find((n) => n.id === draft.fromNoteId) : undefined;
   const toNote = draft.toNoteId ? notes.find((n) => n.id === draft.toNoteId) : undefined;
 
-  /** 起点行右侧：已选起点、或仅有全局选中（边/画布）且无起终点草稿时显示减号，点选模式中不占用为减号 */
-  const fromSlotIsMinus =
-    !!fromNote ||
-    (!!onClearGraphAndDraftSelection &&
-      !!showClearSelection &&
-      !draft.fromNoteId &&
-      !draft.toNoteId &&
-      pickTarget == null);
-  /** 终点行右侧：已选终点时显示减号 */
+  const draftCommitReady =
+    !!fromNote && !!toNote && draft.fromNoteId !== draft.toNoteId;
+
+  const isNewConnection = panelEditingKey === 'new';
+
+  /** 仅有图中/边选中且草稿尚未填起终点时：在标题栏提供一次性清除（与行末减号分工）。 */
+  const showHeaderClearGraphSelection =
+    isNewConnection &&
+    !!onClearGraphAndDraftSelection &&
+    !!showClearSelection &&
+    !draft.fromNoteId &&
+    !draft.toNoteId &&
+    pickTarget == null;
+
+  /**
+   * 行末按钮：该端已在草稿中选便签 → 减号（清除该端 + 退出点选）；否则 → 加号（点选 / 一键填入）。
+   * 与规则一致：新建与编辑共用；选点态下按减号由 clear* 回调同时清 pickTarget。
+   */
+  const fromSlotIsMinus = !!fromNote;
   const toSlotIsMinus = !!toNote;
 
   const beginEndpointEditIfNeeded = () => {
     if (panelEditingKey !== 'new') {
       onBeginEndpointEdit?.();
     }
+  };
+
+  /**
+   * 该端空槽是否可用「一键填入」：图中有选中节点、非点选态，且该节点尚未被另一端占用。
+   * （否则另一端只能选点，或先选中别的节点再一键填入。）
+   */
+  const canOneClickFill = (which: 'from' | 'to') =>
+    pickTarget == null &&
+    !disableGraphPick &&
+    !!onAddEndpointFromGraph &&
+    !!graphFocusedNoteId &&
+    notes.some((n) => n.id === graphFocusedNoteId) &&
+    (which === 'from' ? graphFocusedNoteId !== draft.toNoteId : graphFocusedNoteId !== draft.fromNoteId);
+
+  /** 加号 = 一键填入；指针 = 选点或本侧点选进行中 */
+  const pickOrFillIcon = (which: 'from' | 'to') => {
+    if (pickTarget === which) {
+      return <MousePointer2 size={16} strokeWidth={2} className="shrink-0" aria-hidden />;
+    }
+    if (canOneClickFill(which)) {
+      return <Plus size={16} strokeWidth={2.25} className="shrink-0" aria-hidden />;
+    }
+    return <MousePointer2 size={16} strokeWidth={2} className="shrink-0" aria-hidden />;
+  };
+
+  const fillFromGraphOrPick = (which: 'from' | 'to') => {
+    if (disableGraphPick) return;
+    beginEndpointEditIfNeeded();
+    if (pickTarget === which) {
+      onPickTargetChange(null);
+      return;
+    }
+    if (pickTarget == null) {
+      const nid = graphFocusedNoteId;
+      if (nid && notes.some((n) => n.id === nid) && onAddEndpointFromGraph && canOneClickFill(which)) {
+        onAddEndpointFromGraph(which, nid);
+        return;
+      }
+      onPickTargetChange(which);
+      return;
+    }
+    onPickTargetChange(which);
   };
 
   /**
@@ -195,13 +274,45 @@ export const GraphConnectionPanel: React.FC<GraphConnectionPanelProps> = ({
       style={ch}
       onPointerDown={(e) => e.stopPropagation()}
     >
-      <div className="space-y-3">
+      {saveFlashActive ? (
+        <div
+          className="pointer-events-none absolute inset-0 z-[15] flex items-center justify-center rounded-2xl bg-white/65 backdrop-blur-sm graph-save-overlay-in"
+          aria-live="polite"
+          aria-atomic
+        >
+          <div
+            className="flex items-center justify-center px-4 py-3 graph-save-overlay-content-in"
+            aria-label="已保存"
+          >
+            <CheckCircle2
+              className="w-12 h-12"
+              style={{ color: themeColor }}
+              strokeWidth={1.85}
+              aria-hidden
+            />
+          </div>
+        </div>
+      ) : null}
+      <div
+        className={`space-y-3 relative z-0 ${saveFlashActive ? 'opacity-40' : 'opacity-100'} transition-opacity duration-500 ease-out`}
+      >
         <div className="flex justify-between items-center gap-2">
           <span className="font-bold text-gray-800 flex items-center gap-2 min-w-0">
             <Link2 size={18} className="shrink-0 opacity-80" />
             <span className="truncate">关联</span>
           </span>
           <div className="flex items-center gap-1 shrink-0">
+            {showHeaderClearGraphSelection ? (
+              <button
+                type="button"
+                onClick={onClearGraphAndDraftSelection}
+                className="rounded-lg p-1.5 text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition-colors leading-none"
+                title="清除图中选中"
+                aria-label="清除图中选中"
+              >
+                <Minus size={16} strokeWidth={2.25} />
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={onNewConnection}
@@ -268,13 +379,17 @@ export const GraphConnectionPanel: React.FC<GraphConnectionPanelProps> = ({
             ) : (
               <button
                 type="button"
-                title={disableGraphPick ? graphPickDisabledHint : '在图中点选'}
+                title={
+                  disableGraphPick
+                    ? graphPickDisabledHint
+                    : pickTarget === 'from'
+                      ? '取消图中点选'
+                      : canOneClickFill('from')
+                        ? '将图中当前选中节点设为起点'
+                        : '在图中点选起点'
+                }
                 disabled={disableGraphPick}
-                onClick={() => {
-                  if (disableGraphPick) return;
-                  beginEndpointEditIfNeeded();
-                  onPickTargetChange(pickTarget === 'from' ? null : 'from');
-                }}
+                onClick={() => fillFromGraphOrPick('from')}
                 className={`shrink-0 self-center rounded-lg p-1.5 border-0 shadow-none outline-none ring-0 transition-colors focus-visible:ring-0 w-9 h-9 flex items-center justify-center ${
                   disableGraphPick
                     ? 'text-gray-300 bg-gray-100 cursor-not-allowed'
@@ -283,7 +398,7 @@ export const GraphConnectionPanel: React.FC<GraphConnectionPanelProps> = ({
                     : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100/60'
                 }`}
               >
-                <MousePointer2 size={14} />
+                {pickOrFillIcon('from')}
               </button>
             )}
           </div>
@@ -359,13 +474,17 @@ export const GraphConnectionPanel: React.FC<GraphConnectionPanelProps> = ({
             ) : (
               <button
                 type="button"
-                title={disableGraphPick ? graphPickDisabledHint : '在图中点选'}
+                title={
+                  disableGraphPick
+                    ? graphPickDisabledHint
+                    : pickTarget === 'to'
+                      ? '取消图中点选'
+                      : canOneClickFill('to')
+                        ? '将图中当前选中节点设为终点'
+                        : '在图中点选终点'
+                }
                 disabled={disableGraphPick}
-                onClick={() => {
-                  if (disableGraphPick) return;
-                  beginEndpointEditIfNeeded();
-                  onPickTargetChange(pickTarget === 'to' ? null : 'to');
-                }}
+                onClick={() => fillFromGraphOrPick('to')}
                 className={`shrink-0 self-center rounded-lg p-1.5 border-0 shadow-none outline-none ring-0 transition-colors focus-visible:ring-0 w-9 h-9 flex items-center justify-center ${
                   disableGraphPick
                     ? 'text-gray-300 bg-gray-100 cursor-not-allowed'
@@ -374,7 +493,7 @@ export const GraphConnectionPanel: React.FC<GraphConnectionPanelProps> = ({
                     : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100/60'
                 }`}
               >
-                <MousePointer2 size={14} />
+                {pickOrFillIcon('to')}
               </button>
             )}
           </div>
@@ -450,7 +569,12 @@ export const GraphConnectionPanel: React.FC<GraphConnectionPanelProps> = ({
           <button
             type="button"
             onClick={onCommit}
-            className="flex-1 min-w-[6rem] py-2.5 rounded-xl text-xs font-semibold text-theme-chrome-fg shadow-sm transition-opacity hover:opacity-90"
+            disabled={commitDisabled || !draftCommitReady}
+            className={`flex-1 min-w-[6rem] py-2.5 rounded-xl text-xs font-semibold text-theme-chrome-fg shadow-sm transition-opacity ${
+              commitDisabled || !draftCommitReady
+                ? 'opacity-50 cursor-not-allowed pointer-events-none'
+                : 'hover:opacity-90'
+            }`}
             style={{ backgroundColor: themeColor }}
           >
             保存

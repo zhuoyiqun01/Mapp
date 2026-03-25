@@ -110,6 +110,7 @@ export const GraphStyleSettingsBlock: React.FC<GraphStyleSettingsBlockProps> = (
           </span>
         </span>
       </label>
+
     </div>
   );
 };

@@ -1,7 +1,7 @@
 import type { Core, ElementDefinition } from 'cytoscape';
 import type { Connection, Note, Project } from '../../types';
 import { parseNoteContent } from '../../utils';
-import { mergeGraphLayerState } from './graphRuntimeCore';
+import { GRAPH_UNTAGGED_TAG_GROUP, mergeGraphLayerState } from './graphRuntimeCore';
 
 // Cytoscape 的 style stylesheet 类型在当前工具链下可能不可用，这里用宽类型避免无关类型检查阻塞。
 type Stylesheet = any[];
@@ -55,6 +55,13 @@ function noteLabel(note: Note): string {
   return raw.length > 48 ? `${raw.slice(0, 45)}…` : raw;
 }
 
+/** 与关联面板检索一致，供顶栏节点定位等复用 */
+export function graphNoteSearchLabel(note: Note): string {
+  const short = graphNoteShortTitle(note.text || '');
+  const raw = `${note.emoji || ''}${short}`.trim();
+  return raw || '便签';
+}
+
 function yearLabel(note: Note): string {
   if (note.startYear == null) return '';
   if (note.endYear != null && note.endYear !== note.startYear) {
@@ -93,31 +100,64 @@ export function buildGraphElements(
     return { edgeLine, edgeLineFocus, edgeLineHi };
   };
 
+  const linkedIds = new Set<string>();
+  for (const c of connections) {
+    if (!noteIds.has(c.fromNoteId) || !noteIds.has(c.toNoteId)) continue;
+    linkedIds.add(c.fromNoteId);
+    linkedIds.add(c.toNoteId);
+  }
+
   const nodes: ElementDefinition[] = notes.map((note) => {
-    const main = noteLabel(note);
-    const yl = yearLabel(note);
-    /** 单行：时间在主标题右侧（用 em 空格拉开，避免框过窄过高） */
-    const label = yl ? `${main}\u2003\u2003${yl}` : main;
-    return {
-      data: {
-        id: note.id,
-        label,
-        fullTitle: parseNoteContent(note.text || '').title || '便签',
-        year: yl,
-        timeSort: note.startYear != null ? note.startYear : undefined,
-        color: noteNodeColor(note, themeColor),
-        /** 图谱「按标签分组网格」用：与节点着色一致，取第一个标签文案；无标签则为空串（归入「无标签」组） */
-        tagGroup: note.tags?.[0]?.label?.trim() ?? '',
-        tagHint: note.tags?.map((t) => t.label).join(' · ') || '',
-        favorite: note.isFavorite ? 'yes' : 'no'
-      }
-    };
-  });
+      const rawTag = note.tags?.[0]?.label?.trim() ?? '';
+      const tagGroup = rawTag !== '' ? rawTag : GRAPH_UNTAGGED_TAG_GROUP;
+      const main = noteLabel(note);
+      const yl = yearLabel(note);
+      /** 单行：时间在主标题右侧（用 em 空格拉开，避免框过窄过高） */
+      const label = yl ? `${main}\u2003\u2003${yl}` : main;
+      return {
+        data: {
+          id: note.id,
+          label,
+          fullTitle: parseNoteContent(note.text || '').title || '便签',
+          year: yl,
+          timeSort: note.startYear != null ? note.startYear : undefined,
+          color: noteNodeColor(note, themeColor),
+          /** 图谱「按标签分组网格」用：无首个标签时归入 GRAPH_UNTAGGED_TAG_GROUP，避免被样式表隐藏 */
+          tagGroup,
+          /**
+           * 图谱「按帧(frame)分簇」用：
+           * - `frameGroups`：该便签所属的多个 frames（按便签数据里的顺序）
+           * - `frameGroup`：兼容旧逻辑的首帧归属（仍保留，但真正的归属会在运行时按 hidden 动态跳过）
+           */
+          frameGroups: (() => {
+            const raw =
+              note.groupIds?.length
+                ? note.groupIds
+                : note.groupId
+                  ? [note.groupId]
+                  : note.groupNames?.length
+                    ? note.groupNames
+                    : note.groupName
+                      ? [note.groupName]
+                      : [];
+            return raw.map((x) => String(x).trim()).filter((x) => x !== '');
+          })(),
+          frameGroup: String(
+            note.groupIds?.[0] ?? note.groupId ?? note.groupNames?.[0] ?? note.groupName ?? ''
+          ).trim(),
+          tagHint: note.tags?.map((t) => t.label).join(' · ') || '',
+          favorite: note.isFavorite ? 'yes' : 'no',
+          graphLinked: linkedIds.has(note.id) ? 'yes' : 'no'
+        }
+      };
+    });
 
   const edges: ElementDefinition[] = [];
   for (const c of connections) {
     if (!noteIds.has(c.fromNoteId) || !noteIds.has(c.toNoteId)) continue;
     const direction = connectionToGraphDirection(c);
+
+    const edgeUntagged = 'no';
 
     const fromFav = Boolean(noteById.get(c.fromNoteId)?.isFavorite);
     const toFav = Boolean(noteById.get(c.toNoteId)?.isFavorite);
@@ -133,6 +173,8 @@ export function buildGraphElements(
         label: c.label || '',
         direction,
         edgeWeight,
+        // 兼容样式表字段；无标签便签已归入「无标签」分组，此处恒为可见
+        edgeUntagged,
         // 用于样式表中按数据决定连线粗细
         edgeLineWidth: edgeLine,
         edgeLineFocusWidth: edgeLineFocus,
@@ -176,6 +218,9 @@ export const DEFAULT_GRAPH_STYLESHEET_SIZING: GraphStylesheetSizing = {
   edgeWeight: 0.3
 };
 
+/** 关系链/选点高亮中心（focus-core）相对邻居（focus-nh）的节点缩放，便于区分 */
+export const GRAPH_FOCUS_CORE_NODE_SCALE = 1.5;
+
 function mergeGraphSizing(partial?: Partial<GraphStylesheetSizing>): GraphStylesheetSizing {
   const o = { ...DEFAULT_GRAPH_STYLESHEET_SIZING };
   if (partial?.nodeSize != null && Number.isFinite(partial.nodeSize)) {
@@ -203,12 +248,17 @@ function graphSizingCss(themeColor: string, s: GraphStylesheetSizing) {
   const refNs = DEFAULT_GRAPH_STYLESHEET_SIZING.nodeSize;
   const baseGap = Math.max(4, Math.round(nf * 0.8));
   const marginY = Math.max(2, Math.round((ns / refNs) * baseGap));
+  const coreScale = GRAPH_FOCUS_CORE_NODE_SCALE;
+  const nsCore = Math.round(ns * coreScale * 100) / 100;
   const favScale = 1.5;
   const favNs = ns * favScale;
   const favNf = nf * favScale;
   const padFav = Math.max(4, Math.round(favNf * 0.8));
   const baseGapFav = Math.max(4, Math.round(favNf * 0.8));
   const marginYFav = Math.max(2, Math.round((favNs / refNs) * baseGapFav));
+  const favNsCore = Math.round(favNs * coreScale * 100) / 100;
+  const marginYCore = Math.max(2, Math.round(marginY * coreScale));
+  const marginYFavCore = Math.max(2, Math.round(marginYFav * coreScale));
 
   // 连线权重同时联动默认节点白描边（普通与收藏态均复用同一 ewNorm）。
   const borderBase = Math.max(0.2, Math.min(0.6, Math.round((ns * 0.071) * (0.1 + 0.2 * ewNorm) * 100) / 100));
@@ -245,6 +295,10 @@ function graphSizingCss(themeColor: string, s: GraphStylesheetSizing) {
     padFav,
     marginY,
     marginYFav,
+    nsCore,
+    favNsCore,
+    marginYCore,
+    marginYFavCore,
     borderBase,
     borderBaseFav,
     borderNh,
@@ -302,6 +356,12 @@ export function getGraphStylesheet(
       }
     },
     {
+      selector: 'node[graphLinked = "no"]',
+      style: {
+        opacity: 0.42
+      }
+    },
+    {
       selector: 'node[favorite = "yes"]',
       style: {
         'text-margin-y': z.marginYFav,
@@ -314,6 +374,7 @@ export function getGraphStylesheet(
     {
       selector: 'node:selected',
       style: {
+        opacity: 1,
         'border-width': z.borderSel,
         'border-color': z.themeColor
       }
@@ -321,6 +382,7 @@ export function getGraphStylesheet(
     {
       selector: 'node:selected[favorite = "yes"]',
       style: {
+        opacity: 1,
         'border-width': z.borderSelFav,
         'border-color': z.themeColor
       }
@@ -393,6 +455,10 @@ export function getGraphStylesheet(
     {
       selector: 'node.focus-core',
       style: {
+        opacity: 1,
+        width: z.nsCore,
+        height: z.nsCore,
+        'text-margin-y': z.marginYCore,
         'border-width': z.borderCore,
         'border-color': z.themeColor,
         color: '#000000',
@@ -412,6 +478,10 @@ export function getGraphStylesheet(
     {
       selector: 'node.focus-core[favorite = "yes"]',
       style: {
+        opacity: 1,
+        width: z.favNsCore,
+        height: z.favNsCore,
+        'text-margin-y': z.marginYFavCore,
         color: z.themeColor,
         'font-weight': 'bold',
         'border-width': z.borderCoreFav,
@@ -424,6 +494,7 @@ export function getGraphStylesheet(
     {
       selector: 'node.focus-hover',
       style: {
+        opacity: 1,
         'border-width': z.borderCore,
         'border-color': z.themeColor,
         color: '#000000',
@@ -443,6 +514,7 @@ export function getGraphStylesheet(
     {
       selector: 'node.focus-hover[favorite = "yes"]',
       style: {
+        opacity: 1,
         color: z.themeColor,
         'font-weight': 'bold',
         'border-width': z.borderCoreFav,
@@ -599,9 +671,63 @@ export function getGraphStylesheet(
       }
     },
     {
+      // 无标签节点直接隐藏：确保它们不参与渲染（含 label / 框）
+      selector: 'node[tagGroup = ""]',
+      style: {
+        display: 'none'
+      }
+    },
+    {
+      // 避免无标签节点“把边线留在画面上”
+      selector: 'edge[edgeUntagged = "yes"]',
+      style: {
+        display: 'none'
+      }
+    },
+    {
       selector: 'node.graph-layer-hidden',
       style: {
         display: 'none'
+      }
+    },
+    {
+      selector: 'node.frame-cluster-halo',
+      style: {
+        shape: 'ellipse',
+        width: 'data(haloW)',
+        height: 'data(haloH)',
+        'background-color': 'data(haloFill)',
+        'background-opacity': 1,
+        'border-width': 1,
+        'border-color': 'data(haloBorder)',
+        'border-opacity': 1,
+        label: '',
+        color: '#ffffff',
+        'text-opacity': 0,
+        events: 'no',
+        'z-index': -100,
+        'z-index-compare': 'manual'
+      }
+    },
+    {
+      // frameCluster 的簇中心标签：只用于展示，不参与交互/选中。
+      selector: 'node.frame-cluster-label',
+      style: {
+        width: '1px',
+        height: '1px',
+        'background-opacity': 0,
+        'border-width': 0,
+        opacity: 1,
+        label: 'data(label)',
+        color: '#6B7280',
+        'font-size': '12px',
+        'font-weight': '800',
+        'text-valign': 'center',
+        'text-margin-y': 0,
+        'text-background-opacity': 0,
+        'text-border-width': 0,
+        'z-index': 22000,
+        events: 'no'
       }
     },
     {
@@ -655,6 +781,8 @@ export interface GraphExportPayload {
   stylesheet: Stylesheet;
   /** 独立页环形/标签网格布局与图层权重一致 */
   graphLayers?: import('../../types').GraphLayerState;
+  /** 独立页圆环/时间轴的分组标准：标签或帧（frame） */
+  graphLayerGroupStandard?: 'tag' | 'frame';
   /** 独立页时间线纵轴与图层权重的参考强度（0～1） */
   graphTimeAxisWeightBias?: number;
   /** 独立页悬停预览卡片（Markdown / 图片） */
@@ -662,6 +790,12 @@ export interface GraphExportPayload {
 }
 
 export function buildGraphExportPayload(project: Project, themeColor: string, cy: Core): GraphExportPayload {
+  const standard = project.graphLayerStandard ?? 'tag';
+  const activeGraphLayers =
+    standard === 'frame'
+      ? mergeGraphLayerState(project.notes || [], project.graphFrameLayers ?? null, 'frame')
+      : mergeGraphLayerState(project.notes || [], project.graphLayers ?? null, 'tag');
+
   return {
     version: 1,
     app: 'mapp-graph-export',
@@ -674,7 +808,8 @@ export function buildGraphExportPayload(project: Project, themeColor: string, cy
       labelFontPx: project.graphLabelFontPx,
       edgeWeight: project.graphEdgeWeight
     }),
-    graphLayers: mergeGraphLayerState(project.notes || [], project.graphLayers ?? null),
+    graphLayers: activeGraphLayers,
+    graphLayerGroupStandard: standard,
     graphTimeAxisWeightBias: project.graphTimeAxisWeightBias,
     notePreviews: buildNotePreviewsFromNotes(project.notes || [])
   };

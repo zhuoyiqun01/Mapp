@@ -12,7 +12,7 @@ export interface TagAddPanelProps {
   onLabelChange: (v: string) => void;
   selectedColor: string;
   onColorChange: (color: string) => void;
-  onApply: () => void;
+  onApply: () => void | Promise<void>;
   /** 点击面板外：与「应用」一致（通常即保存/提交；空标签则取消），并收起面板 */
   onDismissOutside?: () => void;
   /**
@@ -31,6 +31,10 @@ export interface TagAddPanelProps {
   className?: string;
   onInputKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   closeOnInteractOutside?: boolean;
+  /** 隐藏标签输入（仅用于颜色等场景） */
+  hideLabelInput?: boolean;
+  /** 只读标签输入（避免误改标签名） */
+  labelReadOnly?: boolean;
 }
 
 const PORTAL_Z = 10000;
@@ -57,6 +61,8 @@ export const TagAddPanel: React.FC<TagAddPanelProps> = ({
   className = '',
   onInputKeyDown,
   closeOnInteractOutside = true,
+  hideLabelInput = false,
+  labelReadOnly = false,
 }) => {
   const rootRef = useRef<HTMLDivElement>(null);
   const outsideRef = useRef(onDismissOutside ?? onApply);
@@ -86,26 +92,34 @@ export const TagAddPanel: React.FC<TagAddPanelProps> = ({
         <TagIcon size={16} className="text-gray-500 shrink-0 mt-0.5" aria-hidden />
         <div className="text-xs text-gray-500 min-w-0 flex-1 leading-snug">{title}</div>
       </div>
-      <input
-        type="text"
-        value={label}
-        onChange={(e) => onLabelChange(e.target.value)}
-        placeholder={placeholder}
-        autoFocus={autoFocus}
-        className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-offset-0 mb-2"
-        style={{ ['--tw-ring-color' as string]: themeColor }}
-        onKeyDown={onInputKeyDown}
-      />
+      {!hideLabelInput && (
+        <input
+          type="text"
+          value={label}
+          onChange={(e) => onLabelChange(e.target.value)}
+          placeholder={placeholder}
+          autoFocus={autoFocus}
+          readOnly={labelReadOnly}
+          className={`w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-offset-0 mb-2 ${
+            labelReadOnly ? 'bg-gray-50 cursor-not-allowed text-gray-600' : ''
+          }`}
+          style={{ ['--tw-ring-color' as string]: themeColor }}
+          onKeyDown={onInputKeyDown}
+        />
+      )}
       <div className="flex flex-wrap gap-1.5 mb-2">
         {TAG_COLORS.map((c) => (
           <button
             key={c}
             type="button"
             onClick={() => onColorChange(c)}
-            className="w-6 h-6 rounded-full shrink-0 cursor-pointer p-0 border-0 transition-transform"
+            className="w-5 h-5 rounded-full shrink-0 cursor-pointer p-0 border-0 transition-transform"
             style={{
               backgroundColor: c,
-              transform: selectedColor === c ? 'scale(1.15)' : undefined,
+              // Selected color dot should be visually distinct.
+              // Use a larger scale factor while reducing base size,
+              // so both dots are smaller but the selected one stands out more.
+              transform: selectedColor === c ? 'scale(1.25)' : undefined,
             }}
             title={c}
           />
@@ -115,7 +129,7 @@ export const TagAddPanel: React.FC<TagAddPanelProps> = ({
         type="button"
         onClick={(e) => {
           e.stopPropagation();
-          onApply();
+          void onApply();
         }}
         className="w-full py-1.5 text-sm rounded-lg text-theme-chrome-fg border-0 cursor-pointer"
         style={{ backgroundColor: themeColor }}

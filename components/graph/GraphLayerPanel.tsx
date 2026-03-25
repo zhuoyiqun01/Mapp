@@ -1,22 +1,33 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Eye, EyeOff, GripVertical } from 'lucide-react';
 import { TAG_COLORS } from '../../constants';
-import type { GraphLayerState, Note } from '../../types';
-import { GRAPH_LAYER_WEIGHT_MAX, GRAPH_LAYER_WEIGHT_MIN } from '../../utils/graph/graphRuntimeCore';
+import type { Frame, GraphLayerState, Note } from '../../types';
+import { GRAPH_LAYER_WEIGHT_MAX, GRAPH_LAYER_WEIGHT_MIN, type GraphLayerGroupStandard } from '../../utils/graph/graphRuntimeCore';
 import { SettingsCompactSlider } from '../ui/SettingsCompactSlider';
+import { TagAddPanel } from '../ui/TagAddPanel';
 
 export interface GraphLayerPanelProps {
   themeColor: string;
   panelChromeStyle?: React.CSSProperties;
   merged: GraphLayerState;
+  layerGroupStandard: GraphLayerGroupStandard;
+  onLayerGroupStandardChange: (standard: GraphLayerGroupStandard) => void;
   onStateChange: (next: GraphLayerState) => void;
   notes: Note[];
   onUpdateNote: (note: Note) => void;
+  /**
+   * 批量更新 notes（一次性提交），用于避免多次 `updateNoteInProject`
+   * 因为基于同一 `activeProject` 快照而互相覆盖。
+   */
+  onBatchUpdateNotes?: (nextNotes: Note[]) => void | Promise<void>;
+  frames: Frame[];
 }
 
-function tagGroupLabel(key: string): string {
+function groupLabel(key: string, layerGroupStandard: GraphLayerGroupStandard, framesById: Map<string, Frame>): string {
   const k = String(key).trim();
-  return k === '' ? '无标签' : k;
+  if (layerGroupStandard === 'tag') return k === '' ? '无标签' : k;
+  if (k === '') return '无帧';
+  return framesById.get(k)?.title ?? k;
 }
 
 function normalizeTagLabel(v: string | undefined | null): string {
@@ -42,15 +53,21 @@ export const GraphLayerPanel: React.FC<GraphLayerPanelProps> = ({
   themeColor,
   panelChromeStyle,
   merged,
+  layerGroupStandard,
+  onLayerGroupStandardChange,
   onStateChange,
   notes,
-  onUpdateNote
+  onUpdateNote,
+  onBatchUpdateNotes,
+  frames
 }) => {
   const hiddenSet = new Set((merged.hidden ?? []).map((h) => String(h).trim()));
   const keysSet = useMemo(() => new Set((merged.order ?? []).map((k) => String(k).trim())), [merged.order]);
+  const framesById = useMemo(() => new Map(frames.map((f) => [String(f.id).trim(), f])), [frames]);
 
-  // tag colors for each tagGroup key (based on all tags of matching label).
+  // Colors per group key (used for the little colored dots).
   const tagColorsByKey = useMemo(() => {
+    if (layerGroupStandard !== 'tag') return new Map<string, string[]>();
     const map = new Map<string, string[]>();
     const seenColorSetByKey = new Map<string, Set<string>>();
 
@@ -72,16 +89,62 @@ export const GraphLayerPanel: React.FC<GraphLayerPanelProps> = ({
     }
 
     return map;
-  }, [notes, keysSet]);
+  }, [notes, keysSet, layerGroupStandard]);
 
-  const cycleTagColor = useCallback(
-    (tagLabelKey: string, fromColor: string) => {
+  const frameColorsByKey = useMemo(() => {
+    if (layerGroupStandard !== 'frame') return new Map<string, string[]>();
+    const map = new Map<string, string[]>();
+    for (const f of frames) {
+      const id = String(f.id).trim();
+      if (!keysSet.has(id)) continue;
+      map.set(id, [f.color]);
+    }
+    return map;
+  }, [frames, keysSet, layerGroupStandard]);
+
+  type TagColorBatchEditor = {
+    tagLabelKey: string;
+    fromColor: string;
+    toColor: string;
+    portalPlacement: { top: number; left: number };
+  };
+  const [tagColorBatchEditor, setTagColorBatchEditor] = useState<TagColorBatchEditor | null>(null);
+
+  const openTagColorBatchEditor = useCallback(
+    (tagLabelKey: string, fromColor: string, anchorEl: HTMLElement) => {
+      if (layerGroupStandard !== 'tag') return;
+      const rect = anchorEl.getBoundingClientRect();
+      const TAG_PANEL_EST_W = 260;
+      const TAG_PANEL_EST_H = 220;
+      const gap = 8;
+      let top = rect.bottom + gap;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      if (spaceBelow < TAG_PANEL_EST_H && rect.top > TAG_PANEL_EST_H + gap) {
+        top = rect.top - TAG_PANEL_EST_H - gap;
+      }
+      let left = rect.left;
+      left = Math.max(8, Math.min(left, window.innerWidth - TAG_PANEL_EST_W - 8));
+
       const idx = TAG_COLORS.indexOf(fromColor);
-      const toColor = idx >= 0 ? TAG_COLORS[(idx + 1) % TAG_COLORS.length] : TAG_COLORS[0];
+      const defaultToColor = idx >= 0 ? TAG_COLORS[(idx + 1) % TAG_COLORS.length] : TAG_COLORS[0];
+
+      setTagColorBatchEditor({
+        tagLabelKey,
+        fromColor,
+        toColor: defaultToColor,
+        portalPlacement: { top, left }
+      });
+    },
+    [layerGroupStandard]
+  );
+
+  const applyBatchTagColorChange = useCallback(
+    async (tagLabelKey: string, fromColor: string, toColor: string) => {
+      if (layerGroupStandard !== 'tag') return;
       if (toColor === fromColor) return;
 
-      // 批量修改：所有便签中 label==该分组 且 color==点击颜色 的 tag 颜色都切到 toColor
-      for (const note of notes) {
+      // 批量修改：所有便签中 label==该分组 且 color==fromColor 的 tag 颜色都切到 toColor
+      const nextNotes = notes.map((note) => {
         let changed = false;
         const nextTags = (note.tags ?? []).map((t) => {
           const label = normalizeTagLabel(t.label);
@@ -91,11 +154,23 @@ export const GraphLayerPanel: React.FC<GraphLayerPanelProps> = ({
           }
           return t;
         });
-        if (!changed) continue;
-        onUpdateNote({ ...note, tags: nextTags });
+        return changed ? { ...note, tags: nextTags } : note;
+      });
+
+      if (onBatchUpdateNotes) {
+        await onBatchUpdateNotes(nextNotes);
+        return;
+      }
+
+      // fallback：尽量顺序更新（但由于 activeProject 快照问题，可能仍会丢失）。
+      for (let i = 0; i < nextNotes.length; i++) {
+        const nextNote = nextNotes[i];
+        const origNote = notes[i];
+        if (nextNote === origNote) continue;
+        await Promise.resolve(onUpdateNote(nextNote));
       }
     },
-    [notes, onUpdateNote]
+    [layerGroupStandard, notes, onUpdateNote, onBatchUpdateNotes]
   );
 
   const [dragKey, setDragKey] = useState<string | null>(null);
@@ -128,6 +203,38 @@ export const GraphLayerPanel: React.FC<GraphLayerPanelProps> = ({
     >
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="max-h-[min(22rem,68vh)] min-h-0 flex-1 overflow-y-auto overscroll-contain px-1.5 py-0.5 theme-surface-scrollbar">
+          <div className="flex items-center gap-2 px-1.5 py-1.5">
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onLayerGroupStandardChange('tag');
+              }}
+              className={`flex-1 rounded-lg px-2 py-1 text-xs font-semibold transition-colors ${
+                layerGroupStandard === 'tag' ? 'text-white' : 'text-gray-600'
+              } ${layerGroupStandard === 'tag' ? '' : 'bg-gray-100 hover:bg-gray-200'}`}
+              style={layerGroupStandard === 'tag' ? { backgroundColor: themeColor } : undefined}
+              aria-label="切换为按标签分组"
+            >
+              tag
+            </button>
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onLayerGroupStandardChange('frame');
+              }}
+              className={`flex-1 rounded-lg px-2 py-1 text-xs font-semibold transition-colors ${
+                layerGroupStandard === 'frame' ? 'text-white' : 'text-gray-600'
+              } ${layerGroupStandard === 'frame' ? '' : 'bg-gray-100 hover:bg-gray-200'}`}
+              style={layerGroupStandard === 'frame' ? { backgroundColor: themeColor } : undefined}
+              aria-label="切换为按帧分组"
+            >
+              frame
+            </button>
+          </div>
         {merged.order.map((key) => {
           const k = String(key).trim();
           const visible = !hiddenSet.has(k);
@@ -200,7 +307,9 @@ export const GraphLayerPanel: React.FC<GraphLayerPanelProps> = ({
                     <GripVertical size={16} strokeWidth={2} />
                   </div>
                   <div className="flex flex-shrink-0 items-center gap-1 pr-0.5">
-                    {(tagColorsByKey.get(k) ?? []).slice(0, 6).map((c) => (
+                    {(
+                      (layerGroupStandard === 'tag' ? tagColorsByKey.get(k) : frameColorsByKey.get(k)) ?? []
+                    ).slice(0, 6).map((c) => (
                       <button
                         key={`${k}:${c}`}
                         type="button"
@@ -208,23 +317,32 @@ export const GraphLayerPanel: React.FC<GraphLayerPanelProps> = ({
                         onPointerDown={(e) => e.stopPropagation()}
                         onClick={(e) => {
                           e.stopPropagation();
-                          cycleTagColor(k, c);
+                          if (layerGroupStandard === 'tag') {
+                            openTagColorBatchEditor(k, c, e.currentTarget);
+                          }
                         }}
                         className="w-3 h-3 rounded-full border border-white/90 shadow-sm hover:scale-110 transition-transform"
                         style={{ backgroundColor: c }}
-                        title={`点击切换颜色：${c}`}
-                        aria-label={`切换标签「${tagGroupLabel(k)}」中颜色为 ${c} 的 tag`}
+                        title={layerGroupStandard === 'tag' ? `点击切换颜色：${c}` : `帧颜色：${c}`}
+                        aria-label={`分组「${groupLabel(k, layerGroupStandard, framesById)}」颜色为 ${c}`}
                       />
                     ))}
-                    {((tagColorsByKey.get(k) ?? []).length ?? 0) > 6 ? (
-                      <span className="text-[10px] text-gray-400 leading-none pl-0.5">+{(tagColorsByKey.get(k) ?? []).length - 6}</span>
+                    {(
+                      (layerGroupStandard === 'tag' ? tagColorsByKey.get(k) : frameColorsByKey.get(k)) ?? []
+                    ).length > 6 ? (
+                      <span className="text-[10px] text-gray-400 leading-none pl-0.5">
+                        +{
+                          ((layerGroupStandard === 'tag' ? tagColorsByKey.get(k) : frameColorsByKey.get(k)) ??
+                            []).length - 6
+                        }
+                      </span>
                     ) : null}
                   </div>
                   <span
                     className="min-w-0 flex-1 truncate text-sm font-medium text-gray-800"
-                    title={tagGroupLabel(k)}
+                    title={groupLabel(k, layerGroupStandard, framesById)}
                   >
-                    {tagGroupLabel(k)}
+                    {groupLabel(k, layerGroupStandard, framesById)}
                   </span>
                   <button
                     type="button"
@@ -275,7 +393,7 @@ export const GraphLayerPanel: React.FC<GraphLayerPanelProps> = ({
       {weightPanelKey != null ? (
         <div
           className="flex w-[min(16rem,45vw)] shrink-0 flex-col justify-center border-l border-gray-200/85 px-2 py-2"
-          title={tagGroupLabel(weightPanelKey)}
+          title={groupLabel(weightPanelKey, layerGroupStandard, framesById)}
         >
           <SettingsCompactSlider
             label="半径权重"
@@ -298,6 +416,37 @@ export const GraphLayerPanel: React.FC<GraphLayerPanelProps> = ({
           />
         </div>
       ) : null}
+
+      {tagColorBatchEditor && (
+        <TagAddPanel
+          themeColor={themeColor}
+          panelChromeStyle={panelChromeStyle}
+          title={`批量修改标签「${groupLabel(tagColorBatchEditor.tagLabelKey, 'tag', framesById)}」颜色`}
+          label={tagColorBatchEditor.tagLabelKey}
+          hideLabelInput
+          selectedColor={tagColorBatchEditor.toColor}
+          onColorChange={(c) => {
+            setTagColorBatchEditor((prev) =>
+              prev ? { ...prev, toColor: c } : prev
+            );
+          }}
+          onApply={async () => {
+            await applyBatchTagColorChange(
+              tagColorBatchEditor.tagLabelKey,
+              tagColorBatchEditor.fromColor,
+              tagColorBatchEditor.toColor
+            );
+            setTagColorBatchEditor(null);
+          }}
+          onDismissOutside={() => setTagColorBatchEditor(null)}
+          portalPlacement={tagColorBatchEditor.portalPlacement}
+          closeOnInteractOutside
+          dismissIgnoreClosestSelector={undefined}
+          autoFocus={false}
+          // onLabelChange is unused when hideLabelInput=true
+          onLabelChange={() => {}}
+        />
+      )}
     </div>
   );
 };

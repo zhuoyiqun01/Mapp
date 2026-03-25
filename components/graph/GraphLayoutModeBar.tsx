@@ -1,5 +1,5 @@
 import React from 'react';
-import { Circle, Clock, Network, Tags } from 'lucide-react';
+import { Circle, Clock, Network, Tags, Layers } from 'lucide-react';
 import type { GraphLayoutMode } from '../../utils/graph/graphRuntimeCore';
 
 type Props = {
@@ -10,6 +10,7 @@ type Props = {
   onApplyCircleLayout: () => void;
   onApplyTimeLayout: () => void;
   onApplyCoseLayout: () => void;
+  onApplyFrameClusterLayout: () => void;
 };
 
 export const GraphLayoutModeBar: React.FC<Props> = ({
@@ -19,7 +20,8 @@ export const GraphLayoutModeBar: React.FC<Props> = ({
   onApplyTagGridLayout,
   onApplyCircleLayout,
   onApplyTimeLayout,
-  onApplyCoseLayout
+  onApplyCoseLayout,
+  onApplyFrameClusterLayout
 }) => {
   const graphLayoutBtnClass = (mode: GraphLayoutMode) =>
     `flex items-center justify-center px-3 py-2 rounded-xl transition-all font-bold text-sm ${
@@ -69,6 +71,15 @@ export const GraphLayoutModeBar: React.FC<Props> = ({
         style={activeGraphLayout === 'cose' ? { backgroundColor: themeColor } : undefined}
       >
         <Network size={20} />
+      </button>
+      <button
+        type="button"
+        title="按帧分簇（跨簇边更近，显示簇+成员）"
+        onClick={onApplyFrameClusterLayout}
+        className={graphLayoutBtnClass('frameCluster')}
+        style={activeGraphLayout === 'frameCluster' ? { backgroundColor: themeColor } : undefined}
+      >
+        <Layers size={20} />
       </button>
     </div>
   );
