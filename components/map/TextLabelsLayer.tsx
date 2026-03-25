@@ -1,6 +1,7 @@
 import React from 'react';
 import { Marker, Popup } from 'react-leaflet';
 import { Note } from '../../types';
+import { parseNoteContent } from '../../utils';
 import { DivIcon } from 'leaflet';
 
 interface TextLabelsLayerProps {
@@ -28,7 +29,7 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
   onSelectNote,
   onClearSelection
 }) => {
-  if (!showTextLabels && !isPreviewMode) return null;
+  if (!showTextLabels && !preSelectedNotes && !isPreviewMode) return null;
 
   // In preview mode, if no note is selected and no pre-selection, and label mode is off, don't show any labels
   if (isPreviewMode && !selectedNoteId && !preSelectedNotes && !showTextLabels) return null;
@@ -41,14 +42,12 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
     if (cluster.notes.length === 1) {
       visibleIndividualNoteIds.add(cluster.notes[0].id);
     } else if (cluster.notes.length > 1) {
-      // For clusters, find the first note with text to represent the cluster
-      const representativeNote = cluster.notes.find(note => note.variant === 'standard' && note.text?.trim());
+      // For clusters, find the first note with title/text to represent the cluster（标题规则参考 TableView/tab 模式）
+      const representativeNote = cluster.notes.find(note => note.variant === 'standard' && (parseNoteContent(note.text || '').title || note.text?.trim()));
       if (representativeNote) {
-        let text = representativeNote.text.trim();
-        // Use only the first line as label
-        if (text.includes('\n')) {
-          text = text.split('\n')[0].trim();
-        }
+        const parsed = parseNoteContent(representativeNote.text || '');
+        let text = parsed.title || representativeNote.emoji || (representativeNote.variant === 'image' ? '照片' : '点位');
+
         clusterLabels.push({
           position: cluster.position,
           text: text,
@@ -60,8 +59,9 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
 
   return (
     <>
-      {/* Pre-selected cluster labels (stacked vertically) */}
-      {isPreviewMode && preSelectedNotes && preSelectedNotes.length > 0 && (() => {
+      {/* Pre-selected cluster labels (stacked vertically).
+          在普通地图模式和预览模式下都可复用，用于“展开簇内 labels，点击 label 选择 note”。 */}
+      {preSelectedNotes && preSelectedNotes.length > 0 && (() => {
         const pos = preSelectedNotes[0].coords;
         const fontSize = Math.max(10, pinSize / 3);
         const itemHeight = fontSize + 16;
@@ -77,12 +77,8 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
               html: `
                 <div style="display: flex; flex-direction: column; gap: 4px; align-items: center;">
                   ${preSelectedNotes.map((note, idx) => {
-                    let text = note.text?.trim() || note.emoji || (note.variant === 'image' ? '照片' : '点位');
-                    
-                    // Use only the first line as label
-                    if (text.includes('\n')) {
-                      text = text.split('\n')[0].trim();
-                    }
+                    const parsed = parseNoteContent(note.text || '');
+                    let text = parsed.title || note.emoji || (note.variant === 'image' ? '照片' : '点位');
 
                     const isFav = note.isFavorite === true;
 
@@ -120,10 +116,14 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
               iconAnchor: [100, totalHeight / 2]
             })}
             eventHandlers={{
-              click: (e) => {
+              // 使用 mousedown 让单击立即触发，而不是依赖 Leaflet 对 click 的处理
+              mousedown: (e) => {
                 e.originalEvent.stopPropagation();
+                e.originalEvent.stopImmediatePropagation();
                 const target = e.originalEvent.target as HTMLElement;
-                const noteId = target.getAttribute('data-note-id') || target.closest('.pre-selected-label-item')?.getAttribute('data-note-id');
+                const noteId =
+                  target.getAttribute('data-note-id') ||
+                  target.closest('.pre-selected-label-item')?.getAttribute('data-note-id');
                 if (noteId && onSelectNote) {
                   onSelectNote(noteId);
                 } else if (onClearSelection) {
@@ -146,16 +146,14 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
             }
             return showTextLabels && note.variant === 'standard' && note.text?.trim() && visibleIndividualNoteIds.has(note.id);
           }
-          return note.variant === 'standard' && note.text?.trim() && visibleIndividualNoteIds.has(note.id);
+          // 普通地图模式下，如果当前有 preSelectedNotes（来自某个点/簇的展开），就隐藏全局 labels，只保留展开的那一组
+          if (preSelectedNotes) return false;
+          return showTextLabels && note.variant === 'standard' && note.text?.trim() && visibleIndividualNoteIds.has(note.id);
         })
         .map(note => {
           // Calculate text width (approximate)
-          let text = note.text?.trim() || '';
-          
-          // Use only the first line as label
-          if (text.includes('\n')) {
-            text = text.split('\n')[0].trim();
-          }
+          const parsed = parseNoteContent(note.text || '');
+          const text = parsed.title || (note.text || '').split('\n')[0].trim();
 
           const isFavorite = note.isFavorite === true;
           const scale = isFavorite ? 1.5 : 1; // Slightly scale favorite labels, but not as much as pins to avoid clutter
@@ -205,7 +203,12 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
         })}
 
       {/* Cluster labels */}
-      {(!isPreviewMode || (isPreviewMode && !selectedNoteId && !preSelectedNotes)) && clusterLabels.map((clusterLabel, index) => {
+      {(
+        // 非预览模式：只有在没有 preSelectedNotes 时才显示全局 cluster labels
+        (!isPreviewMode && !preSelectedNotes) ||
+        // 预览模式：原有逻辑，且需要没有 preSelectedNotes
+        (isPreviewMode && !selectedNoteId && !preSelectedNotes)
+      ) && clusterLabels.map((clusterLabel, index) => {
         // Calculate text width (approximate)
         const text = clusterLabel.text;
         const isFavorite = clusterLabel.isFavorite;

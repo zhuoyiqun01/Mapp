@@ -7,11 +7,9 @@ import { DrawingCanvas } from './DrawingCanvas';
 import { motion } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import { useTiptapEditor } from './hooks/useTiptapEditor';
-import { useTouchNavigation } from './hooks/useTouchNavigation';
 import { useNoteState } from './hooks/useNoteState';
 import { useMediaHandler } from './hooks/useMediaHandler';
 import { NoteHeader } from './note-editor/NoteHeader';
-import { ClusterNavigation } from './note-editor/ClusterNavigation';
 import { ImagePreviewModal } from './note-editor/ImagePreviewModal';
 import { EditorArea } from './note-editor/EditorArea';
 import { MediaGallery } from './note-editor/MediaGallery';
@@ -22,13 +20,9 @@ interface NoteEditorProps {
   onClose: () => void;
   onSave: (note: Partial<Note>) => void;
   onDelete?: (noteId: string) => void;
-  clusterNotes?: Note[];
-  currentIndex?: number;
-  onNext?: () => void;
-  onPrev?: () => void;
-  onSaveWithoutClose?: (note: Partial<Note>) => void;
   onSwitchToMapView?: (coords?: { lat: number; lng: number }) => void;
   onSwitchToBoardView?: (coords?: { x: number; y: number }, mapInstance?: any) => void;
+  themeColor?: string;
 }
 
 const DEFAULT_BG = '#FFFFFF';
@@ -39,13 +33,9 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   onClose, 
   onSave, 
   onDelete,
-  clusterNotes = [],
-  currentIndex = 0,
-  onNext,
-  onPrev,
-  onSaveWithoutClose,
   onSwitchToMapView,
-  onSwitchToBoardView
+  onSwitchToBoardView,
+  themeColor = THEME_COLOR
 }) => {
   // Work around occasional framer-motion typing issues in TS server
   const MotionDiv = (motion.div as unknown) as React.ComponentType<any>;
@@ -113,8 +103,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     if (!textareaRef.current) return;
   }, []);
 
-  // Swipe detection for cluster navigation
-  const touchHandlers = useTouchNavigation({ onNext, onPrev, minSwipeDistance: 50 });
   const emojiButtonRef = useRef<HTMLDivElement | null>(null);
   const [emojiPickerPosition, setEmojiPickerPosition] = useState<{ left: number; top: number } | null>(null);
 
@@ -240,17 +228,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     }, 0);
   };
 
-  const handleSaveWithoutClose = () => {
-    if (onSaveWithoutClose) {
-      const noteData = getCurrentNoteData();
-      // Ensure images are always included
-      if (!noteData.images) {
-        noteData.images = images || [];
-      }
-      onSaveWithoutClose(noteData);
-    }
-  };
-
   const handleDelete = () => {
       if (initialNote?.id && onDelete) {
           // Direct deletion without confirmation dialog as requested
@@ -268,9 +245,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       onPointerMove={(e) => e.stopPropagation()}
       onPointerUp={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
-      onTouchStart={touchHandlers.onTouchStart}
-      onTouchMove={touchHandlers.onTouchMove}
-      onTouchEnd={touchHandlers.onTouchEnd}
       onDragOver={(e) => e.stopPropagation()}
       onDragEnter={(e) => e.stopPropagation()}
       onDragLeave={(e) => e.stopPropagation()}
@@ -324,7 +298,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         <div className={`flex flex-col flex-1 h-full min-h-0 ${isSketching ? 'invisible' : ''}`} style={{ zIndex: 10 }}>
             {/* Header - middle layer z-10 (inherits from parent) */}
             <NoteHeader
-              themeColor={THEME_COLOR}
+              themeColor={themeColor}
               isPreviewMode={isPreviewMode}
               onSetPreviewMode={(preview) => {
                 setShowEmojiPicker(false);
@@ -399,6 +373,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
               textareaRef={textareaRef}
               updateCursorPosition={updateCursorPosition}
               editor={editor}
+              themeColor={themeColor}
             />
 
             <MediaGallery
@@ -446,15 +421,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
             
         </div>
         </MotionDiv>
-        
-        <ClusterNavigation
-          themeColor={THEME_COLOR}
-          currentIndex={currentIndex}
-          total={clusterNotes.length}
-          onPrev={onPrev}
-          onNext={onNext}
-          onBeforeNavigate={handleSaveWithoutClose}
-        />
         </div>
 
       <ImagePreviewModal

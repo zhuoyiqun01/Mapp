@@ -4,6 +4,7 @@ import { GripVertical, Edit2, Check, Plus, X, ExternalLink } from 'lucide-react'
 import { TAG_COLORS } from '../constants';
 import { generateId, parseNoteContent } from '../utils';
 import { NoteEditor } from './NoteEditor';
+import { TagChip } from './ui/TagChip';
 
 interface TableViewProps {
   project: Project;
@@ -443,17 +444,12 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
                             </button>
                           </div>
                         ) : (
-                          <span
+                          <TagChip
                             key={tag.id}
-                            onClick={() => handleEditTag(note, tag.id)}
-                            className="flex-shrink-0 h-6 px-2.5 rounded-full text-xs font-bold text-white shadow-sm flex items-center gap-1 cursor-pointer hover:opacity-80 transition-opacity"
-                            style={{ backgroundColor: tag.color }}
-                          >
-                            {tag.label}
-                            <button onClick={(e) => { e.stopPropagation(); handleRemoveTag(note, tag.id); }}>
-                              <X size={10} />
-                            </button>
-                          </span>
+                            label={tag.label}
+                            color={tag.color}
+                            onRemove={() => handleRemoveTag(note, tag.id)}
+                          />
                         )
                       ))}
                       {addingTagNoteId === note.id && !editingTagId ? (
@@ -579,6 +575,7 @@ export const TableView: React.FC<TableViewProps> = ({ project, onUpdateNote, onU
             setEditorNoteId(null);
           }}
           onSwitchToBoardView={onSwitchToBoardView}
+          themeColor={themeColor}
         />
       )}
       </div>

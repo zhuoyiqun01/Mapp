@@ -1,7 +1,7 @@
 import { useMapEvents } from 'react-leaflet';
 
 interface MapClickHandlerProps {
-  onClick: () => void;
+  onClick: (e: L.LeafletMouseEvent) => void;
 }
 
 export const MapClickHandler = ({ onClick }: MapClickHandlerProps) => {

@@ -5330,6 +5330,7 @@ const createNoteAtCenter = (variant: 'compact') => {
               onDelete={onDeleteNote}
               onSwitchToMapView={onSwitchToMapView}
               onSwitchToBoardView={onSwitchToBoardView}
+              themeColor={themeColor}
               onSave={(updated) => {
                   // Text variant removed
                   if (updated.id && notes.some(n => n.id === updated.id)) {

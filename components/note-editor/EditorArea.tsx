@@ -12,6 +12,7 @@ interface EditorAreaProps {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   updateCursorPosition: () => void;
   editor: Editor | null;
+  themeColor: string;
 }
 
 export const EditorArea: React.FC<EditorAreaProps> = ({
@@ -23,7 +24,8 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
   isProcessingImages,
   textareaRef,
   updateCursorPosition,
-  editor
+  editor,
+  themeColor
 }) => {
   return (
     <div
@@ -52,14 +54,15 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
             onKeyUp={updateCursorPosition}
             onClick={updateCursorPosition}
             placeholder="在此输入内容 (支持 Markdown 语法)..."
-            className="w-full h-full bg-white border-none resize-none focus:ring-0 p-6 text-gray-800 placeholder-gray-400 leading-relaxed overflow-y-auto break-words whitespace-pre-wrap text-[1.1rem]"
+            className="note-editor-textarea w-full h-full bg-white border-none resize-none focus:ring-0 p-6 text-gray-800 placeholder-gray-400 leading-relaxed overflow-y-auto break-words whitespace-pre-wrap text-[1.1rem]"
             spellCheck={false}
             style={{
               border: 'none',
               outline: 'none',
               boxShadow: 'none',
               zIndex: 2,
-              minHeight: '300px'
+              minHeight: '300px',
+              caretColor: themeColor
             }}
           />
         ) : (
@@ -68,6 +71,15 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
             <style>{`
               .tiptap-editor {
                 outline: none !important;
+                caret-color: ${themeColor};
+              }
+              .note-editor-textarea::selection {
+                background: ${themeColor}33;
+                color: inherit;
+              }
+              .tiptap-editor *::selection {
+                background: ${themeColor}33;
+                color: inherit;
               }
               .tiptap-editor p {
                 margin-top: 0 !important;

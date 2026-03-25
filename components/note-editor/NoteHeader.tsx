@@ -1,5 +1,6 @@
 import React from 'react';
 import { Code, Zap, Star, Trash2, ArrowUp, Locate, Check } from 'lucide-react';
+import { NoteIconButton } from './NoteIconButton';
 
 interface NoteHeaderProps {
   themeColor: string;
@@ -37,7 +38,7 @@ export const NoteHeader: React.FC<NoteHeaderProps> = ({
   onLocateBoard,
   showLocateMap,
   onLocateMap,
-  onSave
+  onSave,
 }) => {
   return (
     <div className="flex justify-between items-start p-4 pb-2 relative flex-shrink-0">
@@ -63,62 +64,43 @@ export const NoteHeader: React.FC<NoteHeaderProps> = ({
       </div>
 
       <div className="flex items-center gap-2">
-        <button
+        <NoteIconButton
           onClick={onToggleFavorite}
-          className={`rounded-full p-1.5 transition-colors active:scale-90 ${
-            isFavorite ? 'text-white' : 'text-gray-400 hover:text-gray-600 hover:bg-black/5'
-          }`}
-          style={isFavorite ? { backgroundColor: themeColor } : undefined}
+          variant="primary"
+          themeColor={themeColor}
+          active={isFavorite}
           title={isFavorite ? '取消收藏' : '收藏'}
         >
           <Star size={24} fill={isFavorite ? themeColor : 'none'} />
-        </button>
+        </NoteIconButton>
 
         {showDelete && onDelete && (
-          <button
-            onClick={onDelete}
-            className="text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full p-1.5 transition-colors active:scale-90"
-          >
+          <NoteIconButton onClick={onDelete} variant="danger">
             <Trash2 size={24} />
-          </button>
+          </NoteIconButton>
         )}
 
         {showUpgrade && onUpgrade && (
-          <button
-            onClick={onUpgrade}
-            className="text-green-400 hover:text-green-600 hover:bg-green-50 rounded-full p-1.5 transition-colors active:scale-90"
-            title="升级为标准便签"
-          >
+          <NoteIconButton onClick={onUpgrade} variant="success" title="升级为标准便签">
             <ArrowUp size={24} />
-          </button>
+          </NoteIconButton>
         )}
 
         {showLocateBoard && onLocateBoard && (
-          <button
-            onClick={onLocateBoard}
-            className="text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-full p-1.5 transition-colors active:scale-90"
-            title="定位到board视图"
-          >
+          <NoteIconButton onClick={onLocateBoard} variant="neutral" title="定位到board视图">
             <Locate size={24} className="text-gray-400 hover:text-gray-600" />
-          </button>
+          </NoteIconButton>
         )}
 
         {showLocateMap && onLocateMap && (
-          <button
-            onClick={onLocateMap}
-            className="text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-full p-1.5 transition-colors active:scale-90"
-            title="定位到地图视图"
-          >
+          <NoteIconButton onClick={onLocateMap} variant="neutral" title="定位到地图视图">
             <Locate size={24} className="text-gray-400 hover:text-gray-600" />
-          </button>
+          </NoteIconButton>
         )}
 
-        <button
-          onClick={onSave}
-          className="text-gray-400 hover:text-gray-600 hover:bg-black/5 rounded-full p-1.5 transition-colors active:scale-90"
-        >
+        <NoteIconButton onClick={onSave} variant="neutral">
           <Check size={28} />
-        </button>
+        </NoteIconButton>
       </div>
     </div>
   );

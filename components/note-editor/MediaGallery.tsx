@@ -3,6 +3,7 @@ import { Camera, PenTool, X, Check } from 'lucide-react';
 import type { Tag } from '../../types';
 import { TAG_COLORS } from '../../constants';
 import { EmojiPicker } from './EmojiPicker';
+import { TagChip } from '../ui/TagChip';
 
 interface MediaGalleryProps {
   isCompactMode: boolean;
@@ -262,26 +263,16 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
               </button>
             </div>
           ) : (
-            <span
+            <TagChip
               key={tag.id}
-              onClick={() => {
+              label={tag.label}
+              color={tag.color}
+              className=""
+              onRemove={() => {
                 setShowEmojiPicker(false);
-                onEditTag(tag);
+                onRemoveTag(tag.id);
               }}
-              className="flex-shrink-0 h-6 px-2.5 rounded-full text-xs font-bold text-white shadow-sm flex items-center gap-1 cursor-pointer hover:opacity-80 transition-opacity"
-              style={{ backgroundColor: tag.color }}
-            >
-              {tag.label}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowEmojiPicker(false);
-                  onRemoveTag(tag.id);
-                }}
-              >
-                <X size={10} />
-              </button>
-            </span>
+            />
           )
         )}
 

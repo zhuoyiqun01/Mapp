@@ -114,11 +114,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
 
   const { mapInstance, mapRefCallback } = useMapInitialization();
 
-  // Marker clustering related state
-  const [currentNoteIndex, setCurrentNoteIndex] = useState(0);
-  const [currentClusterNotes, setCurrentClusterNotes] = useState<Note[]>([]);
-  
-
+  // Marker clustering related state (reserved for future use)
   
   // 读取已有图片（可能是存储的图片 ID），用于指纹对比
   const getImageDataForFingerprint = async (imageRef: string): Promise<string | null> => {
@@ -160,6 +156,14 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isEditorOpen]);
+
+  // 当关闭全局 label 开关时，同时收起当前已展开/选中的 labels
+  useEffect(() => {
+    if (!showTextLabels) {
+      setPreSelectedNotes(null);
+      setSelectedNoteId(null);
+    }
+  }, [showTextLabels]);
 
     // Pin size control
     const [pinSize, setPinSize] = useState(1.0); // Scale factor for pin size
@@ -451,31 +455,9 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       return;
     }
 
-    // If we're opening the same note that was just closed, preserve the editing state
-    let noteToEdit = note;
-    if (editingNote && editingNote.id === note.id) {
-      // Use the preserved editing state which has the most recent changes
-      noteToEdit = editingNote as Note;
-      console.log('Marker clicked:', note.id, 'using preserved editing data (most recent)');
-    } else {
-      // Clear previous editing state when opening a different note
-      setEditingNote(null);
-
-      // Get the latest note data from the notes array to ensure we have the most recent changes
-    const latestNote = notes.find(n => n.id === note.id);
-      if (latestNote) {
-        noteToEdit = latestNote;
-        console.log('Marker clicked:', note.id, 'using latest data from notes array');
-      } else {
-        console.log('Marker clicked:', note.id, 'using provided note data');
-      }
-    }
-
-    setCurrentClusterNotes([]);
-    setCurrentNoteIndex(0);
-    setEditingNote(noteToEdit);
-    setIsEditorOpen(true);
-    onToggleEditor(true);
+    // 普通地图模式：第一次点击 pin 只展开当前点对应的 label（或 label 组），不直接打开编辑器
+    setPreSelectedNotes([note]);
+    setSelectedNoteId(note.id);
   };
 
   // Handle cluster marker click - set up cluster navigation
@@ -486,78 +468,26 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       e.originalEvent?.stopImmediatePropagation();
     }
     
-    // 预览模式下点击集合点也恢复状态
+    // Sort notes: from south to north, from west to east
+    const sortedClusterNotes = sortNotes(clusterNotes);
+
     if (!isUIVisible) {
+      // 预览模式：点击集合点时，仅在地图上展开该簇的标签
       if (selectionTimerRef.current) {
         clearTimeout(selectionTimerRef.current);
         selectionTimerRef.current = null;
       }
       setSelectedNoteId(null);
-      // 预选中集合中的所有点
-      setPreSelectedNotes(clusterNotes);
+      setPreSelectedNotes(sortedClusterNotes);
       return;
     }
 
-    // Sort notes: from south to north, from west to east
-    const sortedClusterNotes = sortNotes(clusterNotes);
-    const firstNote = sortedClusterNotes[0];
-    
-    setCurrentClusterNotes(sortedClusterNotes);
-    setCurrentNoteIndex(0);
-    setEditingNote(firstNote);
-    setIsEditorOpen(true);
-    onToggleEditor(true);
+    // 正常地图模式：点击集合点时，仅展开该簇内的 labels，由 TextLabelsLayer 处理二次点击
+    setSelectedNoteId(null);
+    setPreSelectedNotes(sortedClusterNotes);
   };
 
   
-  // Save current note without closing editor
-  const saveCurrentNoteWithoutClose = (noteData: Partial<Note>) => {
-    if (noteData.id && notes.some(n => n.id === noteData.id)) {
-      // 确保保留原始note的variant
-      const existingNote = notes.find(n => n.id === noteData.id);
-      const fullNote: Note = {
-        ...existingNote!,
-        ...noteData,
-        variant: noteData.variant || existingNote!.variant
-      } as Note;
-      onUpdateNote(fullNote);
-      // Update editingNote to reflect the saved changes
-      setEditingNote(fullNote);
-      // Update the note in currentClusterNotes to reflect changes
-      const updatedClusterNotes = currentClusterNotes.map(note =>
-        note.id === noteData.id ? { ...note, ...noteData, variant: noteData.variant || note.variant } as Note : note
-      );
-      setCurrentClusterNotes(updatedClusterNotes);
-    } else {
-      // 新Note必须指定variant
-      const fullNote: Note = {
-        ...noteData,
-        variant: noteData.variant || 'standard'
-      } as Note;
-      onAddNote(fullNote);
-      // Update editingNote for new notes
-      setEditingNote(fullNote);
-    }
-  };
-
-  // Switch to next marker (swipe right)
-  const switchToNextNote = () => {
-    if (currentClusterNotes.length > 1 && currentNoteIndex < currentClusterNotes.length - 1) {
-      const nextIndex = currentNoteIndex + 1;
-      setCurrentNoteIndex(nextIndex);
-      setEditingNote(currentClusterNotes[nextIndex]);
-    }
-  };
-  
-  // Switch to previous marker (swipe left)
-  const switchToPrevNote = () => {
-    if (currentClusterNotes.length > 1 && currentNoteIndex > 0) {
-      const prevIndex = currentNoteIndex - 1;
-      setCurrentNoteIndex(prevIndex);
-      setEditingNote(currentClusterNotes[prevIndex]);
-    }
-  };
-
   const handleSaveNote = (noteData: Partial<Note>) => {
     if (noteData.id && notes.some(n => n.id === noteData.id)) {
       // 确保保留原始note的variant
@@ -587,14 +517,15 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const closeEditor = () => {
       setIsEditorOpen(false);
       onToggleEditor(false);
-      // Keep editingNote state to preserve recent changes for potential re-opening
-      // Only clear it when opening a different note
-      setCurrentClusterNotes([]);
-      setCurrentNoteIndex(0);
   };
 
 
-  const handleMapClickInternal = useCallback(() => {
+  const handleMapClickInternal = useCallback((e: L.LeafletMouseEvent) => {
+    // 若点击的是展开的 label（或 label 组），不要清空选择，让 TextLabelsLayer 的 onSelectNote 处理
+    const target = e.originalEvent?.target as HTMLElement;
+    if (target?.closest?.('.pre-selected-labels-container') || target?.closest?.('.pre-selected-label-item')) {
+      return;
+    }
     if (!isUIVisible) {
       if (selectionTimerRef.current) {
         clearTimeout(selectionTimerRef.current);
@@ -602,6 +533,9 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       }
       setSelectedNoteId(null);
       setPreSelectedNotes(null);
+    } else {
+      setPreSelectedNotes(null);
+      setSelectedNoteId(null);
     }
     if (pendingPlaceNote) {
       setPendingPlaceNote(null);
@@ -754,26 +688,36 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         />
         
         <TextLabelsLayer
-            notes={getFilteredNotes}
-            showTextLabels={showTextLabels}
-            pinSize={pinSize}
-            themeColor={themeColor}
-            clusteredMarkers={clusteredMarkers}
-            selectedNoteId={selectedNoteId}
-            preSelectedNotes={preSelectedNotes}
-            isPreviewMode={!isUIVisible}
-            onSelectNote={(noteId) => {
-              const note = notes.find(n => n.id === noteId);
-              if (note) {
-                setPreSelectedNotes(null);
-                setSelectedNoteId(noteId);
-              }
-            }}
-            onClearSelection={() => {
-              setPreSelectedNotes(null);
-              setSelectedNoteId(null);
-            }}
-          />
+          notes={getFilteredNotes}
+          showTextLabels={showTextLabels}
+          pinSize={pinSize}
+          themeColor={themeColor}
+          clusteredMarkers={clusteredMarkers}
+          selectedNoteId={selectedNoteId}
+          preSelectedNotes={preSelectedNotes}
+          isPreviewMode={!isUIVisible}
+          onSelectNote={(noteId) => {
+            const note = notes.find(n => n.id === noteId);
+            if (!note) return;
+
+            setPreSelectedNotes(null);
+            setSelectedNoteId(noteId);
+
+            // 预览模式下仅高亮/预览，不打开编辑器
+            if (!isUIVisible) {
+              return;
+            }
+
+            // 正常地图模式下，二次点击 label 打开对应 NoteEditor
+            setEditingNote(note);
+            setIsEditorOpen(true);
+            onToggleEditor(true);
+          }}
+          onClearSelection={() => {
+            setPreSelectedNotes(null);
+            setSelectedNoteId(null);
+          }}
+        />
 
         {/* User Location Indicator - only show if location permission is granted */}
         {hasLocationPermission && currentLocation && mapInstance && (
@@ -1073,17 +1017,13 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       
       {isEditorOpen && (
         <NoteEditor 
-            isOpen={isEditorOpen}
-            onClose={closeEditor}
-            onSave={handleSaveNote}
-            onDelete={onDeleteNote}
-            initialNote={editingNote || {}}
-            clusterNotes={currentClusterNotes.length > 1 ? currentClusterNotes : []}
-            currentIndex={currentNoteIndex}
-            onNext={switchToNextNote}
-            onPrev={switchToPrevNote}
-            onSaveWithoutClose={saveCurrentNoteWithoutClose}
-            onSwitchToBoardView={(coords) => onSwitchToBoardView(coords, mapInstance)}
+          isOpen={isEditorOpen}
+          onClose={closeEditor}
+          onSave={handleSaveNote}
+          onDelete={onDeleteNote}
+          initialNote={editingNote || {}}
+          onSwitchToBoardView={(coords) => onSwitchToBoardView(coords, mapInstance)}
+          themeColor={themeColor}
         />
       )}
 
