@@ -46,6 +46,14 @@ function graphLayerWeightNorm(wgt: number): number {
   return (clampGraphLayerWeight(wgt) - GRAPH_LAYER_WEIGHT_MIN) / GRAPH_LAYER_WEIGHT_SPAN;
 }
 
+/** frameCluster 簇内：标签权重→半径比例的非线形（>1 时高权重更靠外圈、指数越大对比越强） */
+const FRAME_CLUSTER_TAG_WEIGHT_TO_RADIUS_EXP = 1.85;
+
+function frameClusterTagWeightRadiusFactor(norm01: number): number {
+  const u = Math.min(1, Math.max(0, norm01));
+  return Math.pow(u, FRAME_CLUSTER_TAG_WEIGHT_TO_RADIUS_EXP);
+}
+
 /** 稳定字符串哈希：用于给每个标签组分配固定相位，避免全组重叠在同一角度。 */
 function stableAngleSeed(input: string): number {
   let h = 2166136261;
@@ -108,6 +116,59 @@ export function applyGraphLayerNodeVisibility(
     cy.nodes().forEach((node) => {
       const g = getGraphLayerEffectiveGroupKey(node, standard, hiddenSet);
       node.style('display', hiddenSet.has(g) ? 'none' : 'element');
+    });
+  });
+}
+
+/**
+ * 便签节点是否属于 frameCluster「临时只看」选中的帧（与看板 filterFrameIds：任一 groupId 命中即算）
+ */
+function graphNoteMatchesFrameClusterPeek(n: NodeSingular, peek: Set<string>): boolean {
+  if (peek.size === 0) return true;
+  const raw = n.data('frameGroups') as unknown;
+  const arr = Array.isArray(raw) ? raw : [n.data('frameGroup')];
+  const ids = arr.map((x) => String(x ?? '').trim()).filter((x) => x !== '');
+  if (ids.length === 0) return peek.has('');
+  return ids.some((id) => peek.has(id));
+}
+
+/**
+ * frameCluster：点击簇标题「临时只看」时弱化其它簇节点/边/底衬（与看板 frame 标题过滤一致）。
+ * `peek === null` 或空集时清除弱化。
+ */
+export function applyGraphFrameClusterPeekHighlight(cy: Core, peek: Set<string> | null | undefined): void {
+  const active = peek && peek.size > 0 ? new Set([...peek].map((k) => String(k))) : null;
+
+  cy.batch(() => {
+    cy.nodes().forEach((n) => {
+      n.removeClass('graph-frame-peek-dim');
+      n.removeClass('graph-frame-peek-focus');
+    });
+    cy.edges().forEach((e) => {
+      e.removeClass('graph-frame-peek-dim');
+    });
+
+    if (!active) return;
+
+    cy.nodes().forEach((n) => {
+      if (n.hasClass('frame-cluster-halo') || n.hasClass('frame-cluster-label')) {
+        const k = n.data('clusterFrameKey');
+        const keyStr = k !== undefined && k !== null ? String(k) : '';
+        if (active.has(keyStr)) n.addClass('graph-frame-peek-focus');
+        else n.addClass('graph-frame-peek-dim');
+        return;
+      }
+      if (!graphNoteMatchesFrameClusterPeek(n, active)) {
+        n.addClass('graph-frame-peek-dim');
+      }
+    });
+
+    cy.edges().forEach((e) => {
+      const s = e.source();
+      const t = e.target();
+      if (!graphNoteMatchesFrameClusterPeek(s, active) || !graphNoteMatchesFrameClusterPeek(t, active)) {
+        e.addClass('graph-frame-peek-dim');
+      }
     });
   });
 }
@@ -716,7 +777,11 @@ export function applyGraphTimeLayout(
  * 3) 簇内：参考圆环布局，用标签分层顺序与权重做多环半径；无 tag 面板数据时退化为单环。
  * 4) 每簇增加略大于最外圈的玻璃感圆形底衬。
  */
-const FRAME_CLUSTER_TAG_RING_DEPTH = 0.26;
+/** 簇内标签多环所占外圈半径比例；相对原 0.26 加倍，使权重对应的半径上下限跨度约 2 倍 */
+const FRAME_CLUSTER_TAG_RING_DEPTH = 0.52;
+
+/** cytoscape-cose-bilkent 默认 edgeElasticity=0.45；簇图布局用一半弹簧强度，削弱「有连线则簇更易挤在一起」 */
+const FRAME_CLUSTER_COSE_EDGE_ELASTICITY = 0.225;
 
 export function applyGraphFrameClusterMembersLayout(
   cy: Core,
@@ -856,7 +921,8 @@ export function applyGraphFrameClusterMembersLayout(
         randomize: false,
         padding: 40,
         quality: 'draft',
-        numIter: 500
+        numIter: 500,
+        edgeElasticity: FRAME_CLUSTER_COSE_EDGE_ELASTICITY
       } as any).run();
     } else {
       const onlyKey = keysForLayout[0];
@@ -952,7 +1018,7 @@ export function applyGraphFrameClusterMembersLayout(
         const groupNodes = byTag.get(tagKey);
         if (!groupNodes?.length) continue;
         const tw = tagLayersState.weights?.[tagKey] ?? 0.5;
-        const tNorm = graphLayerWeightNorm(tw);
+        const tNorm = frameClusterTagWeightRadiusFactor(graphLayerWeightNorm(tw));
         const r = innerR + tNorm * (outerR - innerR);
         const phase = stableAngleSeed(`frameCluster::${clusterKey}::${tagKey}`) * 2 * Math.PI - Math.PI / 2;
         const gn = groupNodes.length;
@@ -1005,7 +1071,7 @@ export function applyGraphFrameClusterMembersLayout(
         const haloId = `frameClusterHalo__${clusterKey === '' ? '__empty__' : clusterKey}`;
         cy.add({
           group: 'nodes',
-          data: { id: haloId, haloW, haloH: haloW, haloFill, haloBorder },
+          data: { id: haloId, haloW, haloH: haloW, haloFill, haloBorder, clusterFrameKey: clusterKey },
           classes: ['frame-cluster-halo']
         });
         cy.getElementById(haloId).position({ x: center.x, y: center.y });
@@ -1016,10 +1082,12 @@ export function applyGraphFrameClusterMembersLayout(
         if (!cy.getElementById(id).empty()) return;
         cy.add({
           group: 'nodes',
-          data: { id, label: labelText },
+          data: { id, label: labelText, clusterFrameKey: clusterKey },
           classes: ['frame-cluster-label']
         });
-        cy.getElementById(id).position({ x: center.x, y: center.y });
+        const labelCol = cy.getElementById(id);
+        labelCol.position({ x: center.x, y: center.y });
+        labelCol.ungrabify();
       });
     });
 

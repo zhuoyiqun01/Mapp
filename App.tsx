@@ -841,6 +841,20 @@ export default function App() {
   };
 
   const handleCreateProject = async (project: Project) => {
+    // JSON 全量导入已在 storage 中按 project.id 保存；若再 createProject 会新建空项目并选错 ID，导致「导入后空白」
+    const hasImportedPayload =
+      (project.notes?.length ?? 0) > 0 ||
+      (project.frames?.length ?? 0) > 0 ||
+      (project.connections?.length ?? 0) > 0;
+
+    if (hasImportedPayload) {
+      await projectState.loadProjects();
+      setViewMode('map');
+      setIsSidebarOpen(false);
+      await projectState.selectProject(project.id);
+      return;
+    }
+
     const projectId = await projectState.createProject({
       name: project.name
     });

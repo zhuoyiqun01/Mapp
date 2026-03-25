@@ -733,8 +733,9 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     return latDiff < 0.0001 && lngDiff < 0.0001;
   };
 
-  // Import project from JSON data
-  const handleImportProject = async (file: File) => {
+  // Import project from JSON data（merge 必须用参数传入：拖放时 setState 异步，不能依赖 isImportingFromData）
+  const handleImportProject = async (file: File, options?: { merge?: boolean }) => {
+    const mergeIntoCurrent = !!(options?.merge && activeProject);
     try {
       const text = await file.text();
       const data = JSON.parse(text);
@@ -759,9 +760,10 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       };
 
       // If importing into existing project (merge mode)
-      if (isImportingFromData && activeProject) {
+      if (mergeIntoCurrent && activeProject) {
         // Create ID mapping for notes, frames, and connections
         const noteIdMap = new Map<string, string>();
+        const duplicateNoteIdMap = new Map<string, string>();
         const frameIdMap = new Map<string, string>();
         
         // Generate new IDs for imported notes (import ALL notes including compact and text)
@@ -794,24 +796,57 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           return { ...frame, id: newId };
         });
         
-        // Update note groupId references to new frame IDs
+        // Update note groupId / groupIds to new frame IDs
         importedNotes.forEach(note => {
           if (note.groupId && frameIdMap.has(note.groupId)) {
             note.groupId = frameIdMap.get(note.groupId)!;
+          }
+          if (note.groupIds?.length) {
+            note.groupIds = note.groupIds
+              .map(gid => (frameIdMap.has(gid) ? frameIdMap.get(gid)! : gid));
           }
         });
         
         // Merge notes with duplicate detection
         if (activeProject) {
-          // Filter out duplicate notes
           const uniqueImportedNotes = importedNotes.filter(importedNote => {
-            return !activeProject.notes.some(existingNote => 
+            const match = activeProject.notes.find(existingNote =>
               isDuplicateNote(importedNote, existingNote)
             );
+            if (match) {
+              duplicateNoteIdMap.set(importedNote.id, match.id);
+              return false;
+            }
+            return true;
           });
           
           const mergedNotes = [...activeProject.notes, ...uniqueImportedNotes];
-          const updatedProject = { ...activeProject, notes: mergedNotes };
+
+          const resolveMergedNoteId = (oldImportedId: string): string | undefined => {
+            if (noteIdMap.has(oldImportedId)) return noteIdMap.get(oldImportedId)!;
+            if (duplicateNoteIdMap.has(oldImportedId)) return duplicateNoteIdMap.get(oldImportedId)!;
+            return oldImportedId;
+          };
+
+          const importedConnections = (newProject.connections || []).map(conn => ({
+            ...conn,
+            id: generateId(),
+            fromNoteId: resolveMergedNoteId(conn.fromNoteId) ?? conn.fromNoteId,
+            toNoteId: resolveMergedNoteId(conn.toNoteId) ?? conn.toNoteId
+          })).filter(conn =>
+            mergedNotes.some(n => n.id === conn.fromNoteId) &&
+            mergedNotes.some(n => n.id === conn.toNoteId)
+          );
+
+          const mergedFrames = [...(activeProject.frames || []), ...importedFrames];
+          const mergedConnections = [...(activeProject.connections || []), ...importedConnections];
+
+          const updatedProject = {
+            ...activeProject,
+            notes: mergedNotes,
+            frames: mergedFrames,
+            connections: mergedConnections
+          };
           
           // Save project using new storage system (this will handle image separation)
           await saveProject(updatedProject);
@@ -833,24 +868,44 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           }
         }
       } else {
-        // Create as new project - regenerate all IDs
+        // Create as new project - regenerate IDs 并保持 frame / 连线与便签 ID 一致
+        const noteIdMap = new Map<string, string>();
+        const frameIdMap = new Map<string, string>();
+
         const regeneratedNotes = (newProject.notes || []).map(note => {
-          // 不要根据内容自动判断 variant，保持原始 variant 或默认为 standard
           const raw = (note as Note & { variant?: string }).variant || 'standard';
           const variant: 'standard' | 'image' = raw === 'image' ? 'image' : 'standard';
+          const newId = generateId();
+          noteIdMap.set(note.id, newId);
           return {
             ...note,
-            id: generateId(),
+            id: newId,
             variant
           };
         });
-        const regeneratedFrames = (newProject.frames || []).map(frame => ({
-          ...frame,
-          id: generateId()
-        }));
+
+        const regeneratedFrames = (newProject.frames || []).map(frame => {
+          const newId = generateId();
+          frameIdMap.set(frame.id, newId);
+          return { ...frame, id: newId };
+        });
+
+        regeneratedNotes.forEach(note => {
+          if (note.groupId && frameIdMap.has(note.groupId)) {
+            note.groupId = frameIdMap.get(note.groupId)!;
+          }
+          if (note.groupIds?.length) {
+            note.groupIds = note.groupIds.map(gid =>
+              frameIdMap.has(gid) ? frameIdMap.get(gid)! : gid
+            );
+          }
+        });
+
         const regeneratedConnections = (newProject.connections || []).map(conn => ({
           ...conn,
-          id: generateId()
+          id: generateId(),
+          fromNoteId: noteIdMap.get(conn.fromNoteId) ?? conn.fromNoteId,
+          toNoteId: noteIdMap.get(conn.toNoteId) ?? conn.toNoteId
         }));
         
         // Debug: count notes by variant
@@ -935,7 +990,9 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
 
   const handleImportFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      handleImportProject(e.target.files[0]);
+      handleImportProject(e.target.files[0], {
+        merge: !!(isImportingFromData && activeProject)
+      });
     }
   };
 
@@ -977,9 +1034,8 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       );
       
       if (jsonFile) {
-        // Always merge when dragging (import data mode)
-        setIsImportingFromData(true);
-        handleImportProject(jsonFile);
+        const merge = !!activeProject;
+        handleImportProject(jsonFile, { merge });
       }
     }
   };

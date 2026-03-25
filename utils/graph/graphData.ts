@@ -710,11 +710,12 @@ export function getGraphStylesheet(
       }
     },
     {
-      // frameCluster 的簇中心标签：只用于展示，不参与交互/选中。
+      // frameCluster 簇标题：默认 text-events=no 时点在字上会穿透到下层面；设 yes 才用 label 包围盒拾取
       selector: 'node.frame-cluster-label',
       style: {
-        width: '1px',
-        height: '1px',
+        width: 108,
+        height: 30,
+        shape: 'roundrectangle',
         'background-opacity': 0,
         'border-width': 0,
         opacity: 1,
@@ -723,11 +724,67 @@ export function getGraphStylesheet(
         'font-size': '12px',
         'font-weight': '800',
         'text-valign': 'center',
+        'text-halign': 'center',
         'text-margin-y': 0,
         'text-background-opacity': 0,
         'text-border-width': 0,
+        'text-outline-width': 6,
+        'text-outline-color': '#ffffff',
+        'text-outline-opacity': 1,
+        'text-events': 'yes',
         'z-index': 22000,
-        events: 'no'
+        'z-index-compare': 'manual',
+        cursor: 'pointer'
+      }
+    },
+    /** 簇标题选中：不显主题底/边（避免盖住通用 node:selected 的绿色描边） */
+    {
+      selector: 'node.frame-cluster-label:selected',
+      style: {
+        'border-width': 0,
+        'border-opacity': 0,
+        'background-opacity': 0,
+        opacity: 1
+      }
+    },
+    {
+      selector: 'node.frame-cluster-label.graph-frame-peek-focus',
+      style: {
+        color: '#111827',
+        opacity: 1,
+        'text-outline-width': 8
+      }
+    },
+    {
+      selector: 'node.frame-cluster-label.graph-frame-peek-dim',
+      style: {
+        opacity: 0.34,
+        'text-outline-width': 5
+      }
+    },
+    {
+      selector: 'node.frame-cluster-halo.graph-frame-peek-dim',
+      style: {
+        'background-opacity': 0.2,
+        'border-opacity': 0.35
+      }
+    },
+    {
+      selector: 'node.graph-frame-peek-dim:not(.frame-cluster-halo):not(.frame-cluster-label)',
+      style: {
+        opacity: 0.32
+      }
+    },
+    {
+      selector: 'edge.graph-frame-peek-dim',
+      style: {
+        opacity: 0.3
+      }
+    },
+    {
+      selector: 'edge.graph-frame-peek-dim.focus-edge-hover, edge.graph-frame-peek-dim.focus-edge-selected',
+      style: {
+        opacity: 0.95
       }
     },
     {

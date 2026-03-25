@@ -35,6 +35,7 @@ import {
   animateGraphCenterOnNode,
   applyGraphLayerNodeVisibility,
   applyGraphFrameClusterMembersLayout,
+  applyGraphFrameClusterPeekHighlight,
   type GraphLayerGroupStandard
 } from '../utils/graph/graphRuntimeCore';
 import { mapChromeHaloFillAndBorder } from '../utils/map/mapChromeStyle';
@@ -161,6 +162,18 @@ export const GraphView: React.FC<GraphViewProps> = ({
     }
     return project.graphDefaultLayoutMode ?? DEFAULT_GRAPH_LAYOUT_MODE;
   });
+
+  /** frameCluster：点击簇标题「临时只看」选中的帧 id（空串表示「无帧」簇）；逻辑与看板 frame 标题过滤一致 */
+  const [frameClusterPeekFrameIds, setFrameClusterPeekFrameIds] = useState<Set<string>>(() => new Set());
+  const frameClusterPeekKey = useMemo(
+    () => Array.from(frameClusterPeekFrameIds).sort().join('\u0001'),
+    [frameClusterPeekFrameIds]
+  );
+
+  const activeGraphLayoutRef = useRef(activeGraphLayout);
+  activeGraphLayoutRef.current = activeGraphLayout;
+  const frameClusterPeekFrameIdsRef = useRef(frameClusterPeekFrameIds);
+  frameClusterPeekFrameIdsRef.current = frameClusterPeekFrameIds;
 
   /** cytoscape 回调闭包不随 render 更新，用 ref 读连线面板 + 点选模式 */
   const graphUiRef = useRef({
@@ -362,6 +375,12 @@ export const GraphView: React.FC<GraphViewProps> = ({
       getGraphLayoutCache(projectId) ?? project.graphDefaultLayoutMode ?? DEFAULT_GRAPH_LAYOUT_MODE
     );
   }, [projectId, project.graphDefaultLayoutMode]);
+
+  useEffect(() => {
+    if (activeGraphLayout !== 'frameCluster') {
+      setFrameClusterPeekFrameIds(new Set());
+    }
+  }, [activeGraphLayout]);
 
   const nodeStructureKey = useMemo(() => graphNodeStructureKey(notes), [notes]);
   const edgeStructureKey = useMemo(
@@ -626,9 +645,36 @@ export const GraphView: React.FC<GraphViewProps> = ({
   const bindCyEvents = useCallback(
     (cy: Core) => {
       const onNodeTap = (evt: cytoscape.EventObject) => {
-        cy.elements().unselect();
         const n = evt.target as NodeSingular;
         const id = n.id();
+
+        if (activeGraphLayoutRef.current === 'frameCluster' && n.hasClass('frame-cluster-label')) {
+          if (graphNodeTapTimerRef.current) {
+            clearTimeout(graphNodeTapTimerRef.current);
+            graphNodeTapTimerRef.current = null;
+          }
+          const rawKey = n.data('clusterFrameKey');
+          const clusterKey = rawKey !== undefined && rawKey !== null ? String(rawKey) : '';
+          const oe = evt.originalEvent;
+          const shift = oe instanceof MouseEvent ? oe.shiftKey : false;
+          setFrameClusterPeekFrameIds((prev) => {
+            const next = new Set(prev);
+            if (shift) {
+              if (next.has(clusterKey)) next.delete(clusterKey);
+              else next.add(clusterKey);
+            } else if (next.size === 1 && next.has(clusterKey)) {
+              next.clear();
+            } else {
+              next.clear();
+              next.add(clusterKey);
+            }
+            return next;
+          });
+          cy.elements().unselect();
+          return;
+        }
+
+        cy.elements().unselect();
         const ui = graphUiRef.current;
         if (ui.showConnectionPanel && ui.isGraphToolbarEditMode && ui.pickTarget) {
           const field = ui.pickTarget === 'from' ? 'fromNoteId' : 'toNoteId';
@@ -674,6 +720,9 @@ export const GraphView: React.FC<GraphViewProps> = ({
         }
         cy.elements().unselect();
         const n = evt.target as NodeSingular;
+        if (n.hasClass('frame-cluster-label') || n.hasClass('frame-cluster-halo')) {
+          return;
+        }
         const id = n.id();
         setSelectedConnectionId(null);
         setEdgeLabelDraft('');
@@ -712,6 +761,9 @@ export const GraphView: React.FC<GraphViewProps> = ({
 
       const onBgTap = (evt: cytoscape.EventObject) => {
         if (evt.target !== cy) return;
+        if (activeGraphLayoutRef.current === 'frameCluster' && frameClusterPeekFrameIdsRef.current.size > 0) {
+          setFrameClusterPeekFrameIds(new Set());
+        }
         cy.elements().unselect();
         clearSelection();
       };
@@ -732,6 +784,11 @@ export const GraphView: React.FC<GraphViewProps> = ({
 
       const onNodeOver = (evt: cytoscape.EventObject) => {
         const n = evt.target as NodeSingular;
+        if (n.hasClass('frame-cluster-label') || n.hasClass('frame-cluster-halo')) {
+          setHoveredNote(null);
+          setPreviewImageIndex(0);
+          return;
+        }
         const note = noteByIdRef.current.get(n.id());
         setHoveredNote(note || null);
         setPreviewImageIndex(0);
@@ -997,6 +1054,32 @@ export const GraphView: React.FC<GraphViewProps> = ({
     tagGraphLayersOrderKey,
     tagGraphLayersWeightsKey,
     tagGraphLayersHiddenKey
+  ]);
+
+  /** frameCluster 布局重算后簇标题节点会重建，需按当前「临时只看」状态重新挂类 */
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    if (activeGraphLayout !== 'frameCluster') {
+      applyGraphFrameClusterPeekHighlight(cy, null);
+      return;
+    }
+    applyGraphFrameClusterPeekHighlight(
+      cy,
+      frameClusterPeekFrameIds.size > 0 ? frameClusterPeekFrameIds : null
+    );
+  }, [
+    activeGraphLayout,
+    frameClusterPeekKey,
+    mergedFrameGraphLayers,
+    mergedTagGraphLayers,
+    project.frames,
+    frameGraphLayersHiddenKey,
+    frameGraphLayersOrderKey,
+    tagGraphLayersOrderKey,
+    tagGraphLayersWeightsKey,
+    tagGraphLayersHiddenKey,
+    nodeStructureKey
   ]);
 
   useEffect(() => {
