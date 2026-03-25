@@ -17,6 +17,9 @@ export default defineConfig(({ mode }) => {
           registerType: 'autoUpdate',
           manifest: false,
           workbox: {
+            // Workbox 默认最多只会预缓存 2MiB 的资源；你的构建产物有超过该大小的 chunk，
+            // 如果不调整会导致构建阶段直接失败。
+            maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5MiB
             globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
             globDirectory: 'dist',
             navigateFallback: null,
