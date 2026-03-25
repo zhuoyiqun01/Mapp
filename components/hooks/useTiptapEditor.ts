@@ -21,7 +21,7 @@ export function useTiptapEditor({ noteId, content, onMarkdownChange }: UseTiptap
     editorProps: {
       attributes: {
         class:
-          'prose focus:outline-none min-h-[300px] p-6 text-gray-800 leading-relaxed max-w-none tiptap-editor'
+          'prose cursor-text focus:outline-none min-h-[300px] p-0 text-[1.05rem] text-gray-800 leading-relaxed max-w-none tiptap-editor'
       }
     }
   });

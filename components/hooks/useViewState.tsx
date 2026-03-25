@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { ViewMode } from '../../types';
-import { getViewPositionCache, setViewPositionCache } from '../../utils/storage';
+import { getViewPositionCache, setViewPositionCache } from '../../utils/persistence/storage';
 
 interface NavigationCoords {
   lat: number;

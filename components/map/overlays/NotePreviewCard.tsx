@@ -8,20 +8,40 @@ interface NotePreviewCardProps {
   note: Note;
   currentImageIndex: number;
   onImageIndexChange: (index: number) => void;
+  chromeSurfaceStyle?: React.CSSProperties;
+  /** 为 true 时不拦截指针（悬停预览穿透到底层，仅选中展示时可交互） */
+  passThrough?: boolean;
 }
 
 export const NotePreviewCard: React.FC<NotePreviewCardProps> = ({
   note,
   currentImageIndex,
-  onImageIndexChange
+  onImageIndexChange,
+  chromeSurfaceStyle,
+  passThrough = false
 }) => {
+  const formatPreviewTitle = (rawText: string): string => {
+    const title = parseNoteContent(rawText || '').title || 'Untitled Note';
+    return title.replace(/,\s/, '\n');
+  };
+
+  const formatYearRange = (): string | null => {
+    if (note.startYear == null) return null;
+    if (note.endYear != null && note.endYear !== note.startYear) {
+      return `${note.startYear}–${note.endYear}`;
+    }
+    return String(note.startYear);
+  };
+
+  const timeRangeText = formatYearRange();
   const allImages = [...(note.images || [])];
   if (note.sketch) allImages.push(note.sketch);
 
   return (
     <div
-      className="fixed top-4 left-4 z-[1000] w-72 sm:w-80 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden animate-in slide-in-from-left-8 duration-500 ease-out pointer-events-auto flex flex-col"
-      style={{ maxHeight: 'calc(100vh - 2rem)' }}
+      data-allow-context-menu
+      className={`fixed top-4 left-4 z-[1000] w-72 sm:w-80 rounded-2xl shadow-2xl border border-gray-100 overflow-hidden animate-in slide-in-from-left-8 duration-500 ease-out flex flex-col ${passThrough ? 'pointer-events-none' : 'pointer-events-auto'} ${chromeSurfaceStyle ? '' : 'bg-white'}`}
+      style={{ maxHeight: 'calc(100vh - 2rem)', ...chromeSurfaceStyle }}
       onClick={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
     >
@@ -31,9 +51,14 @@ export const NotePreviewCard: React.FC<NotePreviewCardProps> = ({
             <span className="text-2xl mt-0.5 shrink-0">{note.emoji}</span>
           )}
           <div className="min-w-0 flex-1">
-            <h3 className="text-lg font-bold text-gray-900 leading-tight line-clamp-2 break-words">
-              {parseNoteContent(note.text || '').title || 'Untitled Note'}
+            <h3 className="text-lg font-bold text-gray-900 leading-tight whitespace-pre-line break-words">
+              {formatPreviewTitle(note.text || '')}
             </h3>
+            {timeRangeText && (
+              <div className="mt-1 text-xs text-gray-500 font-medium truncate">
+                {timeRangeText}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -43,10 +68,10 @@ export const NotePreviewCard: React.FC<NotePreviewCardProps> = ({
           const { detail } = parseNoteContent(note.text);
           if (!detail.trim()) return null;
           return (
-            <div className="px-4 py-3 text-gray-800 text-sm leading-relaxed break-words border-b border-gray-50 bg-gray-50/30 mapping-preview-markdown">
+            <div className="px-4 py-3 text-gray-800 text-sm leading-snug break-words border-b border-gray-50 bg-gray-50/30 mapping-preview-markdown">
               <ReactMarkdown>{detail}</ReactMarkdown>
               <style>{`
-                .mapping-preview-markdown p { margin-bottom: 0.5rem; }
+                .mapping-preview-markdown p { margin-bottom: 0.6rem; line-height: 1.4; }
                 .mapping-preview-markdown p:last-child { margin-bottom: 0; }
                 .mapping-preview-markdown h1 { font-size: 1.25rem; font-weight: 800; margin: 0.8rem 0 0.4rem; }
                 .mapping-preview-markdown h2 { font-size: 1.1rem; font-weight: 700; margin: 0.7rem 0 0.3rem; }

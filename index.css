@@ -7,6 +7,30 @@
   --color-theme-dark: #E6C700;
 }
 
+/* 铺在主题色上的图标/文字颜色；Lab L* 与阈值由 applyThemeChromeCssVars 更新 */
+:root {
+  --theme-chrome-fg: #ffffff;
+  --theme-chrome-lab-l: 0;
+  /* 与 useAppState / App 中主题默认值一致，首屏未跑 JS 前作回退 */
+  --theme-color: #3b82f6;
+  --theme-color-dark: #3566d6;
+  --theme-scrollbar-thumb: rgba(255, 255, 255, 0.42);
+  --theme-scrollbar-thumb-hover: rgba(255, 255, 255, 0.58);
+  --theme-scrollbar-track: rgba(255, 255, 255, 0.14);
+  /* 与 mapChromeSurfaceStyle / App 状态同步，避免再叠一层 Tailwind backdrop-blur */
+  --map-ui-chrome-opacity: 0.9;
+  --map-ui-chrome-blur-px: 8px;
+}
+
+/* 原生 range 滑块拇指/强调色（否则为系统蓝） */
+input[type="range"] {
+  accent-color: var(--theme-color);
+}
+
+.text-theme-chrome-fg {
+  color: var(--theme-chrome-fg, #ffffff);
+}
+
 html, body, #root {
   height: 100%;
 }
@@ -29,6 +53,38 @@ body {
   display: none;  /* Chrome, Safari and Opera */
 }
 
+/* 铺在主题色上（主页 / 侧边栏）：由 applyThemeChromeCssVars 写入 --theme-scrollbar-* */
+.theme-surface-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--theme-scrollbar-thumb) var(--theme-scrollbar-track);
+}
+
+.theme-surface-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.theme-surface-scrollbar::-webkit-scrollbar-track {
+  background: var(--theme-scrollbar-track);
+  border-radius: 9999px;
+}
+
+.theme-surface-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--theme-scrollbar-thumb);
+  border-radius: 9999px;
+}
+
+.theme-surface-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--theme-scrollbar-thumb-hover);
+}
+
+/** 无 panelChromeStyle 内联时，与 mapChromeSurfaceStyle 同一套变量（由 App 写入根节点） */
+.map-chrome-surface-fallback {
+  background-color: rgb(255 255 255 / var(--map-ui-chrome-opacity, 0.9));
+  backdrop-filter: blur(var(--map-ui-chrome-blur-px, 8px));
+  -webkit-backdrop-filter: blur(var(--map-ui-chrome-blur-px, 8px));
+}
+
 /* Fixed width for tag columns to prevent table expansion */
 .tag-header-column {
   width: 128px;
@@ -36,7 +92,6 @@ body {
   max-width: 128px;
   box-sizing: border-box;
   flex-shrink: 0;
-  overflow: hidden;
 }
 
 .tag-content-column {
@@ -45,7 +100,8 @@ body {
   max-width: 128px;
   box-sizing: border-box;
   flex-shrink: 0;
-  overflow: hidden;
+  /* 勿用 overflow:hidden，否则会裁切 Tag 的 box-shadow */
+  overflow: visible;
 }
 
 .tag-content-column > * {

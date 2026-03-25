@@ -78,6 +78,12 @@ interface NoteMarkerProps {
   themeColor: string;
   zIndexOffset?: number;
   onClick: (e: L.LeafletMouseEvent) => void;
+  onMouseEnter?: (e: L.LeafletMouseEvent) => void;
+  onMouseLeave?: (e: L.LeafletMouseEvent) => void;
+  draggable?: boolean;
+  onDragEnd?: (e: L.DragEndEvent) => void;
+  // 拖拽过程中更新坐标（用于避免回弹）
+  onDrag?: (e: any) => void;
 }
 
 export const NoteMarker = React.memo<NoteMarkerProps>(function NoteMarker({
@@ -88,7 +94,12 @@ export const NoteMarker = React.memo<NoteMarkerProps>(function NoteMarker({
   pinSize,
   themeColor,
   zIndexOffset = 0,
-  onClick
+  onClick,
+  onMouseEnter,
+  onMouseLeave,
+  draggable = false,
+  onDragEnd,
+  onDrag
 }) {
   const icon = useMemo(
     () => createNoteIcon(note, themeColor, clusterCount, showTextLabels, pinSize),
@@ -105,12 +116,25 @@ export const NoteMarker = React.memo<NoteMarkerProps>(function NoteMarker({
     ]
   );
 
+  const eventHandlers: {
+    click: (e: L.LeafletMouseEvent) => void;
+    mouseover?: (e: L.LeafletMouseEvent) => void;
+    mouseout?: (e: L.LeafletMouseEvent) => void;
+    dragend?: (e: L.DragEndEvent) => void;
+    drag?: (e: any) => void;
+  } = { click: onClick };
+  if (onMouseEnter) eventHandlers.mouseover = onMouseEnter;
+  if (onMouseLeave) eventHandlers.mouseout = onMouseLeave;
+  if (onDragEnd) eventHandlers.dragend = onDragEnd;
+  if (onDrag) eventHandlers.drag = onDrag;
+
   return (
     <Marker
       position={position}
       icon={icon}
       zIndexOffset={zIndexOffset}
-      eventHandlers={{ click: onClick }}
+      draggable={draggable}
+      eventHandlers={eventHandlers}
     />
   );
 });

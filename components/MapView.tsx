@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { MapContainer, TileLayer, Marker, GeoJSON, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { set } from 'idb-keyval';
-import { Search, Locate, Loader2, X, Satellite, Plus, Image as ImageIcon, FileJson, Type, Settings, Globe } from 'lucide-react';
 
 import { Note, Coordinates, Project, Frame } from '../types';
 import { MAP_TILE_URL, MAP_TILE_URL_FALLBACK, MAP_SATELLITE_URL, MAP_ATTRIBUTION, THEME_COLOR, THEME_COLOR_DARK, MAP_STYLE_OPTIONS } from '../constants';
@@ -18,29 +17,44 @@ import { useMapInitialization } from '@/components/hooks/useMapInitialization';
 import { useNotePositioning } from '@/components/hooks/useNotePositioning';
 import { useDataImport } from '@/components/hooks/useDataImport';
 import { useFileDrop } from '@/components/hooks/useFileDrop';
+import { useCsvImport } from '@/components/hooks/useCsvImport';
 import { MapLongPressHandler } from './map/MapLongPressHandler';
 import { MapNavigationHandler } from './map/MapNavigationHandler';
 import { TextLabelsLayer } from './map/TextLabelsLayer';
 import { MapPositionTracker } from './map/MapPositionTracker';
 import { MapCenterHandler } from './map/MapCenterHandler';
-import { MapZoomController } from './map/MapZoomController';
 import { MapControls } from './map/MapControls';
 import { MapSearchPanel } from './map/controls/MapSearchPanel';
 import { MapLayerControl } from './map/controls/MapLayerControl';
 import { NotePreviewCard } from './map/overlays/NotePreviewCard';
+import { MapLocationErrorBanner } from './map/overlays/MapLocationErrorBanner';
+import { MapImportMenuModal } from './map/overlays/MapImportMenuModal';
+import { MapTopRightEditToggle } from './map/overlays/MapTopRightEditToggle';
+import { MapToolbarSliders } from './map/overlays/MapToolbarSliders';
+import { MapPreviewTopRightToolbar } from './map/overlays/MapPreviewTopRightToolbar';
 import { ClusterMarkerLayer } from './map/layers/ClusterMarkerLayer';
 import { MapClickHandler } from './map/MapClickHandler';
+import { MapShiftBoxSelect } from './map/MapShiftBoxSelect';
+import { MapConnectionLinesOverlay } from './map/MapConnectionLinesOverlay';
 import { SettingsPanel } from './SettingsPanel';
-import { CustomHorizontalSlider } from './ui/CustomHorizontalSlider';
+import { ChromeIconButton } from './ui/ChromeIconButton';
 import { parseNoteContent } from '../utils';
 import exifr from 'exifr';
 import { NoteEditor } from './NoteEditor';
 import { generateId } from '../utils';
-import { hexToRgb, isPhotoTakenRecently } from '../utils/mapUtils';
-import { calculateImageFingerprint, calculateFingerprintFromBase64 } from '../utils/imageProcessing';
-import { loadImage } from '../utils/storage';
-import { ZoomSlider } from './ZoomSlider';
+import { hexToRgb, isPhotoTakenRecently } from '../utils/map/mapUtils';
+import { calculateImageFingerprint, calculateFingerprintFromBase64 } from '../utils/media/imageProcessing';
+import { loadImage } from '../utils/persistence/storage';
 import { ImportPreviewDialog } from './ImportPreviewDialog';
+import { buildMapTabExportPayload } from '../utils/map/mapTabExportPayload';
+import { buildStandaloneMapTabHtml } from '../utils/map/mapTabExportHtml';
+import { downloadTextFile } from '../utils/graph/graphExportHtml';
+import {
+  mapChromeSurfaceStyle,
+  mapChromeHoverBackground,
+  DEFAULT_MAP_UI_CHROME_OPACITY,
+  DEFAULT_MAP_UI_CHROME_BLUR_PX
+} from '../utils/map/mapChromeStyle';
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -73,33 +87,115 @@ interface MapViewProps {
   onMapClick?: () => void;
   isUIVisible?: boolean;
   fileInputRef?: React.RefObject<HTMLInputElement | null>;
+  onThemeColorChange?: (color: string) => void;
+  mapUiChromeOpacity?: number;
+  mapUiChromeBlurPx?: number;
+  onMapUiChromeOpacityChange?: (opacity: number) => void;
+  onMapUiChromeBlurPxChange?: (blurPx: number) => void;
+  isRouteMode?: boolean;
+  setIsRouteMode?: (v: boolean) => void;
+  waypoints?: Note[];
+  setWaypoints?: (w: Note[]) => void;
+  /** 与 App 中「界面外观」一致的面板玻璃样式（设置、编辑器等） */
+  panelChromeStyle?: React.CSSProperties;
 }
 
-export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNote, onDeleteNote, onToggleEditor, onImportDialogChange, onUpdateProject, fileInputRef: externalFileInputRef, navigateToCoords, projectId, onNavigateComplete, onSwitchToBoardView, themeColor = THEME_COLOR, mapStyleId = 'carto-light-nolabels', onMapStyleChange, showImportMenu, setShowImportMenu, showBorderPanel, setShowBorderPanel, borderGeoJSON, setBorderGeoJSON, onMapClick, isUIVisible = true }) => {
+export const MapView: React.FC<MapViewProps> = ({
+  project,
+  onAddNote,
+  onUpdateNote,
+  onDeleteNote,
+  onToggleEditor,
+  onImportDialogChange,
+  onUpdateProject,
+  fileInputRef: externalFileInputRef,
+  navigateToCoords,
+  projectId,
+  onNavigateComplete,
+  onSwitchToBoardView,
+  themeColor = THEME_COLOR,
+  mapStyleId = 'carto-light-nolabels',
+  onMapStyleChange,
+  showImportMenu,
+  setShowImportMenu,
+  showBorderPanel,
+  setShowBorderPanel,
+  borderGeoJSON,
+  setBorderGeoJSON,
+  onMapClick,
+  isUIVisible = true,
+  onThemeColorChange,
+  mapUiChromeOpacity = DEFAULT_MAP_UI_CHROME_OPACITY,
+  mapUiChromeBlurPx = DEFAULT_MAP_UI_CHROME_BLUR_PX,
+  onMapUiChromeOpacityChange,
+  onMapUiChromeBlurPxChange,
+  isRouteMode: _isRouteMode,
+  setIsRouteMode: _setIsRouteMode,
+  waypoints: _waypoints,
+  setWaypoints: _setWaypoints,
+  panelChromeStyle: panelChromeStyleProp
+}) => {
   if (!project) return null;
   const notes = project.notes;
+  const connections = project.connections || [];
+  const mapChromeSurface =
+    panelChromeStyleProp ?? mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx);
+  const mapChromeHoverBg = mapChromeHoverBackground(mapUiChromeOpacity);
   const [editingNote, setEditingNote] = useState<Partial<Note> | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
+  const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(() => new Set());
   const [preSelectedNotes, setPreSelectedNotes] = useState<Note[] | null>(null);
   const [currentPreviewImageIndex, setCurrentPreviewImageIndex] = useState(0);
   const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [connectionHighlightNoteIds, setConnectionHighlightNoteIds] = useState<string[] | null>(null);
+  const [hoveredNoteId, setHoveredNoteId] = useState<string | null>(null);
+  // 拖拽时的乐观坐标覆盖：避免聚类重算延迟导致 marker 被 React 用旧 position 回弹
+  const [noteCoordOverrides, setNoteCoordOverrides] = useState<Record<string, Coordinates>>({});
+  const isMarkerDraggingRef = useRef(false);
+  const ignoreNextMarkerClickRef = useRef(false);
+  const ignoreNextMapClickRef = useRef(false);
 
-  const selectedNote = useMemo(() => 
-    selectedNoteId ? notes.find(n => n.id === selectedNoteId) : null
-  , [selectedNoteId, notes]);
+  const selectedNote = useMemo(
+    () => (selectedNoteId ? notes.find((n) => n.id === selectedNoteId) : null),
+    [selectedNoteId, notes]
+  );
+  const hoveredNote = useMemo(
+    () => (hoveredNoteId ? notes.find((n) => n.id === hoveredNoteId) ?? null : null),
+    [hoveredNoteId, notes]
+  );
 
-  // Reset index when selected note changes
+  // Reset preview image index when selected or hovered note changes
   useEffect(() => {
     setCurrentPreviewImageIndex(0);
-  }, [selectedNoteId]);
+  }, [selectedNoteId, hoveredNoteId]);
 
-  // Clear selection when exiting preview mode
+  // 当前选中点及其所有通过 connections 直接相连的端点，强制在聚类中拆分为单独 pin
+  const forceSingleNoteIds = useMemo(() => {
+    const seeds = new Set<string>(selectedNoteIds);
+    if (selectedNoteId) seeds.add(selectedNoteId);
+    if (seeds.size === 0) return [] as string[];
+    const ids = new Set<string>(seeds);
+    seeds.forEach((id) => {
+      connections.forEach((conn) => {
+        if (conn.fromNoteId === id || conn.toNoteId === id) {
+          ids.add(conn.fromNoteId);
+          ids.add(conn.toNoteId);
+        }
+      });
+    });
+    return Array.from(ids);
+  }, [selectedNoteIds, selectedNoteId, connections]);
+
+  // Clear selection and hover when exiting preview mode
   useEffect(() => {
     if (isUIVisible) {
       setSelectedNoteId(null);
+      setSelectedNoteIds(new Set());
       setPreSelectedNotes(null);
       setCurrentPreviewImageIndex(0);
+      setConnectionHighlightNoteIds(null);
+      setHoveredNoteId(null);
     }
   }, [isUIVisible]);
 
@@ -135,6 +231,15 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   
   // Text labels display mode
   const [showTextLabels, setShowTextLabels] = useState(false);
+  /** 仅用于检测全局 label 是否从「开」变为「关」，避免选中态变化时误清簇展开列表 */
+  const prevShowTextLabelsRef = useRef(showTextLabels);
+
+  /** 地图顶栏「编辑」：展开 Pin/Label/Cluster 滑块，交互与 Board 顶栏 Done 一致 */
+  const [isMapToolbarEditMode, setIsMapToolbarEditMode] = useState(false);
+
+  useEffect(() => {
+    if (!isUIVisible) setIsMapToolbarEditMode(false);
+  }, [isUIVisible]);
 
   // Shortcut key T to toggle text labels
   useEffect(() => {
@@ -157,22 +262,58 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isEditorOpen]);
 
-  // 当关闭全局 label 开关时，同时收起当前已展开/选中的 labels
+  // 当关闭全局 label 开关时：
+  // - 仍保留当前选中态（便于非 label 模式下继续显示连接相关 label）
+  // - 只收起“簇展开列表”
+  // - 根据 selectedNoteId 重新计算 connectionHighlightNoteIds，让非 label 模式下也能显示连接端点 label
   useEffect(() => {
-    if (!showTextLabels) {
-      setPreSelectedNotes(null);
-      setSelectedNoteId(null);
-    }
-  }, [showTextLabels]);
+    if (!isUIVisible) return;
 
-    // Pin size control
-    const [pinSize, setPinSize] = useState(1.0); // Scale factor for pin size
+    // 清理可能正在等待的选中延迟（避免在 label 切换瞬间出现竞态）
+    if (selectionTimerRef.current) {
+      clearTimeout(selectionTimerRef.current);
+      selectionTimerRef.current = null;
+    }
+
+    if (!showTextLabels) {
+      // 仅当用户关闭全局 label 开关时收起簇展开；不要在 selectedNoteId/Ids 变化时清空，
+      // 否则点击簇会先 setPreSelectedNotes 再被本 effect 立即清掉，表现为 label 组一闪即逝。
+      if (prevShowTextLabelsRef.current) {
+        setPreSelectedNotes(null);
+      }
+      prevShowTextLabelsRef.current = showTextLabels;
+      setHoveredNoteId(null);
+
+      const seeds = new Set<string>(selectedNoteIds);
+      if (selectedNoteId) seeds.add(selectedNoteId);
+      if (seeds.size > 0) {
+        const ids = new Set<string>(seeds);
+        seeds.forEach((id) => {
+          connections.forEach((conn) => {
+            if (conn.fromNoteId === id || conn.toNoteId === id) {
+              ids.add(conn.fromNoteId);
+              ids.add(conn.toNoteId);
+            }
+          });
+        });
+        setConnectionHighlightNoteIds(Array.from(ids));
+      } else {
+        setConnectionHighlightNoteIds(null);
+      }
+    } else {
+      prevShowTextLabelsRef.current = showTextLabels;
+      // 打开 label 模式时，不需要额外的 connectionHighlightNoteIds 收缩逻辑
+      setConnectionHighlightNoteIds(null);
+    }
+  }, [showTextLabels, isUIVisible, selectedNoteId, selectedNoteIds, connections]);
+
+  // Pin size control
+  const [pinSize, setPinSize] = useState(1.0); // Scale factor for pin size
+  // Label size control (independent)
+  const [labelSize, setLabelSize] = useState(1.0);
 
   // Cluster threshold control
   const [clusterThreshold, setClusterThreshold] = useState(40); // Distance threshold for clustering
-
-  // Frame description editing state
-  const [editingFrameDescription, setEditingFrameDescription] = useState<string | null>(null);
 
   // Settings panel
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
@@ -325,12 +466,14 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   });
 
   const { handleDataImport } = useDataImport({ project, onUpdateProject });
+  const { handleCsvImport } = useCsvImport({ project, onUpdateProject, mapInstance });
   const { computeBoardPosition } = useNotePositioning(notes);
   const { isDragging, rootProps, dismissDropZone } = useFileDrop({
     isEditorOpen,
     themeColor,
     handleImageImport,
-    handleDataImport
+    handleDataImport,
+    handleCsvImport
   });
 
   // Map layers management hook
@@ -351,40 +494,9 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   const { clusteredMarkers, sortNotes } = useMapClustering({
     mapInstance,
     getFilteredNotes: () => getFilteredNotes,
-    clusterThreshold
+    clusterThreshold,
+    forceSingleNoteIds
   });
-
-  // Find single selected frame for description panel
-  const activeFrame = useMemo(() => {
-    if (showAllFrames || !project.frames) return null;
-    const visibleFrameIds = Object.entries(frameLayerVisibility)
-      .filter(([_, visible]) => visible)
-      .map(([id, _]) => id);
-    
-    if (visibleFrameIds.length === 1) {
-      return project.frames.find(f => f.id === visibleFrameIds[0]) || null;
-    }
-    return null;
-  }, [showAllFrames, project.frames, frameLayerVisibility]);
-
-  // Reset frame description editing state when active frame changes
-  useEffect(() => {
-    setEditingFrameDescription(null);
-  }, [activeFrame?.id]);
-
-  const handleSaveFrameDescription = async () => {
-    if (!activeFrame || editingFrameDescription === null) return;
-    
-    const updatedFrames = project.frames?.map(f => 
-      f.id === activeFrame.id ? { ...f, description: editingFrameDescription } : f
-    ) || [];
-    
-    await onUpdateProject?.({
-      ...project,
-      frames: updatedFrames
-    });
-    setEditingFrameDescription(null);
-  };
 
   // Map styling management hook
   const {
@@ -427,6 +539,9 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
   );
 
   const handleMarkerClick = (note: Note, e?: L.LeafletMouseEvent) => {
+    if (ignoreNextMarkerClickRef.current || isMarkerDraggingRef.current) {
+      return;
+    }
     // Prevent event propagation to avoid conflicts with map events
     if (e) {
       e.originalEvent?.stopPropagation();
@@ -441,11 +556,25 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       }
       
       setPreSelectedNotes(null);
-      // 点击点位显示 label，隐藏其他 label
+      // 预览模式下：点击点位时，只显示该点及其连线相邻点的 label
       if (selectedNoteId === note.id) {
         setSelectedNoteId(null);
+        setConnectionHighlightNoteIds(null);
       } else {
         setSelectedNoteId(null);
+        // 计算与当前点通过连线相连的所有点（包括自身）
+        const relatedIds = new Set<string>();
+        relatedIds.add(note.id);
+        connections.forEach(conn => {
+          if (conn.fromNoteId === note.id || conn.toNoteId === note.id) {
+            relatedIds.add(conn.fromNoteId);
+            relatedIds.add(conn.toNoteId);
+          }
+        });
+        const idsArray = Array.from(relatedIds);
+        // label 显示模式下不收缩为仅连线相关 label，保持全部显示
+        setConnectionHighlightNoteIds(showTextLabels ? null : idsArray);
+
         // 延迟设置新选中点，确保“先恢复”的视觉效果或逻辑
         selectionTimerRef.current = setTimeout(() => {
           setSelectedNoteId(note.id);
@@ -455,9 +584,37 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       return;
     }
 
-    // 普通地图模式：第一次点击 pin 只展开当前点对应的 label（或 label 组），不直接打开编辑器
-    setPreSelectedNotes([note]);
-    setSelectedNoteId(note.id);
+    // 普通地图模式：点击 pin 选中；Shift+点击切换多选（与 Board 一致）
+    setPreSelectedNotes(null);
+    const additive = !!(e?.originalEvent?.shiftKey);
+    let nextSet: Set<string>;
+    if (additive) {
+      nextSet = new Set(selectedNoteIds);
+      if (nextSet.has(note.id)) nextSet.delete(note.id);
+      else nextSet.add(note.id);
+    } else {
+      nextSet = new Set([note.id]);
+    }
+    setSelectedNoteIds(nextSet);
+    const primary =
+      nextSet.size === 0
+        ? null
+        : nextSet.has(note.id)
+          ? note.id
+          : Array.from(nextSet)[0];
+    setSelectedNoteId(primary);
+
+    const relatedIds = new Set<string>();
+    nextSet.forEach((id) => {
+      relatedIds.add(id);
+      connections.forEach((conn) => {
+        if (conn.fromNoteId === id || conn.toNoteId === id) {
+          relatedIds.add(conn.fromNoteId);
+          relatedIds.add(conn.toNoteId);
+        }
+      });
+    });
+    setConnectionHighlightNoteIds(showTextLabels ? null : Array.from(relatedIds));
   };
 
   // Handle cluster marker click - set up cluster navigation
@@ -478,14 +635,62 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         selectionTimerRef.current = null;
       }
       setSelectedNoteId(null);
+      setSelectedNoteIds(new Set());
       setPreSelectedNotes(sortedClusterNotes);
       return;
     }
 
     // 正常地图模式：点击集合点时，仅展开该簇内的 labels，由 TextLabelsLayer 处理二次点击
     setSelectedNoteId(null);
+    setSelectedNoteIds(new Set());
     setPreSelectedNotes(sortedClusterNotes);
   };
+
+  const handleMarkerDrag = useCallback((note: Note, e: any) => {
+    const marker = e?.target as L.Marker | undefined;
+    const latLng = marker?.getLatLng?.();
+    if (!latLng) return;
+
+    isMarkerDraggingRef.current = true;
+
+    setNoteCoordOverrides((prev) => ({
+      ...prev,
+      [note.id]: {
+        lat: latLng.lat,
+        lng: latLng.lng
+      }
+    }));
+  }, []);
+
+  const handleMarkerDragEnd = useCallback((note: Note, e: L.DragEndEvent) => {
+    const marker = e.target as L.Marker;
+    const latLng = marker.getLatLng();
+    if (!latLng) return;
+
+    // 乐观更新：先把坐标写到本地覆盖表，保证 marker 位置不会在聚类重算前回弹
+    setNoteCoordOverrides((prev) => ({
+      ...prev,
+      [note.id]: {
+        lat: latLng.lat,
+        lng: latLng.lng
+      }
+    }));
+
+    isMarkerDraggingRef.current = false;
+    ignoreNextMarkerClickRef.current = true;
+    // 允许 dragend 触发的 click 不再影响本次交互
+    setTimeout(() => {
+      ignoreNextMarkerClickRef.current = false;
+    }, 0);
+
+    onUpdateNote({
+      ...note,
+      coords: {
+        lat: latLng.lat,
+        lng: latLng.lng
+      }
+    });
+  }, [onUpdateNote]);
 
   
   const handleSaveNote = (noteData: Partial<Note>) => {
@@ -519,11 +724,80 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       onToggleEditor(false);
   };
 
+  // 非 tab 模式：点击“已选中 label”右侧编辑按钮打开编辑器
+  const handleEditNoteFromLabel = useCallback((noteId: string) => {
+    if (!isUIVisible) return;
+    const note = notes.find(n => n.id === noteId);
+    if (!note) return;
+
+    setPreSelectedNotes(null);
+    setSelectedNoteIds(new Set([noteId]));
+    setSelectedNoteId(noteId);
+    setEditingNote(note);
+    setIsEditorOpen(true);
+    onToggleEditor(true);
+  }, [isUIVisible, notes, onToggleEditor]);
+
+  const handleMapShiftBoxSelectClaimed = useCallback(() => {
+    ignoreNextMapClickRef.current = true;
+  }, []);
+
+  const handleMapBoxSelectCommit = useCallback(
+    ({ ids, additive }: { ids: string[]; additive: boolean }) => {
+      const next = additive
+        ? (() => {
+            const n = new Set(selectedNoteIds);
+            ids.forEach((id) => n.add(id));
+            return n;
+          })()
+        : new Set(ids);
+
+      const primary =
+        next.size === 0 ? null : ids.length > 0 ? ids[ids.length - 1] : Array.from(next)[0];
+
+      const rel = new Set<string>(next);
+      next.forEach((id) => {
+        connections.forEach((conn) => {
+          if (conn.fromNoteId === id || conn.toNoteId === id) {
+            rel.add(conn.fromNoteId);
+            rel.add(conn.toNoteId);
+          }
+        });
+      });
+
+      setSelectedNoteIds(next);
+      setSelectedNoteId(primary);
+      setConnectionHighlightNoteIds(showTextLabels ? null : next.size === 0 ? null : Array.from(rel));
+    },
+    [selectedNoteIds, connections, showTextLabels]
+  );
 
   const handleMapClickInternal = useCallback((e: L.LeafletMouseEvent) => {
     // 若点击的是展开的 label（或 label 组），不要清空选择，让 TextLabelsLayer 的 onSelectNote 处理
     const target = e.originalEvent?.target as HTMLElement;
-    if (target?.closest?.('.pre-selected-labels-container') || target?.closest?.('.pre-selected-label-item')) {
+    if (
+      target?.closest?.('.pre-selected-labels-container') ||
+      target?.closest?.('.pre-selected-label-item') ||
+      target?.closest?.('.custom-text-label-edit-btn') ||
+      // Clicking a pin should not clear selection (otherwise label may show but edit button won't).
+      target?.closest?.('.custom-icon') ||
+      target?.closest?.('.leaflet-marker-icon') ||
+      target?.closest?.('.custom-pending-marker')
+    ) {
+      return;
+    }
+    if (ignoreNextMapClickRef.current) {
+      ignoreNextMapClickRef.current = false;
+      return;
+    }
+    // 与 Board 一致：按住 Shift 点空白地图不取消多选（仍处理 pending / onMapClick）
+    if (isUIVisible && e.originalEvent?.shiftKey) {
+      if (pendingPlaceNote) {
+        setPendingPlaceNote(null);
+      }
+      if (onMapClick) {
+        onMapClick();
+      }
       return;
     }
     if (!isUIVisible) {
@@ -532,10 +806,16 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         selectionTimerRef.current = null;
       }
       setSelectedNoteId(null);
+      setSelectedNoteIds(new Set());
       setPreSelectedNotes(null);
+      setConnectionHighlightNoteIds(null);
+      setHoveredNoteId(null);
     } else {
       setPreSelectedNotes(null);
       setSelectedNoteId(null);
+      setSelectedNoteIds(new Set());
+      setConnectionHighlightNoteIds(null);
+      setHoveredNoteId(null);
     }
     if (pendingPlaceNote) {
       setPendingPlaceNote(null);
@@ -544,6 +824,36 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       onMapClick();
     }
   }, [pendingPlaceNote, onMapClick, isUIVisible]);
+
+  const exportStandaloneMapTab = useCallback(async () => {
+    if (!mapInstance || isUIVisible) return;
+    try {
+      const payload = await buildMapTabExportPayload(project, themeColor, mapStyleId, mapInstance, {
+        pinSize,
+        labelSize,
+        clusterThreshold,
+        showTextLabels,
+        borderGeoJSON: borderGeoJSON ?? null
+      });
+      const html = buildStandaloneMapTabHtml(payload);
+      const safe = (project.name || 'map').replace(/[/\\?%*:|"<>]/g, '_');
+      downloadTextFile(`${safe}-map-tab-demo.html`, html, 'text/html;charset=utf-8');
+    } catch (e) {
+      console.error(e);
+      window.alert('导出失败，请稍后再试');
+    }
+  }, [
+    mapInstance,
+    isUIVisible,
+    project,
+    themeColor,
+    mapStyleId,
+    pinSize,
+    labelSize,
+    clusterThreshold,
+    showTextLabels,
+    borderGeoJSON
+  ]);
 
   return (
     <div
@@ -558,7 +868,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
     >
       {isDragging && (
         <div 
-          className="absolute inset-0 z-[4000] backdrop-blur-sm flex items-center justify-center pointer-events-auto"
+          className="absolute inset-0 z-[4000] flex items-center justify-center pointer-events-auto"
           style={{ backgroundColor: isEditorOpen ? '#3B82F633' : `${themeColor}33` }}
           onClick={dismissDropZone}
         >
@@ -583,7 +893,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
               <div className="text-xl font-bold text-gray-800">
                 {isEditorOpen
                   ? "Drag images to the note editor to add them"
-                  : "Drop images or JSON files here to import"
+                  : "Drop images, JSON or CSV files here to import"
                 }
               </div>
             </div>
@@ -599,14 +909,30 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         zoomSnap={0.1}
         zoomDelta={0.1}
         crs={L.CRS.EPSG3857}
-        style={{ height: '100%', width: '100%' }}
+        style={{
+          height: '100%',
+          width: '100%',
+          // When using blank map style, show a clean white background.
+          backgroundColor: effectiveMapStyle === 'blank' ? '#ffffff' : undefined
+        }}
         zoomControl={false}
         ref={mapRefCallback}
         doubleClickZoom={false}
+        boxZoom={false}
       >
         <MapNavigationHandler coords={navigateToCoords} onComplete={onNavigateComplete} />
         <MapPositionTracker onPositionChange={handleMapPositionChange} />
         <MapClickHandler onClick={handleMapClickInternal} />
+        {isUIVisible && (
+          <MapShiftBoxSelect
+            enabled={isUIVisible}
+            notes={getFilteredNotes}
+            noteCoordOverrides={noteCoordOverrides}
+            onBoxCommit={handleMapBoxSelectCommit}
+            onInteractionClaimed={handleMapShiftBoxSelectClaimed}
+            themeColor={themeColor}
+          />
+        )}
         <TileLayer 
           key={effectiveMapStyle}
           {...tileLayerConfig}
@@ -691,32 +1017,39 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           notes={getFilteredNotes}
           showTextLabels={showTextLabels}
           pinSize={pinSize}
+          labelSize={labelSize}
           themeColor={themeColor}
           clusteredMarkers={clusteredMarkers}
           selectedNoteId={selectedNoteId}
+          selectedNoteIds={selectedNoteIds}
           preSelectedNotes={preSelectedNotes}
           isPreviewMode={!isUIVisible}
+          connectionHighlightNoteIds={connectionHighlightNoteIds}
+          hoveredNoteId={hoveredNoteId}
+          noteCoordOverrides={noteCoordOverrides}
+          onEditNote={handleEditNoteFromLabel}
           onSelectNote={(noteId) => {
-            const note = notes.find(n => n.id === noteId);
-            if (!note) return;
-
-            setPreSelectedNotes(null);
+            setSelectedNoteIds(new Set([noteId]));
             setSelectedNoteId(noteId);
-
-            // 预览模式下仅高亮/预览，不打开编辑器
-            if (!isUIVisible) {
-              return;
-            }
-
-            // 正常地图模式下，二次点击 label 打开对应 NoteEditor
-            setEditingNote(note);
-            setIsEditorOpen(true);
-            onToggleEditor(true);
           }}
           onClearSelection={() => {
             setPreSelectedNotes(null);
             setSelectedNoteId(null);
+            setSelectedNoteIds(new Set());
+            setConnectionHighlightNoteIds(null);
           }}
+        />
+
+        {/* 选中某个点后的连线：用屏幕坐标覆盖层绘制，与地图同步缩放，避免抖动 */}
+        <MapConnectionLinesOverlay
+          selectedNoteId={selectedNoteId}
+          selectedNoteIds={selectedNoteIds}
+          connections={connections}
+          notes={notes}
+          themeColor={themeColor}
+          noteCoordOverrides={noteCoordOverrides}
+          pinSize={pinSize}
+          labelSize={labelSize}
         />
 
         {/* User Location Indicator - only show if location permission is granted */}
@@ -769,51 +1102,16 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           />
         )}
 
-        {/* Location error indicator */}
-        {locationError && (
-          <div className="fixed top-20 left-4 right-4 z-[1000] bg-red-50 border border-red-200 rounded-lg p-3 shadow-lg animate-in slide-in-from-top-2 fade-in duration-300">
-            <div className="flex items-start gap-2">
-              <div className="text-red-500 mt-0.5">📍</div>
-              <div className="flex-1">
-                <p className="text-sm text-red-800 font-medium">位置服务不可用</p>
-                <p className="text-xs text-red-600 mt-1 whitespace-pre-line">{locationError}</p>
-                <div className="mt-2 flex gap-2">
-                  <button
-                    onClick={() => handleLocateCurrentPosition()}
-                    disabled={isLocating}
-                    className="px-3 py-1 bg-red-100 hover:bg-red-200 disabled:bg-gray-100 disabled:cursor-not-allowed text-red-700 text-xs rounded transition-colors flex items-center gap-1"
-                  >
-                    {isLocating ? <Loader2 size={12} className="animate-spin" /> : null}
-                    重试
-                  </button>
-                  <button
-                    onClick={() => {
-                      // 手动清除错误状态并停止定位
-                      setLocationError(null);
-                      setHasRetriedLocation(false);
-                      setIsLocating(false);
-                    }}
-                    className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs rounded transition-colors"
-                  >
-                    关闭
-                  </button>
-                </div>
-              </div>
-              <button
-                onClick={() => {
-                  // 关闭按钮：清除所有相关状态
-                  setLocationError(null);
-                  setHasRetriedLocation(false);
-                  setIsLocating(false);
-                }}
-                className="text-red-500 hover:text-red-700 p-1 hover:bg-red-100 rounded-full transition-colors"
-                aria-label="关闭位置错误提示"
-              >
-                <X size={16} />
-              </button>
-            </div>
-          </div>
-        )}
+        <MapLocationErrorBanner
+          locationError={locationError}
+          isLocating={isLocating}
+          onRetry={handleLocateCurrentPosition}
+          onClose={() => {
+            setLocationError(null);
+            setHasRetriedLocation(false);
+            setIsLocating(false);
+          }}
+        />
         
         <ClusterMarkerLayer
           clusteredMarkers={clusteredMarkers}
@@ -824,6 +1122,13 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           mapInstance={mapInstance}
           onMarkerClick={handleMarkerClick}
           onClusterClick={handleClusterClick}
+          onMarkerHover={(note) => setHoveredNoteId(note?.id ?? null)}
+          noteCoordOverrides={noteCoordOverrides}
+          selectedNoteId={selectedNoteId}
+          selectedNoteIds={selectedNoteIds}
+          isPreviewMode={!isUIVisible}
+          onMarkerDragEnd={handleMarkerDragEnd}
+          onMarkerDrag={handleMarkerDrag}
         />
 
         {/* Import preview markers */}
@@ -870,92 +1175,81 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           />
         ))}
 
-        {(isUIVisible || !isUIVisible) && (
-          <div className="absolute top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none">
-              {/* First Row: Main Controls */}
-              <div className="flex justify-between items-start w-full pointer-events-none">
-                {isUIVisible ? (
-                  <MapControls 
+        {isUIVisible && (
+          <div
+            data-allow-context-menu
+            className="fixed top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none"
+          >
+              <div className="flex justify-between items-center w-full pointer-events-none gap-2">
+                <div className="flex flex-row flex-wrap gap-1.5 sm:gap-2 pointer-events-auto items-center min-h-10 sm:min-h-12">
+                  <MapLayerControl
+                    showPanel={showFrameLayerPanel}
+                    onTogglePanel={() => setShowFrameLayerPanel(!showFrameLayerPanel)}
+                    themeColor={themeColor}
+                    chromeSurfaceStyle={mapChromeSurface}
+                    chromeHoverBackground={mapChromeHoverBg}
+                    frames={project.frames}
+                    frameLayerVisibility={frameLayerVisibility}
+                    setFrameLayerVisibility={setFrameLayerVisibility}
+                    showAllFrames={showAllFrames}
+                    setShowAllFrames={setShowAllFrames}
+                    frameLayerRef={frameLayerRef}
+                  />
+                  <MapControls
                     onLocateCurrentPosition={handleLocateCurrentPosition}
                     isLocating={isLocating}
-                    mapStyle={mapStyle}
-                    onMapStyleChange={handleLocalMapStyleChange}
                     mapNotes={getFilteredNotes}
                     themeColor={themeColor}
+                    chromeSurfaceStyle={mapChromeSurface}
+                    chromeHoverBackground={mapChromeHoverBg}
                     showTextLabels={showTextLabels}
                     setShowTextLabels={setShowTextLabels}
-                    pinSize={pinSize}
-                    setPinSize={setPinSize}
-                    clusterThreshold={clusterThreshold}
-                    setClusterThreshold={setClusterThreshold}
                     onOpenSettings={() => setShowSettingsPanel(true)}
                   />
-                ) : (
-                  <div />
-                )}
-
-                {/* Top Right Spacer */}
-                <div />
+                </div>
+                <div
+                  className="flex h-10 sm:h-12 gap-3 pointer-events-auto items-center shrink-0"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <MapSearchPanel
+                    isOpen={!!showBorderPanel}
+                    onToggle={handleToggleBorderPanel}
+                    themeColor={themeColor}
+                    chromeSurfaceStyle={mapChromeSurface}
+                    chromeHoverBackground={mapChromeHoverBg}
+                    borderSearch={borderSearchState}
+                    borderGeoJSON={borderGeoJSON}
+                    onClearBorder={() => setBorderGeoJSON?.(null)}
+                    onClose={() => setShowBorderPanel?.(false)}
+                  />
+                  <MapTopRightEditToggle
+                    isEditMode={isMapToolbarEditMode}
+                    themeColor={themeColor}
+                    chromeSurfaceStyle={mapChromeSurface}
+                    chromeHoverBackground={mapChromeHoverBg}
+                    onEnterEdit={() => setIsMapToolbarEditMode(true)}
+                    onExitEdit={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      setIsMapToolbarEditMode(false);
+                    }}
+                  />
+                </div>
               </div>
 
-              {/* Second Row: Sliders (hidden on small screens, available in settings) */}
-              {isUIVisible && (
-                <div className="hidden sm:flex gap-1.5 sm:gap-2 pointer-events-auto"
-                  onPointerDown={(e) => {
-                    // Don't stop propagation for slider interactions
-                    const target = e.target as Element;
-                    if (target.closest('.custom-horizontal-slider')) {
-                      return; // Let slider handle the event
-                    }
-                    e.stopPropagation();
-                  }}
-                  onPointerMove={(e) => {
-                    const target = e.target as Element;
-                    if (target.closest('.custom-horizontal-slider')) {
-                      return; // Let slider handle the event
-                    }
-                    e.stopPropagation();
-                  }}
-                  onPointerUp={(e) => {
-                    const target = e.target as Element;
-                    if (target.closest('.custom-horizontal-slider')) {
-                      return; // Let slider handle the event
-                    }
-                    e.stopPropagation();
-                  }}
-                >
-                  {/* Pin Size Control */}
-                  <div className="bg-white/90 backdrop-blur rounded-lg shadow-lg border border-gray-100 p-2 flex flex-col items-center gap-1">
-                      <span className="text-xs font-medium text-gray-600 whitespace-nowrap">Pin Size</span>
-                      <CustomHorizontalSlider
-                          value={pinSize}
-                          min={0.5}
-                          max={2.0}
-                          step={0.1}
-                          onChange={setPinSize}
-                          themeColor={themeColor}
-                          width={90}
-                          formatValue={(val) => `${val.toFixed(1)}x`}
-                          mapInstance={mapInstance}
-                      />
-                  </div>
-
-                  {/* Cluster Threshold Control */}
-                  <div className="bg-white/90 backdrop-blur rounded-lg shadow-lg border border-gray-100 p-2 flex flex-col items-center gap-1">
-                      <span className="text-xs font-medium text-gray-600 whitespace-nowrap">Cluster Threshold</span>
-                      <CustomHorizontalSlider
-                          value={clusterThreshold}
-                          min={1}
-                          max={100}
-                          step={5}
-                          onChange={setClusterThreshold}
-                          themeColor={themeColor}
-                          width={90}
-                          formatValue={(val) => `${val}px`}
-                          mapInstance={mapInstance}
-                      />
-                  </div>
-                </div>
+              {isMapToolbarEditMode && (
+                <MapToolbarSliders
+                  pinSize={pinSize}
+                  setPinSize={setPinSize}
+                  labelSize={labelSize}
+                  setLabelSize={setLabelSize}
+                  clusterThreshold={clusterThreshold}
+                  setClusterThreshold={setClusterThreshold}
+                  themeColor={themeColor}
+                  chromeSurfaceStyle={mapChromeSurface}
+                  mapInstance={mapInstance}
+                />
               )}
           </div>
         )}
@@ -963,56 +1257,40 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         {mapNotes.length === 0 && (
           <div className="absolute top-24 left-0 right-0 z-[400] pointer-events-none flex justify-center">
              <div className="relative">
-                <div className="bg-white/90 backdrop-blur px-4 py-2 rounded-full shadow-lg text-sm text-gray-600 animate-bounce whitespace-nowrap">
+                <div
+                    className="px-4 py-2 rounded-full shadow-lg text-sm text-gray-600 animate-bounce whitespace-nowrap border border-gray-100/80"
+                    style={mapChromeSurface}
+                >
                     Long press anywhere to pin
                 </div>
              </div>
           </div>
         )}
 
-        {isUIVisible && (
-          <div className="fixed bottom-20 sm:bottom-24 left-2 sm:left-4 z-[500]">
-             <MapZoomController
-               min={13}
-               max={19}
-               themeColor={themeColor}
-             />
-          </div>
-        )}
-
       </MapContainer>
 
-      {/* Border & Frame Layer Buttons - Top Right */}
-      {(isUIVisible || !isUIVisible) && (
-        <div
-          className="fixed top-2 sm:top-4 right-2 sm:right-4 z-[500] pointer-events-auto flex items-center gap-1.5 sm:gap-2"
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          <MapSearchPanel
-            isOpen={!!showBorderPanel}
-            onToggle={handleToggleBorderPanel}
-            themeColor={themeColor}
-            borderSearch={borderSearchState}
-            borderGeoJSON={borderGeoJSON}
-            onClearBorder={() => setBorderGeoJSON?.(null)}
-            onClose={() => setShowBorderPanel?.(false)}
-          />
-          <MapLayerControl
-            showPanel={showFrameLayerPanel}
-            onTogglePanel={() => setShowFrameLayerPanel(!showFrameLayerPanel)}
-            themeColor={themeColor}
-            frames={project.frames}
-            frameLayerVisibility={frameLayerVisibility}
-            setFrameLayerVisibility={setFrameLayerVisibility}
-            showAllFrames={showAllFrames}
-            setShowAllFrames={setShowAllFrames}
-            activeFrame={activeFrame}
-            editingFrameDescription={editingFrameDescription}
-            setEditingFrameDescription={setEditingFrameDescription}
-            onSaveFrameDescription={handleSaveFrameDescription}
-            frameLayerRef={frameLayerRef}
-          />
-        </div>
+      {/* 预览模式：顶栏仅保留搜索、图层与导出（与正常模式顶栏分离） */}
+      {!isUIVisible && (
+        <MapPreviewTopRightToolbar
+          showBorderPanel={!!showBorderPanel}
+          onToggleBorderPanel={handleToggleBorderPanel}
+          themeColor={themeColor}
+          chromeSurfaceStyle={mapChromeSurface}
+          chromeHoverBackground={mapChromeHoverBg}
+          borderSearch={borderSearchState}
+          borderGeoJSON={borderGeoJSON}
+          onClearBorder={() => setBorderGeoJSON?.(null)}
+          onCloseBorderPanel={() => setShowBorderPanel?.(false)}
+          showFrameLayerPanel={showFrameLayerPanel}
+          onToggleFrameLayerPanel={() => setShowFrameLayerPanel(!showFrameLayerPanel)}
+          frames={project.frames}
+          frameLayerVisibility={frameLayerVisibility}
+          setFrameLayerVisibility={setFrameLayerVisibility}
+          showAllFrames={showAllFrames}
+          setShowAllFrames={setShowAllFrames}
+          frameLayerRef={frameLayerRef}
+          onExportStandaloneTab={() => void exportStandaloneMapTab()}
+        />
       )}
       
       {isEditorOpen && (
@@ -1024,15 +1302,17 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
           initialNote={editingNote || {}}
           onSwitchToBoardView={(coords) => onSwitchToBoardView(coords, mapInstance)}
           themeColor={themeColor}
+          panelChromeStyle={mapChromeSurface}
         />
       )}
 
       {/* 预览模式选中展示面板 */}
-      {!isUIVisible && selectedNote && (
+      {!isUIVisible && (hoveredNote ?? selectedNote) && (
         <NotePreviewCard
-          note={selectedNote}
+          note={hoveredNote ?? selectedNote!}
           currentImageIndex={currentPreviewImageIndex}
           onImageIndexChange={setCurrentPreviewImageIndex}
+          chromeSurfaceStyle={mapChromeSurface}
         />
       )}
 
@@ -1051,11 +1331,19 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       <input
         ref={dataImportInputRef}
         type="file"
-        accept=".json,application/json"
+        accept=".json,application/json,.csv,text/csv"
         style={{ display: 'none' }}
         onChange={(e) => {
           if (e.target.files && e.target.files[0]) {
-            handleDataImport(e.target.files[0]);
+            const file = e.target.files[0];
+            const isCsv =
+              file.type === 'text/csv' ||
+              file.name.toLowerCase().endsWith('.csv');
+            if (isCsv) {
+              handleCsvImport(file);
+            } else {
+              handleDataImport(file);
+            }
             e.target.value = '';
           }
         }}
@@ -1065,6 +1353,7 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
         isOpen={showImportDialog}
         importPreview={importPreview}
         themeColor={themeColor}
+        panelChromeStyle={mapChromeSurface}
         onConfirm={handleConfirmImport}
         onCancel={handleCancelImport}
         showCoordinates={true}
@@ -1074,75 +1363,38 @@ export const MapView: React.FC<MapViewProps> = ({ project, onAddNote, onUpdateNo
       <SettingsPanel
         isOpen={showSettingsPanel}
         onClose={() => setShowSettingsPanel(false)}
+        settingsContextView="map"
         themeColor={themeColor}
         onThemeColorChange={(color) => {
-          // This will be handled by parent component (App.tsx)
-          // For now, just close the panel
-          setShowSettingsPanel(false);
+          onThemeColorChange?.(color);
         }}
+        mapUiChromeOpacity={mapUiChromeOpacity}
+        onMapUiChromeOpacityChange={onMapUiChromeOpacityChange ?? (() => {})}
+        mapUiChromeBlurPx={mapUiChromeBlurPx}
+        onMapUiChromeBlurPxChange={onMapUiChromeBlurPxChange ?? (() => {})}
         currentMapStyle={mapStyleId || 'carto-light-nolabels'}
         onMapStyleChange={handleMapStyleChange}
         pinSize={pinSize}
         onPinSizeChange={setPinSize}
         clusterThreshold={clusterThreshold}
         onClusterThresholdChange={setClusterThreshold}
+        labelSize={labelSize}
+        onLabelSizeChange={setLabelSize}
+        graphProject={project}
+        onGraphProjectPatch={
+          onUpdateProject ? (patch) => void onUpdateProject({ ...project, ...patch }) : undefined
+        }
       />
 
-      {/* Import Menu - shown when new upload button is clicked */}
-      {showImportMenu && (
-        <div className="fixed inset-0 z-[6000] flex items-center justify-center">
-          <div
-            className="fixed inset-0 bg-black bg-opacity-50"
-            onClick={() => setShowImportMenu && setShowImportMenu(false)}
-          />
-          <div className="relative z-[6001] bg-white rounded-xl shadow-xl border border-gray-100 py-2 w-48 mx-4">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                fileInputRef.current?.click();
-                setShowImportMenu && setShowImportMenu(false);
-              }}
-              className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
-            >
-              <ImageIcon size={16} /> Import from Photos
-            </button>
-            <div className="h-px bg-gray-100 my-1" />
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                dataImportInputRef.current?.click();
-                setShowImportMenu && setShowImportMenu(false);
-              }}
-              className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
-            >
-              <FileJson size={16} /> Import from Data
-            </button>
-            {isCameraAvailable() ? (
-              <>
-                <div className="h-px bg-gray-100 my-1" />
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleImportFromCamera();
-                    setShowImportMenu && setShowImportMenu(false);
-                  }}
-                  className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
-                >
-                  <Plus size={16} /> Import from Camera
-                </button>
-              </>
-            ) : (
-              <>
-                <div className="h-px bg-gray-100 my-1" />
-                <div className="px-4 py-2.5 text-xs text-gray-500 flex items-center gap-2">
-                  <Plus size={16} className="opacity-50" />
-                  <span>Camera requires HTTPS</span>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+      <MapImportMenuModal
+        open={!!showImportMenu}
+        chromeSurfaceStyle={mapChromeSurface}
+        onClose={() => setShowImportMenu?.(false)}
+        onImportPhotos={() => fileInputRef.current?.click()}
+        onImportData={() => dataImportInputRef.current?.click()}
+        onImportCamera={handleImportFromCamera}
+        cameraAvailable={isCameraAvailable()}
+      />
     </div>
   );
 };

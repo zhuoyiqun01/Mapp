@@ -29,7 +29,7 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
 }) => {
   return (
     <div
-      className={`flex-1 min-h-0 px-3 relative group flex flex-col overflow-y-auto custom-scrollbar min-h-[120px] ${
+      className={`flex-1 min-h-0 relative group flex flex-col overflow-y-auto custom-scrollbar ${
         isProcessingImages ? 'ring-2 ring-blue-400 ring-opacity-50 bg-blue-50 bg-opacity-30' : ''
       }`}
       onDragOver={(e) => {
@@ -42,7 +42,7 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
       }}
       onDrop={onDropImages}
     >
-      <div className="grid w-full min-w-0 h-full min-h-0">
+      <div className="grid w-full min-w-0 h-full min-h-[300px]">
         {!isPreviewMode ? (
           <textarea
             ref={textareaRef}
@@ -53,25 +53,29 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
             onSelect={updateCursorPosition}
             onKeyUp={updateCursorPosition}
             onClick={updateCursorPosition}
-            placeholder="在此输入内容 (支持 Markdown 语法)..."
-            className="note-editor-textarea w-full h-full bg-white border-none resize-none focus:ring-0 p-6 text-gray-800 placeholder-gray-400 leading-relaxed overflow-y-auto break-words whitespace-pre-wrap text-[1.1rem]"
+            className="note-editor-textarea cursor-text w-full h-full bg-transparent border-none resize-none focus:ring-0 py-2 px-4 text-gray-800 leading-relaxed overflow-y-auto break-words whitespace-pre-wrap text-[1.05rem]"
             spellCheck={false}
             style={{
               border: 'none',
               outline: 'none',
               boxShadow: 'none',
               zIndex: 2,
-              minHeight: '300px',
               caretColor: themeColor
             }}
           />
         ) : (
-          <div className="w-full h-full bg-white overflow-y-auto min-h-[300px]">
+          <div className="note-editor-tiptap-wrap cursor-text w-full h-full bg-transparent overflow-y-auto py-2 px-4 min-h-0">
             <EditorContent editor={editor as any} />
             <style>{`
               .tiptap-editor {
                 outline: none !important;
                 caret-color: ${themeColor};
+                cursor: text;
+                margin-top: 0 !important;
+                padding-top: 0 !important;
+              }
+              .note-editor-tiptap-wrap .tiptap-editor > :first-child {
+                margin-top: 0 !important;
               }
               .note-editor-textarea::selection {
                 background: ${themeColor}33;
@@ -84,13 +88,6 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
               .tiptap-editor p {
                 margin-top: 0 !important;
                 margin-bottom: 0.5rem !important;
-              }
-              .tiptap-editor p.is-editor-empty:first-child::before {
-                content: attr(data-placeholder);
-                float: left;
-                color: #adb5bd;
-                pointer-events: none;
-                height: 0;
               }
               .tiptap-editor h1 { font-size: 1.8rem; font-weight: 800; margin: 1.5rem 0 1rem; border-bottom: 1px solid #eee; padding-bottom: 0.3rem; }
               .tiptap-editor h2 { font-size: 1.5rem; font-weight: 700; margin: 1.2rem 0 0.8rem; }

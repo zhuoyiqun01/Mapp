@@ -1,11 +1,13 @@
 import React from 'react';
 import { X, Check } from 'lucide-react';
 import { ImportPreview } from './hooks/useImageImport';
+import { DEFAULT_MAP_UI_CHROME_BLUR_PX, DEFAULT_MAP_UI_CHROME_OPACITY, mapChromeSurfaceStyle } from '../utils/map/mapChromeStyle';
 
 interface ImportPreviewDialogProps {
   isOpen: boolean;
   importPreview: ImportPreview[];
   themeColor: string;
+  panelChromeStyle?: React.CSSProperties;
   onConfirm: () => void;
   onCancel: () => void;
   showCloseButton?: boolean;
@@ -16,6 +18,7 @@ export const ImportPreviewDialog: React.FC<ImportPreviewDialogProps> = ({
   isOpen,
   importPreview,
   themeColor,
+  panelChromeStyle,
   onConfirm,
   onCancel,
   showCloseButton = false,
@@ -23,13 +26,20 @@ export const ImportPreviewDialog: React.FC<ImportPreviewDialogProps> = ({
 }) => {
   if (!isOpen) return null;
 
+  const cardChrome =
+    panelChromeStyle ??
+    mapChromeSurfaceStyle(DEFAULT_MAP_UI_CHROME_OPACITY, DEFAULT_MAP_UI_CHROME_BLUR_PX);
+
   const importableCount = importPreview.filter(p => !p.error && !p.isDuplicate).length;
   const duplicateCount = importPreview.filter(p => !p.error && p.isDuplicate).length;
   const errorCount = importPreview.filter(p => p.error).length;
 
   return (
-    <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/50">
+      <div
+        className="rounded-2xl shadow-2xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col border border-gray-200/80"
+        style={cardChrome}
+      >
         {/* Header */}
         <div className={`p-4 ${showCloseButton ? 'flex justify-between items-center border-b border-gray-200' : ''}`}>
           <div>
@@ -107,7 +117,7 @@ export const ImportPreviewDialog: React.FC<ImportPreviewDialogProps> = ({
           <button
             onClick={onConfirm}
             disabled={importableCount === 0}
-            className="px-6 py-2 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg text-gray-900 font-medium transition-colors"
+            className="px-6 py-2 disabled:bg-gray-300 disabled:cursor-not-allowed disabled:text-gray-500 rounded-lg font-medium transition-colors text-theme-chrome-fg"
             style={{ backgroundColor: importableCount > 0 ? themeColor : undefined }}
             onMouseEnter={(e) => {
               if (!e.currentTarget.disabled && importableCount > 0) {

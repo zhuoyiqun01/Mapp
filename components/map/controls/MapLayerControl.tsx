@@ -1,11 +1,14 @@
 import React from 'react';
 import { Layers, Edit3, Save } from 'lucide-react';
 import type { Frame } from '../../../types';
+import { ChromeIconButton } from '../../ui/ChromeIconButton';
 
 interface MapLayerControlProps {
   showPanel: boolean;
   onTogglePanel: () => void;
   themeColor: string;
+  chromeSurfaceStyle?: React.CSSProperties;
+  chromeHoverBackground?: string;
   frames: Frame[] | undefined;
   frameLayerVisibility: Record<string, boolean>;
   setFrameLayerVisibility: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
@@ -22,6 +25,8 @@ export const MapLayerControl: React.FC<MapLayerControlProps> = ({
   showPanel,
   onTogglePanel,
   themeColor,
+  chromeSurfaceStyle,
+  chromeHoverBackground,
   frames,
   frameLayerVisibility,
   setFrameLayerVisibility,
@@ -32,48 +37,29 @@ export const MapLayerControl: React.FC<MapLayerControlProps> = ({
   setEditingFrameDescription,
   onSaveFrameDescription,
   frameLayerRef
-}) => (
+}) => {
+  const ch = chromeSurfaceStyle;
+  return (
   <div className="relative" ref={frameLayerRef}>
-    <button
-      onClick={(e) => {
-        e.stopPropagation();
-        onTogglePanel();
-      }}
-      onPointerDown={(e) => {
-        e.stopPropagation();
-        (e.currentTarget as HTMLElement).style.backgroundColor = themeColor;
-      }}
-      onPointerUp={(e) => {
-        e.stopPropagation();
-        if (!showPanel) {
-          (e.currentTarget as HTMLElement).style.backgroundColor = '';
-        }
-      }}
-      onMouseEnter={(e) => {
-        if (!showPanel) {
-          (e.currentTarget as HTMLElement).style.backgroundColor = '#F3F4F6';
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!showPanel) {
-          (e.currentTarget as HTMLElement).style.backgroundColor = '';
-        }
-      }}
-      className={`bg-white p-2 sm:p-3 rounded-xl shadow-lg transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${
-        showPanel ? 'text-white' : 'text-gray-700'
-      }`}
-      style={{ backgroundColor: showPanel ? themeColor : undefined }}
-      title="Frame Layers"
+    <ChromeIconButton
+      themeColor={themeColor}
+      chromeSurfaceStyle={ch}
+      chromeHoverBackground={chromeHoverBackground}
+      active={showPanel}
+      pressThemeFlash
+      nonChromeIdleHover="imperative-gray100"
+      onClick={() => onTogglePanel()}
+      title="图层"
     >
       <Layers size={18} className="sm:w-5 sm:h-5" />
-    </button>
+    </ChromeIconButton>
 
     {showPanel && (
       <div className="absolute right-0 top-full flex gap-2 items-start pointer-events-none mt-2">
         {activeFrame && (
           <div
-            className="w-72 sm:w-80 bg-white rounded-xl shadow-xl border border-gray-100 flex flex-col pointer-events-auto overflow-hidden animate-in fade-in slide-in-from-right-4"
-            style={{ maxHeight: '60vh' }}
+            className={`w-72 sm:w-80 rounded-xl shadow-xl border border-gray-100 flex flex-col pointer-events-auto overflow-hidden animate-in fade-in slide-in-from-right-4 ${ch ? '' : 'bg-white'}`}
+            style={{ maxHeight: '60vh', ...ch }}
             onClick={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
           >
@@ -101,14 +87,16 @@ export const MapLayerControl: React.FC<MapLayerControlProps> = ({
               )}
             </div>
 
-            <div className="flex-1 overflow-y-auto p-3 custom-scrollbar bg-white">
+            <div
+              className={`flex-1 overflow-y-auto p-3 custom-scrollbar ${ch ? '' : 'bg-white'}`}
+              style={ch ? { backgroundColor: 'transparent' } : undefined}
+            >
               {editingFrameDescription !== null ? (
                 <textarea
                   autoFocus
                   value={editingFrameDescription}
                   onChange={(e) => setEditingFrameDescription(e.target.value)}
-                  className="w-full h-full min-h-[100px] bg-transparent border-none focus:ring-0 p-0 text-xs text-gray-800 placeholder-gray-400 resize-none"
-                  placeholder="Add a description for this layer..."
+                  className="w-full h-full min-h-[100px] bg-transparent border-none focus:ring-0 p-0 text-xs text-gray-800 resize-none"
                 />
               ) : (
                 <div className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap break-words">
@@ -122,7 +110,8 @@ export const MapLayerControl: React.FC<MapLayerControlProps> = ({
         )}
 
         <div
-          className="w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 pointer-events-auto shrink-0"
+          className={`w-56 rounded-xl shadow-xl border border-gray-100 py-2 pointer-events-auto shrink-0 ${ch ? '' : 'bg-white'}`}
+          style={ch}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
         >
@@ -197,4 +186,5 @@ export const MapLayerControl: React.FC<MapLayerControlProps> = ({
       </div>
     )}
   </div>
-);
+  );
+};

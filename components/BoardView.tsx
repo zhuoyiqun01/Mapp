@@ -1,15 +1,42 @@
 import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
-import { Note, Frame, Connection } from '../types';
+import { Note, Frame, Connection, type Project } from '../types';
 import { motion } from 'framer-motion';
 import { NoteEditor } from './NoteEditor';
-import { ZoomSlider } from './ZoomSlider';
-import { Square, StickyNote, X, Pencil, Check, Minus, Move, ArrowUp, Hash, Plus, Image as ImageIcon, FileJson, Locate, Layers, GitBranch } from 'lucide-react';
+import { Square, X, Check, Minus, Move, Hash, Plus, FileJson, Locate, Layers, Settings } from 'lucide-react';
 import exifr from 'exifr';
 import { generateId, fileToBase64, parseNoteContent } from '../utils';
-import { calculateImageFingerprint, calculateFingerprintFromBase64 } from '../utils/imageProcessing';
-import { DEFAULT_THEME_COLOR } from '../constants';
-import { saveImage, saveSketch, loadNoteImages, getViewPositionCache } from '../utils/storage';
-import { compressImageToBase64 } from '../utils/board-utils';
+import { calculateImageFingerprint, calculateFingerprintFromBase64 } from '../utils/media/imageProcessing';
+import { DEFAULT_THEME_COLOR, TAG_COLORS } from '../constants';
+import { mapChromeSurfaceStyle } from '../utils/map/mapChromeStyle';
+import { parseHexToRgb } from '../utils/theme/themeChrome';
+import { saveImage, saveSketch, loadImage, loadNoteImages, getViewPositionCache } from '../utils/persistence/storage';
+import { compressImageToBase64 } from '../utils/board/board-utils';
+import {
+  PLACEMENT_PADDING,
+  PLACEMENT_GAP,
+  PLACEMENT_GRID_CELL,
+  boardNoteDimensions,
+  computeBoardBounds,
+  createGridAllocator,
+  nextSequentialSlot,
+  type BoardBounds,
+  type GridAllocator
+} from '../utils/board/boardPlacement';
+import { TagAddPanel } from './ui/TagAddPanel';
+import { SettingsPanel } from './SettingsPanel';
+import { BoardImportPreviewDialog } from './board/BoardImportPreviewDialog';
+import { BoardImageLightbox } from './board/BoardImageLightbox';
+import { BoardBrowseTagFilterPanel } from './board/BoardBrowseTagFilterPanel';
+import { BoardBrowseTimeFilterPanel } from './board/BoardBrowseTimeFilterPanel';
+import { BoardBatchTimePanel } from './board/BoardBatchTimePanel';
+import { BoardMultiSelectToolbar } from './board/BoardMultiSelectToolbar';
+import { BoardLayerPanel } from './board/BoardLayerPanel';
+import { BoardConnectionQuickEditBar } from './board/BoardConnectionQuickEditBar';
+import { BoardTopRightEditToggle } from './board/BoardTopRightEditToggle';
+import { BoardTopCenterEditToolbar } from './board/BoardTopCenterEditToolbar';
+import { ChromeIconButton } from './ui/ChromeIconButton';
+import { ChromeLabeledSlider } from './ui/ChromeLabeledSlider';
+import { CustomHorizontalSlider } from './ui/CustomHorizontalSlider';
 import ReactMarkdown from 'react-markdown';
 import {
   CONNECTION_OFFSET,
@@ -25,7 +52,142 @@ import {
   VIBRATION_LONG
 } from './board-constants';
 
-// Constants are now imported from board-constants.ts
+
+function imageRefLooksLikeImageId(imageRef: string): boolean {
+  return imageRef.startsWith('img-');
+}
+
+function loadImageElementDimensions(src: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve({ width: img.naturalWidth || img.width, height: img.naturalHeight || img.height });
+    img.onerror = (e) => reject(e);
+    img.src = src;
+  });
+}
+
+async function resolveImageRefToRenderableSrc(imageRef: string): Promise<string | null> {
+  if (!imageRef) return null;
+  if (imageRefLooksLikeImageId(imageRef)) {
+    try {
+      return await loadImage(imageRef);
+    } catch (error) {
+      console.warn('Failed to load image by ID for dimensions:', error);
+      return null;
+    }
+  }
+  return imageRef;
+}
+
+async function detectImageDimensionsFromRefs(imageRefs: string[]): Promise<{ width: number; height: number } | null> {
+  for (const imageRef of imageRefs) {
+    const src = await resolveImageRefToRenderableSrc(imageRef);
+    if (!src) continue;
+    try {
+      const dims = await loadImageElementDimensions(src);
+      if (dims.width > 0 && dims.height > 0) {
+        return dims;
+      }
+    } catch (error) {
+      console.warn('Failed to detect image dimensions:', error);
+    }
+  }
+  return null;
+}
+
+
+/** 便签年份区间（无时间则 null） */
+function getNoteYearSpan(note: Note): { min: number; max: number } | null {
+  if (note.startYear == null) return null;
+  const s = note.startYear;
+  const e = note.endYear != null && note.endYear !== s ? note.endYear : s;
+  return { min: Math.min(s, e), max: Math.max(s, e) };
+}
+
+/** 便签起止年区间完全落在筛选区间内（非交集） */
+function noteTimeRangeFullyContainedInFilter(
+  note: Note,
+  range: { min: number; max: number }
+): boolean {
+  const span = getNoteYearSpan(note);
+  if (!span) return false;
+  return span.min >= range.min && span.max <= range.max;
+}
+
+function computeTimeRangeFromSelection(
+  ids: Set<string>,
+  allNotes: Note[]
+): { min: number; max: number } | null {
+  let min = Infinity;
+  let max = -Infinity;
+  allNotes.forEach((n) => {
+    if (!ids.has(n.id)) return;
+    const span = getNoteYearSpan(n);
+    if (!span) return;
+    min = Math.min(min, span.min);
+    max = Math.max(max, span.max);
+  });
+  if (min === Infinity) return null;
+  return { min, max };
+}
+
+function computeTimeRangeFromAllNotes(allNotes: Note[]): { min: number; max: number } | null {
+  let min = Infinity;
+  let max = -Infinity;
+  allNotes.forEach((n) => {
+    const span = getNoteYearSpan(n);
+    if (!span) return;
+    min = Math.min(min, span.min);
+    max = Math.max(max, span.max);
+  });
+  if (min === Infinity) return null;
+  return { min, max };
+}
+
+function selectionHasTimedNotesInSelection(ids: Set<string>, allNotes: Note[]): boolean {
+  return allNotes.some((n) => ids.has(n.id) && getNoteYearSpan(n) != null);
+}
+
+function collectTagLabelsFromSelection(ids: Set<string>, allNotes: Note[]): Set<string> {
+  const labels = new Set<string>();
+  allNotes.forEach((n) => {
+    if (!ids.has(n.id)) return;
+    (n.tags || []).forEach((t) => labels.add(t.label));
+  });
+  return labels;
+}
+
+/** 多选框内出现的标签文案，去重后按文本排序（与颜色无关） */
+function collectSortedUniqueTagLabelsFromSelection(
+  ids: Set<string>,
+  allNotes: Note[]
+): string[] {
+  const s = collectTagLabelsFromSelection(ids, allNotes);
+  return Array.from(s).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+}
+
+function selectionHasUntaggedNotes(ids: Set<string>, allNotes: Note[]): boolean {
+  return allNotes.some((n) => ids.has(n.id) && !(n.tags && n.tags.length));
+}
+
+/** 勾选「无标签」或任一 label（并集） */
+function noteMatchesBoardTagFilter(
+  note: Note,
+  labels: Set<string>,
+  includeUntagged: boolean
+): boolean {
+  const untagged = !(note.tags && note.tags.length);
+  if (includeUntagged && untagged) return true;
+  if (labels.size > 0 && (note.tags || []).some((t) => labels.has(t.label))) return true;
+  return false;
+}
+
+/** Frame 叠在玻璃底上的主题色/分组色（hex → rgba） */
+function frameTintFromHex(hex: string, alpha: number): string {
+  const rgb = parseHexToRgb(hex);
+  if (rgb) return `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha})`;
+  return `rgba(156, 163, 175, ${alpha})`;
+}
 
 interface BoardViewProps {
   notes: Note[];
@@ -49,16 +211,62 @@ interface BoardViewProps {
   onTransformChange?: (x: number, y: number, scale: number) => void;
   mapViewFileInputRef?: React.RefObject<HTMLInputElement>;
   themeColor?: string;
+  panelChromeStyle?: React.CSSProperties;
+  /** 与 MapView 浮层按钮悬停一致，由 `mapChromeHoverBackground(opacity)` 传入 */
+  chromeHoverBackground?: string;
   isUIVisible?: boolean;
+  /** 与 MapView 相同的设置面板（界面外观、地图样式等） */
+  onThemeColorChange?: (color: string) => void;
+  mapUiChromeOpacity?: number;
+  onMapUiChromeOpacityChange?: (opacity: number) => void;
+  mapUiChromeBlurPx?: number;
+  onMapUiChromeBlurPxChange?: (blurPx: number) => void;
+  mapStyleId?: string;
+  onMapStyleChange?: (styleId: string) => void;
 }
 
-const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onToggleEditor, onAddNote, onDeleteNote, onDeleteNotesBatch, onEditModeChange, connections = [], onUpdateConnections, frames = [], onUpdateFrames, project, onUpdateProject, onSwitchToMapView, onSwitchToBoardView, navigateToCoords, projectId, onNavigateComplete, onTransformChange, mapViewFileInputRef, themeColor = DEFAULT_THEME_COLOR, isUIVisible = true }) => {
+const BoardViewComponent: React.FC<BoardViewProps> = ({
+  notes,
+  onUpdateNote,
+  onToggleEditor,
+  onAddNote,
+  onDeleteNote,
+  onDeleteNotesBatch,
+  onEditModeChange,
+  connections = [],
+  onUpdateConnections,
+  frames = [],
+  onUpdateFrames,
+  project,
+  onUpdateProject,
+  onSwitchToMapView,
+  onSwitchToBoardView,
+  navigateToCoords,
+  projectId,
+  onNavigateComplete,
+  onTransformChange,
+  mapViewFileInputRef,
+  themeColor = DEFAULT_THEME_COLOR,
+  panelChromeStyle,
+  chromeHoverBackground,
+  isUIVisible = true,
+  onThemeColorChange,
+  mapUiChromeOpacity = 0.9,
+  onMapUiChromeOpacityChange,
+  mapUiChromeBlurPx = 8,
+  onMapUiChromeBlurPxChange,
+  mapStyleId = 'carto-light-nolabels',
+  onMapStyleChange,
+}) => {
+  const ch = panelChromeStyle;
+  const chHover = chromeHoverBackground;
+  const frameChromeStyle = useMemo(
+    () => ch ?? mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx),
+    [ch, mapUiChromeOpacity, mapUiChromeBlurPx]
+  );
   const containerRef = useRef<HTMLDivElement>(null);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
   
-  // 指针位置：下一个便签应该放置的位置
-  const [nextNotePosition, setNextNotePosition] = useState({ x: 100, y: 100 });
-
   // 标记是否已经执行过重排
   const [hasRearranged, setHasRearranged] = useState(false);
 
@@ -86,8 +294,7 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
       notes.forEach(note => {
         minX = Math.min(minX, note.boardX);
         minY = Math.min(minY, note.boardY);
-        const w = note.variant === 'compact' ? 180 : 256;
-        const h = note.variant === 'compact' ? 180 : 256;
+        const { width: w, height: h } = boardNoteDimensions(note);
         maxX = Math.max(maxX, note.boardX + w);
         maxY = Math.max(maxY, note.boardY + h);
       });
@@ -155,10 +362,9 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
     frame: true,
     primary: true,
     image: true,
-    secondary: true,
-    connects: true,
   });
   const [showLayerPanel, setShowLayerPanel] = useState(false);
+  const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   
   // Layout state: global standard size scale is stored in project.standardSizeScale
@@ -196,7 +402,12 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(new Set()); // Multi-select state
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
-  
+  const [editingConnectionLabel, setEditingConnectionLabel] = useState<string>('');
+  const editingConnectionLabelRef = useRef<string>('');
+  useEffect(() => {
+    editingConnectionLabelRef.current = editingConnectionLabel;
+  }, [editingConnectionLabel]);
+
   // Multi-select state
   const [isShiftPressed, setIsShiftPressed] = useState(false);
   const [isMultiSelectDragging, setIsMultiSelectDragging] = useState(false);
@@ -209,6 +420,24 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
   const [connectingFrom, setConnectingFrom] = useState<{ noteId: string; side: 'top' | 'right' | 'bottom' | 'left' } | null>(null);
   const [connectingTo, setConnectingTo] = useState<{ x: number; y: number } | null>(null);
   const [hoveringConnectionPoint, setHoveringConnectionPoint] = useState<{ noteId: string; side: 'top' | 'right' | 'bottom' | 'left' } | null>(null);
+
+  /** 多选批量工具栏：标签 / 时间子面板 */
+  const [multiBatchPanel, setMultiBatchPanel] = useState<'none' | 'tag' | 'time'>('none');
+  const [batchTagLabel, setBatchTagLabel] = useState('');
+  const [batchTagColorIndex, setBatchTagColorIndex] = useState(0);
+  const [batchTimeStartStr, setBatchTimeStartStr] = useState('');
+  const [batchTimeEndStr, setBatchTimeEndStr] = useState('');
+
+  useEffect(() => {
+    if (selectedNoteIds.size <= 1) {
+      setMultiBatchPanel('none');
+      setBatchTagLabel('');
+      setBatchTimeStartStr('');
+      setBatchTimeEndStr('');
+      setBrowseTagFilterPanelOpen(false);
+      setBrowseTimeFilterPanelOpen(false);
+    }
+  }, [selectedNoteIds.size]);
   
   // Frame state
   const [isDrawingFrame, setIsDrawingFrame] = useState(false);
@@ -228,6 +457,30 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
   } | null>(null);
   // 在非编辑模式下选中的frames用于过滤显示（支持多frame）
   const [filterFrameIds, setFilterFrameIds] = useState<Set<string>>(new Set());
+  /** 非编辑模式：画板级按标签筛选（与多选面板预览无关） */
+  const [boardFilterTagLabels, setBoardFilterTagLabels] = useState<Set<string>>(new Set());
+  /** 与 boardFilterTagLabels 并集：无标签便签是否通过画板级标签筛选 */
+  const [boardFilterIncludeUntagged, setBoardFilterIncludeUntagged] = useState(false);
+  /** 浏览多选：标签筛选面板 */
+  const [browseTagFilterPanelOpen, setBrowseTagFilterPanelOpen] = useState(false);
+  /** 为 true：预览/确定均不按标签收窄（与「无标签」选项分离） */
+  const [browseTagFilterPendingDefault, setBrowseTagFilterPendingDefault] = useState(true);
+  const [browseTagFilterPendingLabels, setBrowseTagFilterPendingLabels] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [browseTagFilterPendingUntagged, setBrowseTagFilterPendingUntagged] = useState(false);
+  const boardBrowseTagFilterButtonRef = useRef<HTMLButtonElement>(null);
+  /** 浏览多选：按时间筛选面板（portal，与画板级时间筛选分离） */
+  const [browseTimeFilterPanelOpen, setBrowseTimeFilterPanelOpen] = useState(false);
+  const [browseTimeFilterPendingMin, setBrowseTimeFilterPendingMin] = useState(1900);
+  const [browseTimeFilterPendingMax, setBrowseTimeFilterPendingMax] = useState(2100);
+  const [browseTimeFilterSliderMinBound, setBrowseTimeFilterSliderMinBound] = useState(1900);
+  const [browseTimeFilterSliderMaxBound, setBrowseTimeFilterSliderMaxBound] = useState(2100);
+  const boardBrowseTimeFilterButtonRef = useRef<HTMLButtonElement>(null);
+  /** 非编辑模式：按起止年区间筛选（与便签时间段有交集） */
+  const [boardFilterTimeRange, setBoardFilterTimeRange] = useState<{ min: number; max: number } | null>(
+    null
+  );
   const [editingFrameId, setEditingFrameId] = useState<string | null>(null);
   const [editingFrameTitle, setEditingFrameTitle] = useState('');
   const frameTitleInputRef = useRef<HTMLInputElement | null>(null);
@@ -283,6 +536,197 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
     }
   };
 
+  const browseTagLabelsInSelection = useMemo(
+    () => collectSortedUniqueTagLabelsFromSelection(selectedNoteIds, notes),
+    [selectedNoteIds, notes]
+  );
+  const browseSelectionHasUntagged = useMemo(
+    () => selectionHasUntaggedNotes(selectedNoteIds, notes),
+    [selectedNoteIds, notes]
+  );
+  const browseTimeSelectionHasTimedNotes = useMemo(
+    () => selectionHasTimedNotesInSelection(selectedNoteIds, notes),
+    [selectedNoteIds, notes]
+  );
+  const browseTagFilterCanApply = useMemo(
+    () =>
+      browseTagFilterPendingDefault ||
+      browseTagFilterPendingUntagged ||
+      browseTagFilterPendingLabels.size > 0,
+    [
+      browseTagFilterPendingDefault,
+      browseTagFilterPendingUntagged,
+      browseTagFilterPendingLabels,
+    ]
+  );
+
+  const applyBrowseTagFilterFromPanel = () => {
+    if (!browseTagFilterCanApply) return;
+    let nextIds: Set<string>;
+    if (browseTagFilterPendingDefault) {
+      nextIds = new Set(selectedNoteIds);
+    } else {
+      const labelSet = new Set(browseTagFilterPendingLabels);
+      const incU = browseTagFilterPendingUntagged;
+      nextIds = new Set<string>();
+      notes.forEach((n) => {
+        if (!selectedNoteIds.has(n.id)) return;
+        if (noteMatchesBoardTagFilter(n, labelSet, incU)) nextIds.add(n.id);
+      });
+    }
+    setBoardFilterTagLabels(new Set());
+    setBoardFilterIncludeUntagged(false);
+    setSelectedNoteIds(nextIds);
+    setSelectedNoteId(nextIds.size === 0 ? null : Array.from(nextIds)[0]);
+    setBrowseTagFilterPanelOpen(false);
+    resetBlankClickCount();
+  };
+
+  const applyBrowseTimeFilterFromPanel = () => {
+    setBoardFilterTimeRange(null);
+    if (!browseTimeSelectionHasTimedNotes) {
+      setBrowseTimeFilterPanelOpen(false);
+      resetBlankClickCount();
+      return;
+    }
+    const range = {
+      min: browseTimeFilterPendingMin,
+      max: browseTimeFilterPendingMax,
+    };
+    const nextIds = new Set<string>();
+    notes.forEach((n) => {
+      if (!selectedNoteIds.has(n.id)) return;
+      if (noteTimeRangeFullyContainedInFilter(n, range)) nextIds.add(n.id);
+    });
+    setSelectedNoteIds(nextIds);
+    setSelectedNoteId(nextIds.size === 0 ? null : Array.from(nextIds)[0]);
+    setBrowseTimeFilterPanelOpen(false);
+    resetBlankClickCount();
+  };
+
+  const browseTagFilterLayoutRevision = useMemo(
+    () =>
+      JSON.stringify({
+        open: browseTagFilterPanelOpen,
+        edit: isEditMode,
+        ids: [...selectedNoteIds].sort(),
+        tx: transform.x,
+        ty: transform.y,
+        ts: transform.scale,
+        mdrag: isMultiSelectDragging,
+        mdx: multiSelectDragOffset.x,
+        mdy: multiSelectDragOffset.y
+      }),
+    [
+      browseTagFilterPanelOpen,
+      isEditMode,
+      selectedNoteIds,
+      transform.x,
+      transform.y,
+      transform.scale,
+      isMultiSelectDragging,
+      multiSelectDragOffset.x,
+      multiSelectDragOffset.y
+    ]
+  );
+
+  const browseTimeFilterLayoutRevision = useMemo(
+    () =>
+      JSON.stringify({
+        open: browseTimeFilterPanelOpen,
+        edit: isEditMode,
+        ids: [...selectedNoteIds].sort(),
+        tx: transform.x,
+        ty: transform.y,
+        ts: transform.scale,
+        mdrag: isMultiSelectDragging,
+        mdx: multiSelectDragOffset.x,
+        mdy: multiSelectDragOffset.y
+      }),
+    [
+      browseTimeFilterPanelOpen,
+      isEditMode,
+      selectedNoteIds,
+      transform.x,
+      transform.y,
+      transform.scale,
+      isMultiSelectDragging,
+      multiSelectDragOffset.x,
+      multiSelectDragOffset.y
+    ]
+  );
+
+  const notePassesBoardVisibilityFilters = useCallback(
+    (note: Note) => {
+      if (filterFrameIds.size > 0) {
+        const groupIds = note.groupIds || (note.groupId ? [note.groupId] : []);
+        if (!groupIds.some((id) => filterFrameIds.has(id))) return false;
+      }
+      const tagFilterActive =
+        boardFilterTagLabels.size > 0 || boardFilterIncludeUntagged;
+      if (tagFilterActive) {
+        if (
+          !noteMatchesBoardTagFilter(
+            note,
+            boardFilterTagLabels,
+            boardFilterIncludeUntagged
+          )
+        ) {
+          return false;
+        }
+      }
+      if (
+        browseTagFilterPanelOpen &&
+        !browseTagFilterPendingDefault
+      ) {
+        if (!selectedNoteIds.has(note.id)) return false;
+        if (
+          !noteMatchesBoardTagFilter(
+            note,
+            browseTagFilterPendingLabels,
+            browseTagFilterPendingUntagged
+          )
+        ) {
+          return false;
+        }
+      }
+      if (
+        browseTimeFilterPanelOpen &&
+        browseTimeSelectionHasTimedNotes
+      ) {
+        if (!selectedNoteIds.has(note.id)) return false;
+        if (
+          !noteTimeRangeFullyContainedInFilter(note, {
+            min: browseTimeFilterPendingMin,
+            max: browseTimeFilterPendingMax,
+          })
+        ) {
+          return false;
+        }
+      }
+      if (boardFilterTimeRange != null) {
+        if (!noteTimeRangeFullyContainedInFilter(note, boardFilterTimeRange))
+          return false;
+      }
+      return true;
+    },
+    [
+      filterFrameIds,
+      boardFilterTagLabels,
+      boardFilterIncludeUntagged,
+      boardFilterTimeRange,
+      browseTagFilterPanelOpen,
+      browseTagFilterPendingDefault,
+      browseTagFilterPendingLabels,
+      browseTagFilterPendingUntagged,
+      browseTimeFilterPanelOpen,
+      browseTimeSelectionHasTimedNotes,
+      browseTimeFilterPendingMin,
+      browseTimeFilterPendingMax,
+      selectedNoteIds,
+    ]
+  );
+
   // Keyboard shift key support
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -309,6 +753,45 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
       window.removeEventListener('keyup', handleKeyUp);
     };
   }, [isEditMode, showImportDialog]);
+
+  // Keyboard shortcuts for note grouping: Cmd/Ctrl+G (group) and Cmd/Ctrl+Shift+G (ungroup)
+  useEffect(() => {
+    const handleGroupShortcut = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const isGKey = e.key === 'g' || e.key === 'G';
+      if (!isGKey) return;
+
+      if (!e.shiftKey) {
+        // Cmd/Ctrl+G：成组
+        if (selectedNoteIds.size < 2) return;
+        e.preventDefault();
+        const newGroupId = generateId();
+        const updatedNotes = notes.map(n =>
+          selectedNoteIds.has(n.id) ? { ...n, noteGroupId: newGroupId } : n
+        );
+        onUpdateProject?.({ ...project, notes: updatedNotes });
+      } else {
+        // Cmd/Ctrl+Shift+G：取消编组（将所有被选中便签所在的组全部解散）
+        const groupIdsInSelection = new Set(
+          notes
+            .filter(n => selectedNoteIds.has(n.id) && n.noteGroupId)
+            .map(n => n.noteGroupId!)
+        );
+        if (groupIdsInSelection.size === 0) return;
+        e.preventDefault();
+        const updatedNotes = notes.map(n =>
+          n.noteGroupId && groupIdsInSelection.has(n.noteGroupId)
+            ? { ...n, noteGroupId: undefined }
+            : n
+        );
+        onUpdateProject?.({ ...project, notes: updatedNotes });
+        setSelectedNoteIds(new Set());
+      }
+    };
+
+    window.addEventListener('keydown', handleGroupShortcut);
+    return () => window.removeEventListener('keydown', handleGroupShortcut);
+  }, [notes, project, selectedNoteIds, onUpdateProject]);
 
   useEffect(() => {
     onEditModeChange?.(isEditMode);
@@ -337,10 +820,7 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
 
   // 计算Note的中心点是否在Frame内
   const isNoteInFrame = (note: Note, frame: Frame): boolean => {
-    const isCompact = note.variant === 'compact';
-    const width = isCompact ? 180 : 256;
-    const height = isCompact ? 180 : 256;
-    
+    const { width, height } = boardNoteDimensions(note);
     const centerX = note.boardX + width / 2;
     const centerY = note.boardY + height / 2;
     
@@ -429,37 +909,11 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
 
     console.log('开始重排初始便签:', initialNotes.length);
 
-    // 计算合适的列数：根据容器宽度和便签宽度
-    const containerWidth = containerRef.current?.getBoundingClientRect().width || 1200;
-    const noteWidth = 256; // 标准便签宽度
-    const spacing = 50;
-    const padding = 100;
-
-    // 计算每行可以放多少个便签
-    const availableWidth = containerWidth - padding * 2;
-    const notesPerRow = Math.max(1, Math.floor((availableWidth + spacing) / (noteWidth + spacing)));
-    const totalRows = Math.ceil(initialNotes.length / notesPerRow);
-
-    // 计算起始位置（左上角对齐）
-    const startX = padding;
-    const startY = padding;
-
-    // 重排便签位置
     const updatedNotes = notes.map(note => {
       if (!note.isInitialPosition) return note;
-
       const index = initialNotes.indexOf(note);
       if (index === -1) return note;
-
-      const row = Math.floor(index / notesPerRow);
-      const col = index % notesPerRow;
-
-      return {
-        ...note,
-        boardX: startX + col * (noteWidth + spacing),
-        boardY: startY + row * (256 + spacing), // 假设标准高度256
-        isInitialPosition: false // 重排后标记为非初始位置
-      };
+      return { ...note, ...nextSequentialSlot(index), isInitialPosition: false };
     });
 
     // 批量更新便签
@@ -485,12 +939,7 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
   const getConnectionPoint = (note: Note, side: 'top' | 'right' | 'bottom' | 'left', isDragging: boolean, dragOffset: { x: number; y: number }) => {
     const x = note.boardX + (isDragging ? dragOffset.x : 0);
     const y = note.boardY + (isDragging ? dragOffset.y : 0);
-    const isCompact = note.variant === 'compact';
-    const isImage = note.variant === 'image';
-    
-    // For compact/standard/image notes, use respective dimensions
-    const width = isImage ? (note.imageWidth || 256) : (isCompact ? 180 : 256);
-    const height = isImage ? (note.imageHeight || 256) : (isCompact ? 180 : 256);
+    const { width, height } = boardNoteDimensions(note);
     
     switch (side) {
       case 'top':
@@ -819,12 +1268,15 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
       const toPoint = getConnectionPoint(toNote, conn.toSide, toIsDragging, dragOffset);
       
       const pathD = calculateConnectionPath(fromPoint, toPoint, conn.fromSide, conn.toSide);
-      
+      const midX = (fromPoint.x + toPoint.x) / 2;
+      const midY = (fromPoint.y + toPoint.y) / 2;
       return {
         id: conn.id,
-        pathD
+        pathD,
+        midX,
+        midY
       };
-    }).filter(p => p !== null);
+    }).filter((p): p is NonNullable<typeof p> => p !== null);
   }, [connections, notes, draggingNoteId, dragOffset]);
 
   // Apply initial transform when project changes or container is ready
@@ -857,16 +1309,7 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
         const calculateBounds = () => {
             let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
             notes.forEach(note => {
-                let w: number, h: number;
-                
-                if (note.variant === 'compact') {
-                    w = 180;
-                    h = 180;
-                } else {
-                    w = 256;
-                    h = 256;
-                }
-                
+                const { width: w, height: h } = boardNoteDimensions(note);
                 minX = Math.min(minX, note.boardX);
                 minY = Math.min(minY, note.boardY);
                 maxX = Math.max(maxX, note.boardX + w);
@@ -1118,69 +1561,27 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
       return;
     }
     
-    // Calculate board position for imported notes (same logic as createNoteAtCenter)
     const boardNotes = notes.filter(n => n.boardX !== undefined && n.boardY !== undefined);
-    const noteWidth = 256; // Default width for standard notes
-    const noteHeight = 256; // Default height for standard notes
-    const spacing = 50;
-    const aspectRatioThreshold = 2.5; // If width/height > 2.5, start a new row
-    
-    let spawnX = 100;
-    let spawnY = 100;
-    
-    if (boardNotes.length > 0) {
-      let minX = Infinity;
-      let minY = Infinity;
-      let maxX = -Infinity;
-      let maxY = -Infinity;
-      let sumCenterY = 0;
-      let count = 0;
-      
-      boardNotes.forEach(note => {
-        const existingNoteWidth = (note.variant === 'compact') ? 180 : 256;
-        const existingNoteHeight = (note.variant === 'compact') ? 180 : 256;
-        const noteLeft = note.boardX || 0;
-        const noteRight = noteLeft + existingNoteWidth;
-        const noteTop = note.boardY || 0;
-        const noteBottom = noteTop + existingNoteHeight;
-        const noteCenterY = noteTop + existingNoteHeight / 2;
-        
-        if (noteLeft < minX) minX = noteLeft;
-        if (noteTop < minY) minY = noteTop;
-        if (noteRight > maxX) maxX = noteRight;
-        if (noteBottom > maxY) maxY = noteBottom;
-        sumCenterY += noteCenterY;
-        count++;
-      });
-      
-      if (maxX !== -Infinity && minY !== Infinity && count > 0) {
-        // Check aspect ratio - if too wide, show warning and prevent import
-        const contentWidth = maxX - minX;
-        const contentHeight = maxY - minY;
-        const aspectRatioThreshold = 2.5; // If width/height > 2.5, show warning
-        const aspectRatio = contentHeight > 0 ? contentWidth / contentHeight : 0;
-        
-        if (aspectRatio > aspectRatioThreshold) {
-          // Show warning and prevent import
-          alert('先整理一下便利贴吧');
-          if (onSwitchToBoardView) {
-            onSwitchToBoardView();
-          }
-          // Clean up and return
-          setImportPreview([]);
-          setIsDragging(false);
-          return;
-        }
-        
-        // Continue current row: add to the right, aligned to top
-        spawnX = maxX + spacing;
-        spawnY = minY;
-      }
-    }
+    const boardBounds = computeBoardBounds(boardNotes);
+    const allocator = createGridAllocator({
+      existingNotes: boardNotes,
+      padding: PLACEMENT_PADDING,
+      gap: PLACEMENT_GAP,
+      cellSize: PLACEMENT_GRID_CELL
+    });
+    const anchorX = boardBounds ? boardBounds.maxX + PLACEMENT_GAP : PLACEMENT_PADDING;
+    const anchorY = boardBounds ? boardBounds.minY : PLACEMENT_PADDING;
+
+    // 多张图片批量导入时自动成组
+    const importBatchGroupId = validPreviews.length > 1 ? generateId() : undefined;
     
     // Create notes for each valid preview
     for (let i = 0; i < validPreviews.length; i++) {
       const preview = validPreviews[i];
+      const detected = await detectImageDimensionsFromRefs([preview.imageUrl]);
+      const imageWidth = detected?.width || 256;
+      const imageHeight = detected?.height || 256;
+      const placement = allocator.findAndOccupy(imageWidth, imageHeight, anchorX, anchorY);
       const newNote: Note = {
         id: generateId(),
         createdAt: Date.now() + i,
@@ -1193,10 +1594,13 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
         text: '',
         images: [preview.imageUrl],
         tags: [],
-        variant: 'standard',
-        color: '#FFFDF5',
-        boardX: spawnX + (i * (noteWidth + spacing)),
-        boardY: spawnY
+        variant: 'image',
+        color: 'transparent',
+        imageWidth,
+        imageHeight,
+        boardX: placement.x,
+        boardY: placement.y,
+        noteGroupId: importBatchGroupId,
       };
       
       onAddNote?.(newNote);
@@ -1273,35 +1677,32 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
         );
       });
 
-      // Calculate offset to place imported notes to the right
-      let offsetX = 0;
-      let offsetY = 0;
-      if (existingNotes.length > 0) {
-        let maxX = -Infinity;
-        let minY = Infinity;
-        existingNotes.forEach(note => {
-          const noteWidth = (note.variant === 'compact') ? 180 : 256;
-          const noteRight = (note.boardX || 0) + noteWidth;
-          const noteTop = note.boardY || 0;
-          if (noteRight > maxX) maxX = noteRight;
-          if (noteTop < minY) minY = noteTop;
-        });
-        offsetX = maxX + 50;
-        offsetY = minY;
-      }
+      const boardNotes = existingNotes.filter((n) => n.boardX !== undefined && n.boardY !== undefined);
+      const boardBounds = computeBoardBounds(boardNotes);
+      const allocator = createGridAllocator({
+        existingNotes: boardNotes,
+        padding: PLACEMENT_PADDING,
+        gap: PLACEMENT_GAP,
+        cellSize: PLACEMENT_GRID_CELL
+      });
+      const anchorX = boardBounds ? boardBounds.maxX + PLACEMENT_GAP : PLACEMENT_PADDING;
+      const anchorY = boardBounds ? boardBounds.minY : PLACEMENT_PADDING;
+
+      // 批量导入时自动成组
+      const importBatchGroupId = uniqueImportedNotes.length > 1 ? generateId() : undefined;
 
       // Generate new IDs and offset positions for imported notes
       // Also handle image separation for imported notes
       const newNotes = await Promise.all(uniqueImportedNotes.map(async (note: Note) => {
         // 不要根据内容自动判断 variant，保持原始 variant 或默认为 standard
-        const variant: 'standard' | 'compact' | 'image' = note.variant || 'standard';
+        const raw = (note as Note & { variant?: string }).variant || 'standard';
+        const variant: 'standard' | 'image' =
+          raw === 'image' ? 'image' : 'standard';
         
         const processedNote: Note = {
           ...note,
           id: generateId(),
           createdAt: Date.now() + Math.random(),
-          boardX: (note.boardX || 0) + offsetX,
-          boardY: (note.boardY || 0) + (offsetY - (uniqueImportedNotes[0]?.boardY || 0)),
           variant: variant
         };
 
@@ -1344,6 +1745,28 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
             }
           }
         }
+
+        // Ensure image note dimensions are always reliable.
+        if ((processedNote.images && processedNote.images.length > 0) || processedNote.variant === 'image') {
+          processedNote.variant = 'image';
+          const hasValidDims =
+            typeof processedNote.imageWidth === 'number' &&
+            processedNote.imageWidth > 0 &&
+            typeof processedNote.imageHeight === 'number' &&
+            processedNote.imageHeight > 0;
+          if (!hasValidDims) {
+            const detected = await detectImageDimensionsFromRefs(processedNote.images || []);
+            processedNote.imageWidth = detected?.width || 256;
+            processedNote.imageHeight = detected?.height || 256;
+          }
+          processedNote.color = 'transparent';
+        }
+
+        const { width, height } = boardNoteDimensions(processedNote);
+        const placement = allocator.findAndOccupy(width, height, anchorX, anchorY);
+        processedNote.boardX = placement.x;
+        processedNote.boardY = placement.y;
+        if (importBatchGroupId) processedNote.noteGroupId = importBatchGroupId;
 
         return processedNote;
       }));
@@ -1454,7 +1877,7 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
           } catch (error) {
             console.error('Failed to add image note:', error);
           }
-        } else if (editingNote && editingNote.variant !== 'compact') {
+        } else if (editingNote && editingNote.variant !== 'image') {
           // 如果正在编辑便签，仍然把图片加到当前便签
           try {
             const newImages: string[] = [];
@@ -1486,7 +1909,7 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
     }
   };
 
-// compressImageToBase64 function moved to utils/board-utils.ts
+// compressImageToBase64 function moved to utils/board/board-utils.ts
 
   const createImageNote = (base64: string, imgWidth: number, imgHeight: number, position?: { x: number; y: number }) => {
     if (!containerRef.current) return;
@@ -1538,13 +1961,19 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
   };
 
   // Create note at specified position (in board coordinates)
-  const createNoteAtPosition = (boardX: number, boardY: number, variant: 'compact') => {
-    const noteWidth = variant === 'compact' ? 180 : 256;
-    const noteHeight = variant === 'compact' ? 180 : 256;
-    
-    // Adjust position to center the note at the click point
-    const spawnX = boardX - noteWidth / 2;
-    const spawnY = boardY - noteHeight / 2;
+  const createNoteAtPosition = (boardX: number, boardY: number) => {
+    const noteWidth = 256;
+    const noteHeight = 256;
+    const boardNotes = notes.filter((n) => n.boardX !== undefined && n.boardY !== undefined);
+    const allocator = createGridAllocator({
+      existingNotes: boardNotes,
+      padding: PLACEMENT_PADDING,
+      gap: PLACEMENT_GAP,
+      cellSize: PLACEMENT_GRID_CELL
+    });
+    const anchorX = boardX - noteWidth / 2;
+    const anchorY = boardY - noteHeight / 2;
+    const placement = allocator.findAndOccupy(noteWidth, noteHeight, anchorX, anchorY);
 
     const newNote: Note = {
       id: generateId(),
@@ -1555,9 +1984,9 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
       fontSize: 3,
       images: [],
       tags: [],
-      boardX: spawnX, 
-      boardY: spawnY,
-      variant: variant,
+      boardX: placement.x,
+      boardY: placement.y,
+      variant: 'standard',
       color: '#FFFDF5'
     };
     setEditingNote(newNote);
@@ -1565,110 +1994,66 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({ notes, onUpdateNote, onT
     setIsSelectingNotePosition(false); // Exit position selection mode
   };
 
-const createNoteAtCenter = (variant: 'compact') => {
-     if (!containerRef.current) return;
-     const { width, height } = containerRef.current.getBoundingClientRect();
-     
-     // Base center in world coordinates
-     const centerX = (width / 2 - transform.x) / transform.scale;
-     const centerY = (height / 2 - transform.y) / transform.scale;
-
-     // New note dimensions (must match actual rendered sizes)
-     // compact: 180px, text/standard: 256px
-     const noteWidth = variant === 'compact' ? 180 : 256;
-     const noteHeight = variant === 'compact' ? 180 : 256;
-     const spacing = 50; // Spacing between new note and existing content (reduced from 100)
-
-     // 使用指针位置直接放置便签
-     let spawnX = nextNotePosition.x;
-     let spawnY = nextNotePosition.y;
-
-     // 更新指针位置：向右移动一个便签宽度 + 间距
-     const newNextX = nextNotePosition.x + noteWidth + spacing;
-     const newNextY = nextNotePosition.y;
-
-     // 检查是否需要换行（超出容器宽度）
-     const containerWidth = containerRef.current?.getBoundingClientRect().width || 1200;
-     if (newNextX + noteWidth > containerWidth - 100) { // 留出右边距
-       // 换行：回到左边，往下移动一行
-       setNextNotePosition({
-         x: 100,
-         y: nextNotePosition.y + noteHeight + spacing
-       });
-     } else {
-       // 继续当前行
-       setNextNotePosition({
-         x: newNextX,
-         y: newNextY
-        });
-     }
-
+const createNoteAtCenter = () => {
+     const boardNotes = notes.filter((n) => n.boardX !== undefined && n.boardY !== undefined);
+     const { boardX, boardY } = nextSequentialSlot(boardNotes.length);
      const newNote: Note = {
          id: generateId(),
          createdAt: Date.now(),
          coords: { lat: 0, lng: 0 },
-         emoji: '', // No emoji for board notes
+         emoji: '',
          text: '',
          fontSize: 3,
          images: [],
          tags: [],
-         boardX: spawnX, 
-         boardY: spawnY,
-         variant: variant,
+         boardX,
+         boardY,
+         variant: 'standard',
          color: '#FFFDF5'
      };
      setEditingNote(newNote);
      onToggleEditor(true);
   };
 
-  // 以视图中心为中心进行缩放
-  const zoomAtViewCenter = (newScale: number) => {
-    if (!containerRef.current) return;
-    
-    const { width, height } = containerRef.current.getBoundingClientRect();
-    const viewCenterX = width / 2;
-    const viewCenterY = height / 2;
-    
-    // 将视图中心转换为世界坐标
-    const worldX = (viewCenterX - transform.x) / transform.scale;
-    const worldY = (viewCenterY - transform.y) / transform.scale;
-    
-    // 计算新的 transform，使得同一个世界坐标点仍然在视图中心
-    const newX = viewCenterX - worldX * newScale;
-    const newY = viewCenterY - worldY * newScale;
-    
-    setTransform({ x: newX, y: newY, scale: newScale });
-
-    // 防抖保存缩放后的位置（500ms后保存，避免频繁保存）
+  const scheduleZoomTransformPersist = useCallback((x: number, y: number, scale: number) => {
     if (zoomSaveTimeoutRef.current) {
       clearTimeout(zoomSaveTimeoutRef.current);
     }
     zoomSaveTimeoutRef.current = setTimeout(() => {
       if (onTransformChange) {
-        onTransformChange(newX, newY, newScale);
+        onTransformChange(x, y, scale);
       }
     }, 500);
-  };
+  }, [onTransformChange]);
 
-  const handleWheel = (e: WheelEvent) => {
-    // 检测 Ctrl/Cmd + 滚轮缩放
-    const isZoomGesture = e.ctrlKey || e.metaKey;
-    
-    if (isZoomGesture) {
-        e.preventDefault();
-        const zoomSensitivity = 0.001;
-        const delta = -e.deltaY * zoomSensitivity;
-        const newScale = Math.min(Math.max(0.2, transform.scale + delta), 4);
-        zoomAtViewCenter(newScale);
-    } else {
-        setTransform(prev => ({
-            ...prev,
-            x: prev.x - e.deltaX,
-            y: prev.y - e.deltaY
-        }));
-    }
-  };
-  
+  // 以指定视图坐标点为中心进行缩放（坐标相对容器左上角，与地图/图视图滚轮缩放一致）
+  const zoomAtViewPoint = useCallback(
+    (newScale: number, viewX: number, viewY: number) => {
+      const clamped = Math.min(Math.max(0.2, newScale), 4);
+      let nextX = 0;
+      let nextY = 0;
+      setTransform((prev) => {
+        const worldX = (viewX - prev.x) / prev.scale;
+        const worldY = (viewY - prev.y) / prev.scale;
+        nextX = viewX - worldX * clamped;
+        nextY = viewY - worldY * clamped;
+        return { x: nextX, y: nextY, scale: clamped };
+      });
+      scheduleZoomTransformPersist(nextX, nextY, clamped);
+    },
+    [scheduleZoomTransformPersist]
+  );
+
+  // 以视图中心为中心进行缩放
+  const zoomAtViewCenter = useCallback(
+    (newScale: number) => {
+      if (!containerRef.current) return;
+      const { width, height } = containerRef.current.getBoundingClientRect();
+      zoomAtViewPoint(newScale, width / 2, height / 2);
+    },
+    [zoomAtViewPoint]
+  );
+
   // 处理触摸双指缩放
   const touchStartRef = useRef<{ 
     distance: number; 
@@ -1835,31 +2220,36 @@ const createNoteAtCenter = (variant: 'compact') => {
     };
   }, [transform, longPressTimerRef, longPressNoteIdRef]);
 
-  // Add wheel event listener with passive: false to allow preventDefault
+  // Add wheel event listener with passive: false to allow preventDefault（与普通滚轮缩放一致，以指针为中心）
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const wheelHandler = (e: WheelEvent) => {
-      // 检测 Ctrl/Cmd + 滚轮缩放
-      const isZoomGesture = e.ctrlKey || e.metaKey;
-      
-      if (isZoomGesture) {
-        e.preventDefault();
-        // 速度敏感的缩放：滚轮滚动越快，缩放越多
-        // deltaY越大，缩放速度越快，更符合用户直觉
-        const zoomSensitivity = 0.001;
-        const delta = -e.deltaY * zoomSensitivity;
-        const currentScale = transform.scale;
-        const newScale = Math.min(Math.max(0.2, currentScale + delta), 4);
-        zoomAtViewCenter(newScale);
-      } else {
-        setTransform(prev => ({
-          ...prev,
-          x: prev.x - e.deltaX,
-          y: prev.y - e.deltaY
-        }));
-      }
+      e.preventDefault();
+      const rect = container.getBoundingClientRect();
+      const viewX = e.clientX - rect.left;
+      const viewY = e.clientY - rect.top;
+      const zoomSensitivity = 0.001;
+      // Shift+滚轮时系统常把纵向增量映射到 deltaX，仅用 deltaY 会导致无法缩放
+      const scrollDelta = e.shiftKey
+        ? Math.abs(e.deltaX) > Math.abs(e.deltaY)
+          ? e.deltaX
+          : e.deltaY
+        : e.deltaY;
+      const delta = -scrollDelta * zoomSensitivity;
+      let nextX = 0;
+      let nextY = 0;
+      let nextScale = 1;
+      setTransform((prev) => {
+        nextScale = Math.min(Math.max(0.2, prev.scale + delta), 4);
+        const worldX = (viewX - prev.x) / prev.scale;
+        const worldY = (viewY - prev.y) / prev.scale;
+        nextX = viewX - worldX * nextScale;
+        nextY = viewY - worldY * nextScale;
+        return { x: nextX, y: nextY, scale: nextScale };
+      });
+      scheduleZoomTransformPersist(nextX, nextY, nextScale);
     };
 
     container.addEventListener('wheel', wheelHandler, { passive: false });
@@ -1867,7 +2257,7 @@ const createNoteAtCenter = (variant: 'compact') => {
     return () => {
       container.removeEventListener('wheel', wheelHandler);
     };
-  }, [transform, zoomAtViewCenter]);
+  }, [scheduleZoomTransformPersist]);
 
   const handleBoardPointerDown = (e: React.PointerEvent) => {
       // 阻止浏览器默认长按菜单
@@ -1913,16 +2303,26 @@ const createNoteAtCenter = (variant: 'compact') => {
         // currentNotePressIdRef 会在 handleNotePointerUp 中根据移动距离判断是否清空
       }
       
-      // Box selection mode (when box select mode is active and in edit mode)
-      if (e.button === 0 && isBoxSelecting && isEditMode && !draggingNoteId && !resizingFrame && !draggingFrameId && !isNoteClick && !resizingImage) {
+      // 框选：编辑模式下「框选」按钮，或任意模式下按住 Shift
+      const shiftOrBoxSelect =
+        (isEditMode && isBoxSelecting) || isShiftPressed || e.shiftKey;
+      if (
+        e.button === 0 &&
+        shiftOrBoxSelect &&
+        !draggingNoteId &&
+        !resizingFrame &&
+        !draggingFrameId &&
+        !isNoteClick &&
+        !resizingImage
+      ) {
           const rect = dragRectRef.current;
           if (!rect) return;
           const worldX = (e.clientX - rect.left - transform.x) / transform.scale;
           const worldY = (e.clientY - rect.top - transform.y) / transform.scale;
           setBoxSelectStart({ x: worldX, y: worldY });
           setBoxSelectEnd({ x: worldX, y: worldY });
-          // If Shift is pressed, preserve existing selection; otherwise replace
-          if (!isShiftPressed) {
+          // Shift 时保留已有选中；否则替换
+          if (!isShiftPressed && !e.shiftKey) {
               setSelectedNoteIds(new Set());
               setSelectedNoteId(null);
           }
@@ -2058,8 +2458,8 @@ const createNoteAtCenter = (variant: 'compact') => {
           return;
       }
       
-      // 如果正在框选
-      if (isBoxSelecting && boxSelectStart) {
+      // 如果正在框选（含按住 Shift 触发的临时框选）
+      if (boxSelectStart) {
           const rect = dragRectRef.current || containerRef.current?.getBoundingClientRect();
           if (!rect) return;
           const worldX = (e.clientX - rect.left - transform.x) / transform.scale;
@@ -2072,33 +2472,22 @@ const createNoteAtCenter = (variant: 'compact') => {
           const minY = Math.min(boxSelectStart.y, worldY);
           const maxY = Math.max(boxSelectStart.y, worldY);
           
-          // 找到所有在框选区域内的notes
-          // When Shift is pressed, add to existing selection; otherwise replace selection
-          const selectedIds = new Set<string>(isShiftPressed ? selectedNoteIds : new Set());
+          const additive = isShiftPressed || e.shiftKey;
+          // Shift：在原有选中上增减；否则以当前框为准替换
+          const selectedIds = new Set<string>(additive ? selectedNoteIds : new Set());
           notes.forEach(note => {
-              const isImage = note.variant === 'image';
-              const isCompact = note.variant === 'compact';
-              const noteWidth = isImage ? (note.imageWidth || 256) : (isCompact ? 180 : 256);
-              const noteHeight = isImage ? (note.imageHeight || 256) : (isCompact ? 180 : 256);
+              const { width: noteWidth, height: noteHeight } = boardNoteDimensions(note);
               const noteRight = note.boardX + noteWidth;
               const noteBottom = note.boardY + noteHeight;
               
-              // 检查note是否与框选区域相交
               if (note.boardX < maxX && noteRight > minX && note.boardY < maxY && noteBottom > minY) {
                   selectedIds.add(note.id);
-              } else if (!isShiftPressed) {
-                  // 如果不按住shift，移除不在框选区域内的notes
+              } else if (!additive) {
                   selectedIds.delete(note.id);
               }
           });
           setSelectedNoteIds(selectedIds);
           return;
-      }
-      
-      // 如果正在连接，处理连接线移动
-      if (connectingFrom) {
-        handleConnectionPointMove(e);
-        return;
       }
       
       if (!isPanning || !lastMousePos.current) return;
@@ -2185,9 +2574,8 @@ const createNoteAtCenter = (variant: 'compact') => {
           return;
       }
       
-      // 如果正在框选，结束当前框选操作（但保持框选模式）
-      if (isBoxSelecting && boxSelectStart) {
-          // Clear box select start/end but keep box select mode active
+      // 结束当前框选拖拽（保持「多选/框选」按钮状态；Shift 临时框选本就不改 isBoxSelecting）
+      if (boxSelectStart) {
           setBoxSelectStart(null);
           setBoxSelectEnd(null);
           dragRectRef.current = null;
@@ -2320,7 +2708,7 @@ const createNoteAtCenter = (variant: 'compact') => {
               if (rect) {
                 const boardX = (e.clientX - rect.left - transform.x) / transform.scale;
                 const boardY = (e.clientY - rect.top - transform.y) / transform.scale;
-                createNoteAtPosition(boardX, boardY, 'compact');
+                createNoteAtPosition(boardX, boardY);
               }
               dragRectRef.current = null;
               (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
@@ -2348,14 +2736,12 @@ const createNoteAtCenter = (variant: 'compact') => {
               return;
           }
           
-          // 2. 如果有选中状态，取消选中（Frame、Note或Connection）
-          // 但如果按住 Shift 键且有多选，不清空多选
-          // 如果正在拖动页面（isPanning），不清空多选
-          // 如果刚刚完成多选拖动，不清空多选状态
-          if (selectedFrameId || selectedNoteId || selectedConnectionId || (selectedNoteIds.size > 0 && !isShiftPressed && !e.shiftKey && !isPanning && !isMultiSelectDragging)) {
+          // 2. 单击空白画布：统一只清空选中（编辑/非编辑一致）
+          // 为了避免破坏 Shift 多选与拖动手势，这里保留原有条件保护
+          if (selectedFrameId || selectedNoteId || selectedConnectionId || (selectedNoteIds.size > 0 && !isShiftPressed && !e.shiftKey && !hasMoved && !isMultiSelectDragging)) {
               setSelectedFrameId(null);
               setSelectedNoteId(null);
-              if (!isShiftPressed && !e.shiftKey && !isPanning && !isMultiSelectDragging) {
+              if (!isShiftPressed && !e.shiftKey && !hasMoved && !isMultiSelectDragging) {
                 setSelectedNoteIds(new Set());
               }
               setSelectedConnectionId(null);
@@ -2364,35 +2750,23 @@ const createNoteAtCenter = (variant: 'compact') => {
               return;
           }
           
-          // 3. 非编辑模式下，点击空白处清除过滤
-          if (!isEditMode && filterFrameIds.size > 0) {
+          // 3. 非编辑模式下，点击空白处清除过滤（图层 / 标签 / 时间）
+          if (
+            !isEditMode &&
+            (filterFrameIds.size > 0 ||
+              boardFilterTagLabels.size > 0 ||
+              boardFilterIncludeUntagged ||
+              boardFilterTimeRange != null)
+          ) {
               setFilterFrameIds(new Set());
+              setBoardFilterTagLabels(new Set());
+              setBoardFilterIncludeUntagged(false);
+              setBoardFilterTimeRange(null);
               dragRectRef.current = null;
               return;
           }
           
-          // 4. 如果在编辑模式，需要点击两次空白处才退出（但不在绘制frame时计数）
-          if (isEditMode && !isDrawingFrame) {
-              blankClickCountRef.current += 1;
-              
-              // 清除之前的重置定时器
-              if (blankClickResetTimerRef.current) {
-                  clearTimeout(blankClickResetTimerRef.current);
-              }
-              
-              // 如果点击了两次，退出编辑模式
-              if (blankClickCountRef.current >= 2) {
-                  setIsEditMode(false);
-                  resetBlankClickCount();
-              } else {
-                  // 设置重置定时器，1秒内没有再次点击则重置计数
-                  blankClickResetTimerRef.current = setTimeout(() => {
-                      resetBlankClickCount();
-                  }, 1000);
-              }
-              dragRectRef.current = null;
-              return;
-          }
+          // 4. 编辑模式退出改为“空白画布双击”，不再在单击中做计数退出
       }
       
       // 如果正在绘制Frame但还没有结束点，不处理（已在上面处理完成情况）
@@ -2401,25 +2775,30 @@ const createNoteAtCenter = (variant: 'compact') => {
           return;
       }
       
-      // 如果正在连接，处理连接释放
-      if (connectingFrom && (containerRef.current || dragRectRef.current)) {
-        const rect = dragRectRef.current || containerRef.current?.getBoundingClientRect();
-        if (rect) {
-          const x = (e.clientX - rect.left - transform.x) / transform.scale;
-          const y = (e.clientY - rect.top - transform.y) / transform.scale;
-          
-          const target = findConnectionPointAt(x, y, connectingFrom.noteId);
-          if (target) {
-            handleConnectionPointUp(e, target.noteId, target.side);
-          } else {
-            handleConnectionPointUp(e);
-          }
-        }
-        dragRectRef.current = null;
-        return;
-      }
-      
       dragRectRef.current = null;
+  };
+
+  const handleBoardDoubleClick = (e: React.MouseEvent) => {
+    // 仅空白画布生效：子元素（便签/连线/frame 等）上的双击由各自逻辑处理
+    if (e.target !== e.currentTarget) return;
+    if (isZooming) return;
+
+    // 双击空白画布：编辑模式下退出编辑；非编辑模式只做一次选中清理（幂等）
+    setSelectedFrameId(null);
+    setSelectedNoteId(null);
+    setSelectedNoteIds(new Set());
+    setSelectedConnectionId(null);
+    if (isEditMode) {
+      setIsEditMode(false);
+      setIsBoxSelecting(false);
+      setBoxSelectStart(null);
+      setBoxSelectEnd(null);
+      setIsDrawingFrame(false);
+      setDrawingFrameStart(null);
+      setDrawingFrameEnd(null);
+      setEditingFrameId(null);
+    }
+    resetBlankClickCount();
   };
 
   const handleNotePointerDown = (e: React.PointerEvent, noteId: string, note: Note) => {
@@ -2523,24 +2902,6 @@ const createNoteAtCenter = (variant: 'compact') => {
   };
 
   const handleNotePointerUp = (e: React.PointerEvent, note: Note) => {
-      // 如果正在连接，检查是否连接到目标
-      if (connectingFrom && containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect();
-        const x = (e.clientX - rect.left - transform.x) / transform.scale;
-        const y = (e.clientY - rect.top - transform.y) / transform.scale;
-        
-        const target = findConnectionPointAt(x, y, connectingFrom.noteId);
-        if (target) {
-          handleConnectionPointUp(e, target.noteId, target.side);
-        } else {
-          handleConnectionPointUp(e);
-        }
-        // 清理状态
-        currentNotePressIdRef.current = null;
-        notePressStartPosRef.current = null;
-        return;
-      }
-      
       // Handle multi-select drag end
       if (isMultiSelectDragging && !isZooming && isEditMode) {
         e.stopPropagation();
@@ -2560,9 +2921,7 @@ const createNoteAtCenter = (variant: 'compact') => {
               const newBoardY = selectedNote.boardY + multiSelectDragOffset.y;
               
               // 检查新位置是否在任何frame内
-              const isCompact = selectedNote.variant === 'compact';
-              const width = isCompact ? 180 : 256;
-              const height = isCompact ? 180 : 256;
+              const { width, height } = boardNoteDimensions(selectedNote);
               
               const centerX = newBoardX + width / 2;
               const centerY = newBoardY + height / 2;
@@ -2642,9 +3001,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                   const newBoardY = note.boardY + dragOffset.y;
                   
                   // 检查新位置是否在任何frame内
-                  const isCompact = note.variant === 'compact';
-                  const width = isCompact ? 180 : 256;
-                  const height = isCompact ? 180 : 256;
+                  const { width, height } = boardNoteDimensions(note);
                   
                   const centerX = newBoardX + width / 2;
                   const centerY = newBoardY + height / 2;
@@ -2715,7 +3072,8 @@ const createNoteAtCenter = (variant: 'compact') => {
           // 1. 在同一个note上按下和抬起
           // 2. 移动距离很小（小于15px，说明是单击而不是拖动）
           // 提高阈值，让单击更容易触发
-          const isShortClick = wasOnSameNote && movedDistance < 15;
+          const isShortClick =
+            wasOnSameNote && movedDistance < 15 && !e.shiftKey && !isShiftPressed;
           
           if (isShortClick) {
               e.stopPropagation();
@@ -2750,9 +3108,38 @@ const createNoteAtCenter = (variant: 'compact') => {
       
       // 如果正在缩放，不触发点击
       if (isZooming) return;
+
+      // 编组逻辑：单击已编组的便签（非 Shift）时，自动选中同组所有成员
+      {
+        const latestNote = notes.find(n => n.id === note.id) || note;
+        if (latestNote.noteGroupId && !isShiftPressed && !e.shiftKey) {
+          const groupMemberIds = new Set(
+            notes.filter(n => n.noteGroupId === latestNote.noteGroupId).map(n => n.id)
+          );
+          setSelectedNoteIds(groupMemberIds);
+          setSelectedNoteId(note.id);
+          return;
+        }
+      }
       
-      // 图片对象在非编辑模式下点击后放大预览 - 优先显示照片而不是涂鸦
+      // 图片对象在非编辑模式下点击后放大预览 - 优先显示照片而不是涂鸦（Shift+点击多选）
       if (note.variant === 'image' && !isEditMode) {
+        if (isShiftPressed || e.shiftKey) {
+          setSelectedNoteIds((prev) => {
+            const newSet = new Set(prev);
+            if (newSet.has(note.id)) {
+              newSet.delete(note.id);
+              if (newSet.size === 0) setSelectedNoteId(null);
+              else setSelectedNoteId(Array.from(newSet)[0]);
+            } else {
+              newSet.add(note.id);
+              setSelectedNoteId(note.id);
+            }
+            return newSet;
+          });
+          resetBlankClickCount();
+          return;
+        }
         if (note.images && note.images[0]) {
           setPreviewImage(note.images[0]);
           return;
@@ -2807,6 +3194,22 @@ const createNoteAtCenter = (variant: 'compact') => {
       }
       
       if (!isEditMode) {
+        if (isShiftPressed || e.shiftKey) {
+          setSelectedNoteIds((prev) => {
+            const newSet = new Set(prev);
+            if (newSet.has(note.id)) {
+              newSet.delete(note.id);
+              if (newSet.size === 0) setSelectedNoteId(null);
+              else setSelectedNoteId(Array.from(newSet)[0]);
+            } else {
+              newSet.add(note.id);
+              setSelectedNoteId(note.id);
+            }
+            return newSet;
+          });
+          resetBlankClickCount();
+          return;
+        }
         // 使用最新的便签数据
         const latestNote = notes.find(n => n.id === note.id) || note;
         ensureNoteImagesLoaded(latestNote).then(loadedNote => {
@@ -3048,7 +3451,9 @@ const createNoteAtCenter = (variant: 'compact') => {
         }}
     >
       <style>{`
-        .markdown-board-preview p { margin: 0; }
+        .markdown-board-preview { line-height: 1.35; }
+        .markdown-board-preview p { margin: 0 0 0.45em 0; }
+        .markdown-board-preview p:last-child { margin-bottom: 0; }
         .markdown-board-preview h1, 
         .markdown-board-preview h2, 
         .markdown-board-preview h3, 
@@ -3087,11 +3492,12 @@ const createNoteAtCenter = (variant: 'compact') => {
         onDrop={handleDrop}
         onDragEnd={handleDragEnd}
         onPointerUp={handleBoardPointerUp}
+        onDoubleClick={handleBoardDoubleClick}
         onContextMenu={(e) => e.preventDefault()}
       >
         {isDragging && (
           <div 
-            className="absolute inset-0 z-[4000] backdrop-blur-sm flex items-center justify-center pointer-events-auto"
+            className="absolute inset-0 z-[4000] flex items-center justify-center pointer-events-auto"
             style={{ backgroundColor: `${themeColor}33` }}
             onClick={(e) => {
               // 点击外部区域关闭
@@ -3155,10 +3561,10 @@ const createNoteAtCenter = (variant: 'compact') => {
             <div
               className="absolute pointer-events-none z-[3000]"
               style={{
-                left: `${notePositionPreview.x - 90}px`, // Center the 180px box
-                top: `${notePositionPreview.y - 90}px`,
-                width: '180px',
-                height: '180px',
+                left: `${notePositionPreview.x - 128}px`,
+                top: `${notePositionPreview.y - 128}px`,
+                width: '256px',
+                height: '256px',
                 border: `4px solid ${themeColor}`,
                 borderRadius: '4px',
                 boxShadow: `0 0 0 1px ${themeColor}4D`,
@@ -3169,7 +3575,7 @@ const createNoteAtCenter = (variant: 'compact') => {
           {/* Render connections */}
           {/* Frames Layer - Below everything */}
           {/* Box Selection Preview */}
-          {isBoxSelecting && boxSelectStart && boxSelectEnd && (
+          {boxSelectStart && boxSelectEnd && (
             <div
               className="absolute pointer-events-none z-[3000]"
               style={{
@@ -3187,16 +3593,16 @@ const createNoteAtCenter = (variant: 'compact') => {
           {/* Drawing Frame Preview */}
           {isDrawingFrame && drawingFrameStart && drawingFrameEnd && (
             <div
-              className="absolute pointer-events-none"
+              className="absolute pointer-events-none overflow-hidden"
               style={{
                 left: `${Math.min(drawingFrameStart.x, drawingFrameEnd.x)}px`,
                 top: `${Math.min(drawingFrameStart.y, drawingFrameEnd.y)}px`,
                 width: `${Math.abs(drawingFrameEnd.x - drawingFrameStart.x)}px`,
                 height: `${Math.abs(drawingFrameEnd.y - drawingFrameStart.y)}px`,
-                backgroundColor: 'rgba(255, 255, 255, 1)',
-                border: '2px dashed rgba(156, 163, 175, 0.8)',
                 borderRadius: '12px',
                 zIndex: 10,
+                border: '2px dashed rgba(156, 163, 175, 0.8)',
+                ...frameChromeStyle,
               }}
             />
           )}
@@ -3225,30 +3631,38 @@ const createNoteAtCenter = (variant: 'compact') => {
               return (
                 <div
                   key={frame.id}
-                  className="absolute"
+                  className="absolute overflow-visible"
                   style={{
-                left: `${displayX}px`,
-                top: `${displayY}px`,
-                width: `${displayWidth}px`,
-                height: `${displayHeight}px`,
-                backgroundColor: selectedFrameId === frame.id ? 'rgba(255, 221, 0, 0.2)' : frame.color,
-                borderRadius: '12px',
-                zIndex: selectedFrameId === frame.id ? 1000 : 10,
-                pointerEvents: 'none',
-              }}
-            >
-              {/* Fixed border that doesn't scale */}
-              <div
-                className="absolute inset-0 pointer-events-none"
-                style={{
-                  border: selectedFrameId === frame.id ? `2px solid ${themeColor}` : '2px solid rgba(156, 163, 175, 0.3)',
-                  borderRadius: '12px',
-                  transform: `scale(${1 / transform.scale})`,
-                  transformOrigin: 'top left',
-                  width: `${displayWidth * transform.scale}px`,
-                  height: `${displayHeight * transform.scale}px`,
-                }}
-              />
+                    left: `${displayX}px`,
+                    top: `${displayY}px`,
+                    width: `${displayWidth}px`,
+                    height: `${displayHeight}px`,
+                    zIndex: selectedFrameId === frame.id ? 1000 : 10,
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {/* 仅玻璃+叠色+内描边做圆角裁剪；外层不 overflow:hidden，避免四角缩放手柄被裁切 */}
+                  <div className="absolute inset-0 overflow-hidden rounded-[12px] pointer-events-none">
+                    <div className="absolute inset-0" style={frameChromeStyle} />
+                    <div
+                      className="absolute inset-0"
+                      style={{
+                        backgroundColor:
+                          selectedFrameId === frame.id
+                            ? 'rgba(255, 221, 0, 0.22)'
+                            : frameTintFromHex(frame.color, 0.22),
+                      }}
+                    />
+                    <div
+                      className="absolute inset-0 rounded-[12px]"
+                      style={{
+                        boxShadow:
+                          selectedFrameId === frame.id
+                            ? `inset 0 0 0 2px ${themeColor}`
+                            : 'inset 0 0 0 2px rgba(156, 163, 175, 0.35)',
+                      }}
+                    />
+                  </div>
               {/* Frame中间区域，也当作空白处 - 让事件冒泡到背景 */}
               <div
                 className="absolute pointer-events-auto"
@@ -3448,7 +3862,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                       top: '-6px',
                       width: '12px',
                       height: '12px',
-                      backgroundColor: 'white',
+                      ...frameChromeStyle,
                       border: `2px solid ${themeColor}`,
                       borderRadius: '2px',
                       transform: `scale(${1 / transform.scale})`,
@@ -3490,7 +3904,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                       top: '-6px',
                       width: '12px',
                       height: '12px',
-                      backgroundColor: 'white',
+                      ...frameChromeStyle,
                       border: `2px solid ${themeColor}`,
                       borderRadius: '2px',
                       transform: `scale(${1 / transform.scale})`,
@@ -3530,7 +3944,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                       bottom: '-6px',
                       width: '12px',
                       height: '12px',
-                      backgroundColor: 'white',
+                      ...frameChromeStyle,
                       border: `2px solid ${themeColor}`,
                       borderRadius: '2px',
                       transform: `scale(${1 / transform.scale})`,
@@ -3570,7 +3984,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                       bottom: '-6px',
                       width: '12px',
                       height: '12px',
-                      backgroundColor: 'white',
+                      ...frameChromeStyle,
                       border: `2px solid ${themeColor}`,
                       borderRadius: '2px',
                       transform: `scale(${1 / transform.scale})`,
@@ -3625,43 +4039,25 @@ const createNoteAtCenter = (variant: 'compact') => {
                 displayHeight = localResizingFrameSize.height;
             }
 
+            const filterActive = filterFrameIds.size > 0;
+            const inFilter = filterFrameIds.has(frame.id);
+            const frameTitleTint =
+              filterActive && !inFilter
+                ? 'rgba(107, 114, 128, 0.32)'
+                : inFilter
+                  ? frameTintFromHex(themeColor, 0.52)
+                  : selectedFrameId === frame.id
+                    ? frameTintFromHex(themeColor, 0.48)
+                    : 'rgba(107, 114, 128, 0.26)';
+
             return (
             <React.Fragment key={frame.id}>
-              {/* Frame border in title layer with 5% opacity - 只在frame框体显示时显示边框 */}
-              {(filterFrameIds.size === 0 || filterFrameIds.has(frame.id)) && (
-                <div
-                  key={`frame-border-title-${frame.id}`}
-                  className="absolute pointer-events-none"
-                  style={{
-                    left: `${displayX}px`,
-                    top: `${displayY}px`,
-                    width: `${displayWidth}px`,
-                    height: `${displayHeight}px`,
-                    border: '2px solid rgba(0, 0, 0, 0.05)',
-                    borderRadius: '12px',
-                    zIndex: selectedFrameId === frame.id ? 1001 : 200,
-                    pointerEvents: 'none',
-                  }}
-                >
-                  <div
-                    className="absolute inset-0 pointer-events-none"
-                    style={{
-                      border: '2px solid rgba(0, 0, 0, 0.05)',
-                      borderRadius: '12px',
-                      transform: `scale(${1 / transform.scale})`,
-                      transformOrigin: 'top left',
-                      width: `${displayWidth * transform.scale}px`,
-                      height: `${displayHeight * transform.scale}px`,
-                    }}
-                  />
-                </div>
-              )}
               <div
                 key={`title-${frame.id}`}
-                className={`absolute -top-8 left-0 px-3 py-1 text-white text-sm font-bold rounded-lg shadow-md flex items-center gap-2 pointer-events-auto whitespace-nowrap ${
-                  filterFrameIds.has(frame.id) ? '' : 'bg-gray-500/50'
+                className={`absolute -top-8 left-0 rounded-lg shadow-md flex flex-col pointer-events-auto overflow-hidden border ${
+                  ch ? 'border-gray-200/70' : 'border-white/45'
                 }`}
-                style={{ 
+                style={{
                   left: `${displayX}px`,
                   top: `${displayY - 32}px`,
                   zIndex: selectedFrameId === frame.id ? 1500 : 201,
@@ -3670,7 +4066,6 @@ const createNoteAtCenter = (variant: 'compact') => {
                   transformOrigin: 'top left',
                   wordBreak: 'keep-all',
                   opacity: filterFrameIds.size > 0 && !filterFrameIds.has(frame.id) ? 0.3 : 1,
-                  backgroundColor: filterFrameIds.has(frame.id) ? themeColor : (selectedFrameId === frame.id ? themeColor : undefined)
                 }}
               onDoubleClick={(e) => {
                 e.stopPropagation();
@@ -3741,6 +4136,12 @@ const createNoteAtCenter = (variant: 'compact') => {
                 }
               }}
             >
+                <div className="absolute inset-0 pointer-events-none" style={frameChromeStyle} />
+                <div
+                  className="absolute inset-0 pointer-events-none"
+                  style={{ backgroundColor: frameTitleTint }}
+                />
+                <div className="relative z-10 flex items-center gap-2 px-3 py-1 text-theme-chrome-fg text-sm font-bold whitespace-nowrap">
               {editingFrameId === frame.id ? (
                 <>
                   <input
@@ -3785,7 +4186,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                         }, 200);
                       }
                     }}
-                    className="bg-transparent text-white px-2 py-0.5 rounded outline-none text-sm"
+                    className="bg-transparent text-theme-chrome-fg px-2 py-0.5 rounded outline-none text-sm"
                     onClick={(e) => e.stopPropagation()}
                     onPointerDown={(e) => e.stopPropagation()}
                   />
@@ -3831,242 +4232,20 @@ const createNoteAtCenter = (variant: 'compact') => {
                   <Minus size={14} />
                 </button>
               )}
+                </div>
             </div>
             </React.Fragment>
           )})}
 
-          {layerVisibility.connects && (
-          <svg 
-            className="absolute pointer-events-none" 
-            style={{ 
-              left: `-${SVG_OVERFLOW_PADDING}px`,
-              top: `-${SVG_OVERFLOW_PADDING}px`,
-              width: `calc(100% + ${SVG_OVERFLOW_PADDING * 2}px)`,
-              height: `calc(100% + ${SVG_OVERFLOW_PADDING * 2}px)`,
-              zIndex: 100,
-              overflow: 'visible'
-            }}
-          >
-            {/* 直角箭头标记定义和投影滤镜 */}
-            <defs>
-              {/* 投影滤镜 */}
-              <filter id="connectionShadow" x="-50%" y="-50%" width="200%" height="200%">
-                <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="rgba(0,0,0,0.3)" floodOpacity="1"/>
-              </filter>
-              <marker
-                id="arrowForward"
-                markerWidth="36"
-                markerHeight="36"
-                refX="30"
-                refY="18"
-                orient="auto"
-                markerUnits="userSpaceOnUse"
-              >
-                {/* 90度折角箭头 */}
-                <path
-                  d="M 12 3 L 30 18 L 12 33"
-                  stroke={themeColor}
-                  strokeWidth="6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  fill="none"
-                />
-              </marker>
-              <marker
-                id="arrowReverse"
-                markerWidth="36"
-                markerHeight="36"
-                refX="30"
-                refY="18"
-                orient="auto-start-reverse"
-                markerUnits="userSpaceOnUse"
-              >
-                {/* 90度折角箭头 */}
-                <path
-                  d="M 12 3 L 30 18 L 12 33"
-                  stroke={themeColor}
-                  strokeWidth="6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  fill="none"
-                />
-              </marker>
-            </defs>
-            
-            {connectionPaths.map((pathData, index) => {
-              if (!pathData) return null;
-              const conn = connections[index];
-              
-              // 如果有过滤frame，只显示起点属于这些frames的连线
-              if (filterFrameIds.size > 0) {
-                const fromNote = notes.find(n => n.id === conn.fromNoteId);
-                if (!fromNote) return null;
-                const groupIds = fromNote.groupIds || (fromNote.groupId ? [fromNote.groupId] : []);
-                // 检查是否有任何groupIds在filterFrameIds中
-                if (!groupIds.some(id => filterFrameIds.has(id))) return null;
-              }
-              
-              const arrowState = conn.arrow || 'forward'; // 默认正向箭头
-              
-              // 确定箭头标记
-              let markerEnd = '';
-              let markerStart = '';
-              
-              if (arrowState === 'forward') {
-                markerEnd = 'url(#arrowForward)';
-              } else if (arrowState === 'reverse') {
-                markerStart = 'url(#arrowReverse)';
-              }
-              
-              // 处理点击：选中 -> forward -> reverse -> none -> delete
-              const handleConnectionClick = (e: React.MouseEvent | React.PointerEvent) => {
-                e.stopPropagation();
-                e.preventDefault();
-                if (!isEditMode) return;
-                
-                // 如果点击的是已选中的连接线，切换箭头状态
-                if (selectedConnectionId === conn.id) {
-                  let updatedConnections: Connection[];
-                  
-                  // 根据当前箭头状态切换到下一个状态（使用conn.arrow而不是arrowState）
-                  const currentArrow = conn.arrow || 'forward';
-                  
-                  if (currentArrow === 'forward') {
-                    // forward -> reverse
-                    updatedConnections = connections.map(c => 
-                      c.id === conn.id ? { ...c, arrow: 'reverse' as const } : c
-                    );
-                    onUpdateConnections?.(updatedConnections);
-                  } else if (currentArrow === 'reverse') {
-                    // reverse -> none
-                    updatedConnections = connections.map(c => 
-                      c.id === conn.id ? { ...c, arrow: 'none' as const } : c
-                    );
-                    onUpdateConnections?.(updatedConnections);
-                  } else if (currentArrow === 'none') {
-                    // none -> delete
-                    updatedConnections = connections.filter(c => c.id !== conn.id);
-                    onUpdateConnections?.(updatedConnections);
-                    setSelectedConnectionId(null);
-                  }
-                  
-                  if (navigator.vibrate) {
-                    navigator.vibrate(VIBRATION_MEDIUM);
-                  }
-                } else {
-                  // 选中连接线，清除其他选中状态
-                  setSelectedConnectionId(conn.id);
-                  setSelectedNoteId(null);
-                  setSelectedFrameId(null);
-                  resetBlankClickCount();
-                  
-                  if (navigator.vibrate) {
-                    navigator.vibrate(VIBRATION_SHORT);
-                  }
-                }
-              };
-              
-              const isSelected = selectedConnectionId === conn.id;
-              
-              // 在编辑模式下，未选中的连接线透明度减小30%，退出编辑模式后完全不透明
-              const getOpacity = () => {
-                if (isSelected) return 1;
-                if (isEditMode) return 0.2 * 0.7; // 编辑模式下未选中：减小30%（0.2 * 0.7 = 0.14）
-                return 1; // 非编辑模式下：完全不透明
-              };
-              
-              return (
-                <g key={pathData.id}>
-                  {/* 选中时的背景高亮 */}
-                  {isSelected && (
-                    <path
-                      d={pathData.pathD}
-                      stroke={`${themeColor}4D`}
-                      strokeWidth={CONNECTION_LINE_CLICKABLE_WIDTH / transform.scale}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      fill="none"
-                    />
-                  )}
-                  {/* 连接线 */}
-                  <path
-                    d={pathData.pathD}
-                    stroke={themeColor}
-                    strokeWidth={(isSelected ? CONNECTION_LINE_WIDTH + 2 : CONNECTION_LINE_WIDTH) / transform.scale}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    fill="none"
-                    markerEnd={markerEnd}
-                    markerStart={markerStart}
-                    opacity={getOpacity()}
-                    filter="url(#connectionShadow)"
-                  />
-                  
-                  {/* 可点击的透明宽线 */}
-                  <path
-                    d={pathData.pathD}
-                    stroke="transparent"
-                    strokeWidth={CONNECTION_LINE_CLICKABLE_WIDTH / transform.scale}
-                    fill="none"
-                    className="pointer-events-auto cursor-pointer"
-                    onClick={handleConnectionClick}
-                    onPointerDown={(e) => {
-                      e.stopPropagation();
-                      handleConnectionClick(e);
-                    }}
-                  />
-                </g>
-              );
-            })}
-            
-            {/* Temporary connection line while dragging */}
-            {connectingFrom && connectingTo && (() => {
-              const fromNote = notes.find(n => n.id === connectingFrom.noteId);
-              if (!fromNote) return null;
-              
-              const fromIsDragging = draggingNoteId === connectingFrom.noteId;
-              const fromPoint = getConnectionPoint(fromNote, connectingFrom.side, fromIsDragging, dragOffset);
-              
-              // 检查是否悬停在连接点上
-              const target = findConnectionPointAt(connectingTo.x, connectingTo.y, connectingFrom.noteId);
-              const strokeOpacity = target ? 1 : 0.5;
-              
-              // 临时连接线使用直线即可
-              const pathD = `M ${fromPoint.x + SVG_OVERFLOW_PADDING} ${fromPoint.y + SVG_OVERFLOW_PADDING} L ${connectingTo.x + SVG_OVERFLOW_PADDING} ${connectingTo.y + SVG_OVERFLOW_PADDING}`;
-              
-              return (
-                <path
-                  d={pathD}
-                  stroke={themeColor}
-                  strokeWidth={CONNECTION_LINE_WIDTH / transform.scale}
-                  strokeLinecap="round"
-                  strokeOpacity={strokeOpacity}
-                  fill="none"
-                  filter="url(#connectionShadow)"
-                />
-              );
-            })()}
-          </svg>
-          )}
-          {notes.filter(note => {
-              // 如果有过滤frames，只显示属于这些frames的便签
-              if (filterFrameIds.size > 0) {
-                const groupIds = note.groupIds || (note.groupId ? [note.groupId] : []);
-                // 检查是否有任何groupIds在filterFrameIds中
-                return groupIds.some(id => filterFrameIds.has(id));
-              }
-              return true;
-            }).map((note) => {
+
+
+          {notes.filter((note) => notePassesBoardVisibilityFilters(note)).map((note) => {
               // Check layer visibility based on note variant
-              const isCompact = note.variant === 'compact';
               const isImage = note.variant === 'image';
-              const isStandard = !isCompact && !isImage;
               
-              // Determine if this note should be visible
               let shouldShow = false;
-              if (isCompact && layerVisibility.secondary) shouldShow = true;
-              else if (isImage && layerVisibility.image) shouldShow = true;
-              else if (isStandard && layerVisibility.primary) shouldShow = true;
+              if (isImage && layerVisibility.image) shouldShow = true;
+              else if (!isImage && layerVisibility.primary) shouldShow = true;
               
               if (!shouldShow) return null;
               
@@ -4079,27 +4258,14 @@ const createNoteAtCenter = (variant: 'compact') => {
               const containingFrame = frames.find(frame => isNoteInFrame(note, frame));
               const isInFrame = !!containingFrame;
 
-              // For compact/standard notes, use fixed dimensions
-              const noteWidth: number = isImage ? (note.imageWidth || 256) : (isCompact ? 180 : 256);
-              const noteHeight: number = isImage ? (note.imageHeight || 256) : (isCompact ? 180 : 256);
+              const { width: noteWidth, height: noteHeight } = boardNoteDimensions(note);
 
-              // Determine line clamp based on font size to ensure it fits the box
-              // Compact/Standard notes have fixed height.
               let clampClass = '';
               if (!isImage) {
-                  // 让预览更宽容，减少在句中出现省略号：
-                  // Compact 高度更小，但仍给 2~5 行；Standard 给 3~6 行
-                  if (isCompact) {
-                    if (note.fontSize >= 4) clampClass = 'line-clamp-2';
-                    else if (note.fontSize === 3) clampClass = 'line-clamp-3';
-                    else if (note.fontSize === 2) clampClass = 'line-clamp-4';
-                    else clampClass = 'line-clamp-5';
-                  } else {
-                    if (note.fontSize >= 4) clampClass = 'line-clamp-3';
-                    else if (note.fontSize === 3) clampClass = 'line-clamp-4';
-                    else if (note.fontSize === 2) clampClass = 'line-clamp-5';
-                    else clampClass = 'line-clamp-6';
-                  }
+                  if (note.fontSize >= 4) clampClass = 'line-clamp-3';
+                  else if (note.fontSize === 3) clampClass = 'line-clamp-4';
+                  else if (note.fontSize === 2) clampClass = 'line-clamp-5';
+                  else clampClass = 'line-clamp-6';
               }
 
               // Get global standard size scale, default to 1
@@ -4124,7 +4290,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                         transform: `scale(${standardSizeScale})`,
                         transformOrigin: 'center',
                   }}
-                  className={`pointer-events-auto ${isEditMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer hover:scale-105 transition-transform'}`}
+                  className={`pointer-events-auto group ${isEditMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer hover:scale-105 transition-transform'}`}
                     onPointerDown={(e) => {
                         lastMousePos.current = { x: e.clientX, y: e.clientY };
                         handleNotePointerDown(e, note.id, note);
@@ -4138,7 +4304,8 @@ const createNoteAtCenter = (variant: 'compact') => {
                       <button 
                         onClick={(e) => handleDeleteClick(e, note.id)}
                         onPointerDown={(e) => e.stopPropagation()}
-                        className="absolute -top-3 -right-3 z-50 bg-red-500 text-white rounded-full p-1.5 shadow-md hover:scale-110 transition-transform"
+                        type="button"
+                        className="absolute -top-3 -right-3 z-50 bg-red-500 text-white rounded-full p-1.5 shadow-md opacity-0 pointer-events-none transition-opacity transition-transform hover:scale-110 group-hover:opacity-100 group-hover:pointer-events-auto"
                       >
                         <X size={14} />
                       </button>
@@ -4240,17 +4407,15 @@ const createNoteAtCenter = (variant: 'compact') => {
                       top: currentY,
                       zIndex: (selectedNoteId === note.id || selectedNoteIds.has(note.id) || isDragging || (isMultiSelectDragging && isInMultiSelect))
                         ? 1000
-                        : isCompact
-                          ? 60
-                          : isImage
-                            ? 55
-                            : 50,
+                        : isImage
+                          ? 55
+                          : 50,
                       width: noteWidth,
                       height: noteHeight,
                       transform: `scale(${standardSizeScale})`,
                       transformOrigin: 'center',
                   }}
-                  className={`pointer-events-auto ${isEditMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer hover:scale-105 transition-transform'}`}
+                  className={`pointer-events-auto group ${isEditMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer hover:scale-105 transition-transform'}`}
                   onPointerDown={(e) => {
                       lastMousePos.current = { x: e.clientX, y: e.clientY };
                       handleNotePointerDown(e, note.id, note);
@@ -4265,151 +4430,16 @@ const createNoteAtCenter = (variant: 'compact') => {
                       <button 
                         onClick={(e) => handleDeleteClick(e, note.id)}
                         onPointerDown={(e) => e.stopPropagation()}
-                        className="absolute -top-3 -right-3 z-50 bg-red-500 text-white rounded-full p-1.5 shadow-md hover:scale-110 transition-transform"
+                        type="button"
+                        className="absolute -top-3 -right-3 z-50 bg-red-500 text-white rounded-full p-1.5 shadow-md opacity-0 pointer-events-none transition-opacity transition-transform hover:scale-110 group-hover:opacity-100 group-hover:pointer-events-auto"
                       >
                         <X size={14} />
                       </button>
                         
-                        {/* Connection points - show when selected (single or multi) or when connecting, but not for image notes */}
-                        {((selectedNoteId === note.id || selectedNoteIds.has(note.id)) || connectingFrom !== null) && !isImage && (
-                          <>
-                            {(['top', 'right', 'bottom', 'left'] as const).map(side => {
-                              const point = getConnectionPoint(note, side, isDragging, dragOffset);
-                              const isCompact = note.variant === 'compact';
-                              
-                              // Use dimensions per variant
-                              const width = isCompact ? 180 : 256;
-                              const height = isCompact ? 180 : 256;
-                              
-                              let left = 0, top = 0;
-                              switch (side) {
-                                case 'top':
-                                  left = width / 2;
-                                  top = 0;
-                                  break;
-                                case 'right':
-                                  left = width;
-                                  top = height / 2;
-                                  break;
-                                case 'bottom':
-                                  left = width / 2;
-                                  top = height;
-                                  break;
-                                case 'left':
-                                  left = 0;
-                                  top = height / 2;
-                                  break;
-                              }
-                              
-                              const isActive = connectingFrom?.noteId === note.id && connectingFrom?.side === side;
-                              const isHovering = hoveringConnectionPoint?.noteId === note.id && hoveringConnectionPoint?.side === side;
-                              
-                              return (
-                                <div
-                                  key={side}
-                                  className={`absolute z-50 w-6 h-6 -translate-x-1/2 -translate-y-1/2 border-2 border-white rounded-full shadow-lg cursor-crosshair transition-transform pointer-events-auto ${
-                                    isActive ? 'scale-125' : isHovering ? 'scale-150 ring-4 ring-opacity-50' : 'hover:scale-110'
-                                  }`}
-                          style={{
-                                    backgroundColor: themeColor,
-                                    boxShadow: isHovering ? `0 0 0 4px ${themeColor}80` : undefined,
-                                    left: `${left}px`, 
-                                    top: `${top}px`
-                                  }}
-                                  onPointerDown={(e) => handleConnectionPointDown(e, note.id, side)}
-                                />
-                              );
-                            })}
-                          </>
-                        )}
                       </>
                   )}
 
-                  {isCompact ? (
-                      <div 
-                          className={`w-full h-full shadow-xl flex flex-col overflow-hidden group rounded-sm transition-shadow ${isDragging ? 'shadow-2xl ring-4' : ''}`}
-                          style={{
-                              boxShadow: isDragging ? `0 0 0 4px ${themeColor}` : undefined,
-                              backgroundColor: note.color || '#FFFDF5',
-                              border: `5px solid ${themeColor}`,
-                              boxSizing: 'border-box'
-                          }}
-                      >
-                          <div className="w-full h-full flex flex-col relative p-4 gap-1">
-                              <div className="relative z-10 pointer-events-none flex flex-col h-full">
-                                  <div 
-                                    className={`text-gray-800 leading-none flex-1 overflow-hidden break-words whitespace-pre-wrap ${clampClass} ${note.isBold ? 'font-bold' : 'font-medium'}`} 
-                                  >
-                                      {note.text ? (() => {
-                                          const { title, detail } = parseNoteContent(note.text);
-                                          
-                                          const getBoardFontSize = (size: number) => {
-                                              const sizes: Record<number, string> = {
-                                                  '-1': '0.8rem',
-                                                  '0': '1.0rem',
-                                                  '1': '1.2rem',
-                                                  '2': '1.6rem',
-                                                  '3': '2.2rem',
-                                                  '4': '2.4rem',
-                                                  '5': '3.0rem'
-                                              };
-                                              return sizes[size] || sizes[3];
-                                          };
-
-                                          return (
-                                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                                                  <span style={{ fontSize: getBoardFontSize(note.fontSize || 3) }}>{title}</span>
-                                                  <div className="markdown-board-preview" style={{ fontSize: getBoardFontSize((note.fontSize || 3) - 2), opacity: 0.9 }}>
-                                                      <ReactMarkdown>{detail || ' '}</ReactMarkdown>
-                                                  </div>
-                                              </div>
-                                          );
-                                      })() : <span className="text-gray-400 italic font-normal text-base">Empty...</span>}
-                                  </div>
-                                  {isCompact && (
-                                    <div className="mt-auto flex items-center justify-end">
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                e.preventDefault(); // 阻止默认行为和进一步冒泡
-                                                // Upgrade compact note to standard note
-                                                const upgradedNote: Note = {
-                                                    ...note,
-                                                    variant: 'standard' as const,
-                                                    // Keep existing coords if available
-                                                    coords: note.coords || { lat: 0, lng: 0 }
-                                                };
-                                                onUpdateNote(upgradedNote);
-                                                
-                                                // 退出框选模式和frame创建模式
-                                                setIsBoxSelecting(false);
-                                                setIsDrawingFrame(false);
-                                                setBoxSelectStart(null);
-                                                setBoxSelectEnd(null);
-                                                setDrawingFrameStart(null);
-                                                setDrawingFrameEnd(null);
-                                                
-                                                // 如果正在编辑这个note，更新editingNote并保持编辑模式打开
-                                                if (editingNote && editingNote.id === note.id) {
-                                                    setEditingNote(upgradedNote);
-                                                } else {
-                                                    // 如果没有在编辑，打开编辑模式并设置editingNote
-                                                    setEditingNote(upgradedNote);
-                                                    onToggleEditor(true);
-                                                }
-                                            }}
-                                            className="p-1.5 rounded-full bg-white/80 hover:bg-white shadow-sm transition-colors opacity-0 group-hover:opacity-100 pointer-events-auto"
-                                            title="升级为标准便签"
-                                        >
-                                            <ArrowUp size={14} className="text-gray-700" />
-                                        </button>
-                                    </div>
-                                  )}
-                              </div>
-                          </div>
-                      </div>
-                  ) : (
-                      <div 
+                  <div 
                           className={`w-full h-full shadow-xl flex flex-col overflow-hidden group rounded-sm transition-shadow ${isDragging ? 'shadow-2xl ring-4' : isInFrame ? 'ring-4 ring-[#EEEEEE]' : ''}`}
                           style={{
                               boxShadow: isDragging ? `0 0 0 4px ${themeColor}` : undefined,
@@ -4418,7 +4448,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                           }}
                       >
                           <div className="w-full h-full flex flex-col relative p-6 gap-2">
-                              {!isCompact && (note.sketch && note.sketch !== '') && (note.images && note.images.length > 0) && (
+                              {(note.sketch && note.sketch !== '') && (note.images && note.images.length > 0) && (
                                   <div className="absolute inset-0 opacity-35 pointer-events-none z-0">
                                       <img 
                                           src={note.sketch || note.images[0]} 
@@ -4427,7 +4457,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                                       />
                                   </div>
                               )}
-                              {!isCompact && (note.sketch && note.sketch !== '') && (!note.images || note.images.length === 0) && (
+                              {(note.sketch && note.sketch !== '') && (!note.images || note.images.length === 0) && (
                                   <div className="absolute inset-0 opacity-35 pointer-events-none z-0">
                                       <img 
                                           src={note.sketch} 
@@ -4436,7 +4466,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                                       />
                                   </div>
                               )}
-                              {!isCompact && !note.sketch && (note.images && note.images.length > 0) && (
+                              {!note.sketch && (note.images && note.images.length > 0) && (
                                   <div className="absolute inset-0 opacity-35 pointer-events-none z-0">
                                       <img 
                                           src={note.images[0]} 
@@ -4446,7 +4476,7 @@ const createNoteAtCenter = (variant: 'compact') => {
                                   </div>
                               )}
                               <div className="relative z-10 pointer-events-none flex flex-col h-full">
-                                  {!isCompact && <div className={`${isCompact ? 'text-2xl mb-1' : 'text-3xl mb-2'} drop-shadow-sm`}>{note.emoji}</div>}
+                                  <div className="text-3xl mb-2 drop-shadow-sm">{note.emoji}</div>
                                   <div 
                                     className={`text-gray-800 leading-none flex-1 overflow-hidden break-words whitespace-pre-wrap ${clampClass} ${note.isBold ? 'font-bold' : 'font-medium'}`} 
                                   >
@@ -4476,46 +4506,6 @@ const createNoteAtCenter = (variant: 'compact') => {
                                           );
                                       })() : <span className="text-gray-400 italic font-normal text-base">Empty...</span>}
                                   </div>
-                                  {isCompact && (
-                                    <div className="mt-auto flex items-center justify-end">
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                e.preventDefault(); // 阻止默认行为和进一步冒泡
-                                                // Upgrade compact note to standard note
-                                                const upgradedNote: Note = {
-                                                    ...note,
-                                                    variant: 'standard' as const,
-                                                    // Keep existing coords if available
-                                                    coords: note.coords || { lat: 0, lng: 0 }
-                                                };
-                                                onUpdateNote(upgradedNote);
-                                                
-                                                // 退出框选模式和frame创建模式
-                                                setIsBoxSelecting(false);
-                                                setIsDrawingFrame(false);
-                                                setBoxSelectStart(null);
-                                                setBoxSelectEnd(null);
-                                                setDrawingFrameStart(null);
-                                                setDrawingFrameEnd(null);
-                                                
-                                                // 如果正在编辑这个note，更新editingNote并保持编辑模式打开
-                                                if (editingNote && editingNote.id === note.id) {
-                                                    setEditingNote(upgradedNote);
-                                                } else {
-                                                    // 如果没有在编辑，打开编辑模式并设置editingNote
-                                                    setEditingNote(upgradedNote);
-                                                    onToggleEditor(true);
-                                                }
-                                            }}
-                                            className="p-1.5 rounded-full bg-white/80 hover:bg-white shadow-sm transition-colors opacity-0 group-hover:opacity-100 pointer-events-auto"
-                                            title="升级为标准便签"
-                                        >
-                                            <ArrowUp size={14} className="text-gray-700" />
-                                        </button>
-                                    </div>
-                                  )}
-                                  {!isCompact && (
                                     <div className="mt-auto flex flex-wrap gap-1 items-center justify-between">
                                         <div className="flex flex-wrap gap-1" style={{ position: 'relative', zIndex: 70 }}>
                                         {note.tags.map(t => (
@@ -4535,25 +4525,22 @@ const createNoteAtCenter = (variant: 'compact') => {
                                             </button>
                                         )}
                                     </div>
-                                  )}
                               </div>
                           </div>
                       </div>
-                  )}
                 </motion.div>
               );
           })}
 
-          {/* Multi-select bounding box */}
-          {isEditMode && selectedNoteIds.size > 1 && (() => {
+          {/* Multi-select bounding box（编辑 / 非编辑 + Shift 多选共用） */}
+          {selectedNoteIds.size > 1 && (() => {
             const selectedNotes = notes.filter(n => selectedNoteIds.has(n.id));
             if (selectedNotes.length === 0) return null;
             
             // Calculate bounding box
             let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
             selectedNotes.forEach(note => {
-              const noteWidth = (note.variant === 'compact') ? 180 : 256;
-              const noteHeight = (note.variant === 'compact') ? 180 : 256;
+              const { width: noteWidth, height: noteHeight } = boardNoteDimensions(note);
               const noteX = note.boardX + (isMultiSelectDragging ? multiSelectDragOffset.x : 0);
               const noteY = note.boardY + (isMultiSelectDragging ? multiSelectDragOffset.y : 0);
               
@@ -4564,6 +4551,149 @@ const createNoteAtCenter = (variant: 'compact') => {
             });
             
             const padding = 10;
+
+            const parseBatchTimeRange = (): { startYear?: number; endYear?: number } => {
+              const startStr = batchTimeStartStr.trim();
+              const endStr = batchTimeEndStr.trim();
+              const parsedStart = startStr ? parseInt(startStr, 10) : undefined;
+              const parsedEnd = endStr ? parseInt(endStr, 10) : undefined;
+              const nextStartYear =
+                parsedStart != null && !Number.isNaN(parsedStart) ? parsedStart : undefined;
+              const nextEndYear =
+                nextStartYear != null &&
+                parsedEnd != null &&
+                !Number.isNaN(parsedEnd) &&
+                parsedEnd !== nextStartYear
+                  ? parsedEnd
+                  : undefined;
+              return { startYear: nextStartYear, endYear: nextEndYear };
+            };
+
+            const applyBatchTags = () => {
+              const label = batchTagLabel.trim();
+              if (!label) return;
+              const color = TAG_COLORS[batchTagColorIndex % TAG_COLORS.length];
+              const ids = new Set(selectedNoteIds);
+              if (onUpdateProject && project) {
+                const nextNotes = project.notes.map(n => {
+                  if (!ids.has(n.id)) return n;
+                  return {
+                    ...n,
+                    tags: [...(n.tags || []), { id: generateId(), label, color }],
+                  };
+                });
+                onUpdateProject({ ...project, notes: nextNotes });
+              } else {
+                ids.forEach(id => {
+                  const n = notes.find(x => x.id === id);
+                  if (!n) return;
+                  onUpdateNote({
+                    ...n,
+                    tags: [...(n.tags || []), { id: generateId(), label, color }],
+                  });
+                });
+              }
+              setBatchTagLabel('');
+              setMultiBatchPanel('none');
+            };
+
+            const dismissBatchTagPanel = () => {
+              if (batchTagLabel.trim()) {
+                applyBatchTags();
+              } else {
+                setMultiBatchPanel('none');
+                setBatchTagLabel('');
+              }
+            };
+
+            const applyBatchTime = () => {
+              const { startYear, endYear } = parseBatchTimeRange();
+              const ids = new Set(selectedNoteIds);
+              if (onUpdateProject && project) {
+                const nextNotes = project.notes.map(n => {
+                  if (!ids.has(n.id)) return n;
+                  return { ...n, startYear, endYear };
+                });
+                onUpdateProject({ ...project, notes: nextNotes });
+              } else {
+                ids.forEach(id => {
+                  const n = notes.find(x => x.id === id);
+                  if (!n) return;
+                  onUpdateNote({ ...n, startYear, endYear });
+                });
+              }
+              setMultiBatchPanel('none');
+            };
+
+            const runBatchDelete = () => {
+              const idsToDelete = Array.from(selectedNoteIds);
+              if (idsToDelete.length === 0) return;
+              if (
+                !confirm(
+                  `确定删除已选中的 ${idsToDelete.length} 个便签吗？\n此操作无法撤回。`
+                )
+              ) {
+                return;
+              }
+              if (idsToDelete.length > 1 && onDeleteNotesBatch) {
+                onDeleteNotesBatch(idsToDelete);
+              } else {
+                idsToDelete.forEach(id => {
+                  if (onDeleteNote) onDeleteNote(id);
+                });
+              }
+              setSelectedNoteIds(new Set());
+              setSelectedNoteId(null);
+              resetBlankClickCount();
+              setMultiBatchPanel('none');
+            };
+
+            const canGroup = isEditMode && selectedNoteIds.size >= 2;
+            const canUngroup = isEditMode && notes.some(n => selectedNoteIds.has(n.id) && n.noteGroupId);
+
+            const runGroupSelected = () => {
+              if (!canGroup || !project) return;
+              const newGroupId = generateId();
+              const updatedNotes = notes.map(n =>
+                selectedNoteIds.has(n.id) ? { ...n, noteGroupId: newGroupId } : n
+              );
+              onUpdateProject?.({ ...project, notes: updatedNotes });
+            };
+
+            const runUngroupSelected = () => {
+              if (!project) return;
+              const groupIdsInSelection = new Set(
+                notes
+                  .filter(n => selectedNoteIds.has(n.id) && n.noteGroupId)
+                  .map(n => n.noteGroupId!)
+              );
+              if (groupIdsInSelection.size === 0) return;
+              const updatedNotes = notes.map(n =>
+                n.noteGroupId && groupIdsInSelection.has(n.noteGroupId)
+                  ? { ...n, noteGroupId: undefined }
+                  : n
+              );
+              onUpdateProject?.({ ...project, notes: updatedNotes });
+              setSelectedNoteIds(new Set());
+            };
+
+            const exitMultiSelectToolbar = () => {
+              setSelectedNoteIds(new Set());
+              setSelectedNoteId(null);
+              setMultiBatchPanel('none');
+              setBatchTagLabel('');
+              setBatchTimeStartStr('');
+              setBatchTimeEndStr('');
+              setBrowseTagFilterPanelOpen(false);
+              setBrowseTimeFilterPanelOpen(false);
+              resetBlankClickCount();
+            };
+
+            const stopToolbarEvent = (e: React.SyntheticEvent) => {
+              e.stopPropagation();
+              e.preventDefault();
+            };
+
             return (
               <div
                 className="absolute z-[2100]"
@@ -4577,728 +4707,285 @@ const createNoteAtCenter = (variant: 'compact') => {
                   pointerEvents: 'none',
                 }}
               >
-                {/* Delete button at top-right */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    // Get current selected IDs before clearing state
-                    const idsToDelete = Array.from(selectedNoteIds);
-                    console.log('Multi-select delete clicked, selectedNoteIds:', idsToDelete);
-                    
-                    if (idsToDelete.length === 0) {
-                      console.warn('No notes to delete');
-                      return;
-                    }
-                    
-                    // Use batch delete for better performance when deleting multiple notes
-                    if (idsToDelete.length > 1 && onDeleteNotesBatch) {
-                      // Use optimized batch delete
-                      onDeleteNotesBatch(idsToDelete);
-                    } else {
-                      // Fallback to individual deletes for single notes or when batch delete not available
-                    idsToDelete.forEach(id => {
-                      console.log('Deleting note:', id);
-                      if (onDeleteNote) {
-                        onDeleteNote(id);
-                      }
-                    });
-                    }
-                    
-                    // Clear selection after deletion
-                    setSelectedNoteIds(new Set());
-                    setSelectedNoteId(null);
+                <BoardMultiSelectToolbar
+                  themeColor={themeColor}
+                  panelChromeStyle={panelChromeStyle}
+                  inverseCanvasScale={1 / transform.scale}
+                  isEditMode={isEditMode}
+                  multiBatchPanel={multiBatchPanel}
+                  onExitMultiSelectToolbar={exitMultiSelectToolbar}
+                  onToggleBatchTagPanel={() =>
+                    setMultiBatchPanel((p) => (p === 'tag' ? 'none' : 'tag'))
+                  }
+                  onToggleBatchTimePanel={() =>
+                    setMultiBatchPanel((p) => (p === 'time' ? 'none' : 'time'))
+                  }
+                  onRunBatchDelete={runBatchDelete}
+                  canGroup={canGroup}
+                  canUngroup={canUngroup}
+                  onRunGroup={runGroupSelected}
+                  onRunUngroup={runUngroupSelected}
+                  browseTagFilterPanelOpen={browseTagFilterPanelOpen}
+                  browseTimeFilterPanelOpen={browseTimeFilterPanelOpen}
+                  boardBrowseTagFilterButtonRef={boardBrowseTagFilterButtonRef}
+                  boardBrowseTimeFilterButtonRef={boardBrowseTimeFilterButtonRef}
+                  onEnterEditModeFromBrowse={() => {
+                    setBrowseTagFilterPanelOpen(false);
+                    setBrowseTimeFilterPanelOpen(false);
+                    setIsEditMode(true);
                     resetBlankClickCount();
                   }}
-                  onPointerDown={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    // Mark that we're interacting with the delete button
-                    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                  onOpenBrowseTagFilterPanel={() => {
+                    setBrowseTagFilterPanelOpen((open) => {
+                      if (open) return false;
+                      setBrowseTimeFilterPanelOpen(false);
+                      setBrowseTagFilterPendingDefault(true);
+                      setBrowseTagFilterPendingLabels(new Set());
+                      setBrowseTagFilterPendingUntagged(false);
+                      return true;
+                    });
                   }}
-                  onPointerUp={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+                  onOpenBrowseTimeFilterPanel={() => {
+                    setBrowseTagFilterPanelOpen(false);
+                    setBrowseTimeFilterPanelOpen((open) => {
+                      if (open) return false;
+                      const sel = computeTimeRangeFromSelection(selectedNoteIds, notes);
+                      const globalSpan = computeTimeRangeFromAllNotes(notes);
+                      const fallback = { min: 1900, max: 2100 };
+                      if (sel) {
+                        let lo = sel.min;
+                        let hi = sel.max;
+                        if (lo === hi) {
+                          lo -= 1;
+                          hi += 1;
+                        }
+                        setBrowseTimeFilterSliderMinBound(lo);
+                        setBrowseTimeFilterSliderMaxBound(hi);
+                        setBrowseTimeFilterPendingMin(sel.min);
+                        setBrowseTimeFilterPendingMax(sel.max);
+                      } else {
+                        const g = globalSpan ?? fallback;
+                        const pad = 2;
+                        const lo = g.min - pad;
+                        const hi = g.max + pad;
+                        setBrowseTimeFilterSliderMinBound(lo);
+                        setBrowseTimeFilterSliderMaxBound(hi);
+                        setBrowseTimeFilterPendingMin(lo);
+                        setBrowseTimeFilterPendingMax(hi);
+                      }
+                      return true;
+                    });
                   }}
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                  }}
-                  onMouseUp={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                  }}
-                  className="absolute -top-3 -right-3 z-[2101] bg-red-500 text-white rounded-full p-2 shadow-lg hover:scale-110 transition-transform cursor-pointer"
-                  style={{ 
-                    transform: `scale(${1 / transform.scale})`,
-                    pointerEvents: 'auto',
-                  }}
-                  title="Delete selected notes"
-                >
-                  <X size={16} />
-                </button>
+                  onStopToolbarEvent={stopToolbarEvent}
+                  editPanelNode={
+                    <>
+                      {isEditMode && multiBatchPanel === 'tag' && (
+                        <TagAddPanel
+                          themeColor={themeColor}
+                          panelChromeStyle={panelChromeStyle}
+                          title={`为 ${selectedNoteIds.size} 个便签添加标签`}
+                          label={batchTagLabel}
+                          onLabelChange={setBatchTagLabel}
+                          selectedColor={TAG_COLORS[batchTagColorIndex % TAG_COLORS.length]}
+                          onColorChange={(c) => {
+                            const i = TAG_COLORS.indexOf(c);
+                            if (i >= 0) setBatchTagColorIndex(i);
+                          }}
+                          onApply={applyBatchTags}
+                          onDismissOutside={dismissBatchTagPanel}
+                          dismissIgnoreClosestSelector="[data-board-batch-toolbar-root]"
+                        />
+                      )}
+
+                      {isEditMode && multiBatchPanel === 'time' && (
+                        <BoardBatchTimePanel
+                          themeColor={themeColor}
+                          panelChromeStyle={panelChromeStyle}
+                          selectedCount={selectedNoteIds.size}
+                          batchTimeStartStr={batchTimeStartStr}
+                          onBatchTimeStartStrChange={setBatchTimeStartStr}
+                          batchTimeEndStr={batchTimeEndStr}
+                          onBatchTimeEndStrChange={setBatchTimeEndStr}
+                          onApply={applyBatchTime}
+                        />
+                      )}
+                    </>
+                  }
+                />
               </div>
             );
           })()}
         </div>
 
-        {/* 图层按钮：非编辑模式右侧单独容器 */}
-        {!isEditMode && (
-            <div 
-                className="fixed top-2 sm:top-4 right-2 sm:right-4 z-[500] pointer-events-auto flex items-center"
-                style={{ height: '40px' }}
+        {/* 设置 + 图层：左上角（与 Mapping 一致） */}
+        {isUIVisible && (
+            <div
+                data-allow-context-menu
+                className="fixed top-2 sm:top-4 left-2 sm:left-4 z-[500] pointer-events-auto flex h-10 sm:h-12 items-center gap-1.5 sm:gap-2"
                 onPointerDown={(e) => e.stopPropagation()}
             >
+                <ChromeIconButton
+                  chromeSurfaceStyle={ch}
+                  chromeHoverBackground={chHover}
+                  nonChromeIdleHover="imperative-gray100"
+                  onClick={() => {
+                    setShowSettingsPanel(true);
+                    setShowLayerPanel(false);
+                  }}
+                  title="设置"
+                >
+                  <Settings size={18} className="sm:w-5 sm:h-5" />
+                </ChromeIconButton>
+                {!isEditMode && (
                 <div className="relative">
-                    <button 
-                        onClick={(e) => { 
-                            e.stopPropagation(); 
+                    <ChromeIconButton
+                        themeColor={themeColor}
+                        chromeSurfaceStyle={ch}
+                        chromeHoverBackground={chHover}
+                        active={showLayerPanel}
+                        pressThemeFlash
+                        nonChromeIdleHover="imperative-gray100"
+                        onClick={() => {
                             setShowLayerPanel(!showLayerPanel);
+                            setShowSettingsPanel(false);
                         }}
-                        onPointerDown={(e) => {
-                            e.stopPropagation();
-                            e.currentTarget.style.backgroundColor = themeColor;
-                        }}
-                        onPointerUp={(e) => {
-                            e.stopPropagation();
-                            if (!showLayerPanel) {
-                                e.currentTarget.style.backgroundColor = '';
-                            }
-                        }}
-                        onMouseEnter={(e) => {
-                            if (!showLayerPanel) {
-                                e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
-                            }
-                        }}
-                        onMouseLeave={(e) => {
-                            if (!showLayerPanel) {
-                                e.currentTarget.style.backgroundColor = '';
-                            }
-                        }}
-                        className={`bg-white p-2 sm:p-3 rounded-xl shadow-lg transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${
-                            showLayerPanel ? 'text-white' : 'text-gray-700'
-                        }`}
-                        style={{ backgroundColor: showLayerPanel ? themeColor : undefined }}
                         title="图层"
                     >
                         <Layers size={18} className="sm:w-5 sm:h-5" />
-                    </button>
+                    </ChromeIconButton>
                     {showLayerPanel && (
-                        <div 
-                            className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-[2000]"
-                            onPointerDown={(e) => e.stopPropagation()}
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            <div className="px-3 py-2 text-xs font-bold text-gray-500 uppercase tracking-wide">Layer</div>
-                            <div className="h-px bg-gray-100 mb-1" />
-                            {/* Connects (连线) - Top */}
-                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
-                                <div className="flex items-center gap-2">
-                                    <GitBranch size={16} className="text-gray-600" strokeWidth={2} />
-                                    <span className="text-sm text-gray-700">Connects</span>
-                                </div>
-                                <input
-                                    type="checkbox"
-                                    checked={layerVisibility.connects}
-                                    onChange={(e) => {
-                                        e.stopPropagation();
-                                        setLayerVisibility(prev => ({ ...prev, connects: !prev.connects }));
-                                    }}
-                                    onPointerDown={(e) => e.stopPropagation()}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
-                                        layerVisibility.connects 
-                                            ? '' 
-                                            : 'bg-transparent'
-                                    }`}
-                                    style={{ 
-                                        backgroundColor: layerVisibility.connects ? themeColor : 'transparent',
-                                        borderColor: themeColor
-                                    }}
-                                />
-                            </div>
-                            {/* Secondary (小便签) */}
-                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
-                                <div className="flex items-center gap-2">
-                                    <StickyNote size={16} className="text-gray-600" strokeWidth={2} />
-                                    <span className="text-sm text-gray-700">Sticky Notes</span>
-                                </div>
-                                <input
-                                    type="checkbox"
-                                    checked={layerVisibility.secondary}
-                                    onChange={(e) => {
-                                        e.stopPropagation();
-                                        setLayerVisibility(prev => ({ ...prev, secondary: !prev.secondary }));
-                                    }}
-                                    onPointerDown={(e) => e.stopPropagation()}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
-                                        layerVisibility.secondary 
-                                            ? '' 
-                                            : 'bg-transparent'
-                                    }`}
-                                    style={{ 
-                                        backgroundColor: layerVisibility.secondary ? themeColor : 'transparent',
-                                        borderColor: themeColor
-                                    }}
-                                />
-                            </div>
-                            {/* Primary Notes */}
-                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
-                                <div className="flex items-center gap-2">
-                                    <Square size={16} className="text-gray-600" strokeWidth={2} />
-                                    <span className="text-sm text-gray-700">Primary Notes</span>
-                                </div>
-                                <input
-                                    type="checkbox"
-                                    checked={layerVisibility.primary}
-                                    onChange={(e) => {
-                                        e.stopPropagation();
-                                        setLayerVisibility(prev => ({ ...prev, primary: !prev.primary }));
-                                    }}
-                                    onPointerDown={(e) => e.stopPropagation()}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
-                                        layerVisibility.primary 
-                                            ? '' 
-                                            : 'bg-transparent'
-                                    }`}
-                                    style={{ 
-                                        backgroundColor: layerVisibility.primary ? themeColor : 'transparent',
-                                        borderColor: themeColor
-                                    }}
-                                />
-                            </div>
-                            {/* Images */}
-                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
-                                <div className="flex items-center gap-2">
-                                    <ImageIcon size={16} className="text-gray-600" strokeWidth={2} />
-                                    <span className="text-sm text-gray-700">Images</span>
-                                </div>
-                                <input
-                                    type="checkbox"
-                                    checked={layerVisibility.image}
-                                    onChange={(e) => {
-                                        e.stopPropagation();
-                                        setLayerVisibility(prev => ({ ...prev, image: !prev.image }));
-                                    }}
-                                    onPointerDown={(e) => e.stopPropagation()}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
-                                        layerVisibility.image 
-                                            ? '' 
-                                            : 'bg-transparent'
-                                    }`}
-                                    style={{ 
-                                        backgroundColor: layerVisibility.image ? themeColor : 'transparent',
-                                        borderColor: themeColor
-                                    }}
-                                />
-                            </div>
-                            {/* Frames */}
-                            <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
-                                <div className="flex items-center gap-2">
-                                    <Square size={16} className="text-gray-600" strokeWidth={2} />
-                                    <span className="text-sm text-gray-700">Frames</span>
-                                </div>
-                                <input
-                                    type="checkbox"
-                                    checked={layerVisibility.frame}
-                                    onChange={(e) => {
-                                        e.stopPropagation();
-                                        setLayerVisibility(prev => ({ ...prev, frame: !prev.frame }));
-                                    }}
-                                    onPointerDown={(e) => e.stopPropagation()}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${
-                                        layerVisibility.frame 
-                                            ? '' 
-                                            : 'bg-transparent'
-                                    }`}
-                                    style={{ 
-                                        backgroundColor: layerVisibility.frame ? themeColor : 'transparent',
-                                        borderColor: themeColor
-                                    }}
-                                />
-                            </div>
-                        </div>
+                        <BoardLayerPanel
+                            themeColor={themeColor}
+                            layerVisibility={layerVisibility}
+                            onLayerVisibilityChange={setLayerVisibility}
+                        />
                     )}
                 </div>
+                )}
+                {isEditMode && (
+                  <div
+                    className="flex flex-wrap gap-1.5 sm:gap-2 pointer-events-auto"
+                    onPointerDown={(e) => {
+                      const target = e.target as Element;
+                      if (target.closest('.custom-horizontal-slider')) return;
+                      e.stopPropagation();
+                    }}
+                    onPointerMove={(e) => {
+                      const target = e.target as Element;
+                      if (target.closest('.custom-horizontal-slider')) return;
+                      e.stopPropagation();
+                    }}
+                    onPointerUp={(e) => {
+                      const target = e.target as Element;
+                      if (target.closest('.custom-horizontal-slider')) return;
+                      e.stopPropagation();
+                    }}
+                  >
+                    <ChromeLabeledSlider label="便签尺寸" chromeSurfaceStyle={ch}>
+                      <CustomHorizontalSlider
+                        value={project?.standardSizeScale || 1}
+                        min={0.5}
+                        max={1}
+                        step={0.1}
+                        onChange={(targetScale) => {
+                          if (!onUpdateProject || !project) return;
+                          const clamped = Math.max(0.5, Math.min(1, targetScale));
+                          const rounded = Math.round(clamped * 10) / 10;
+                          const currentScale = project?.standardSizeScale || 1;
+                          if (Math.abs(rounded - currentScale) < 0.0001) return;
+                          onUpdateProject({ ...project, standardSizeScale: rounded });
+                        }}
+                        themeColor={themeColor}
+                        width={90}
+                        formatValue={(v) => `${Math.round(v * 100)}%`}
+                        mapInstance={null}
+                      />
+                    </ChromeLabeledSlider>
+                  </div>
+                )}
             </div>
         )}
-
-        {/* Shift button for multi-select (编辑模式) and multi-frame filter (非编辑模式) - above ZoomSlider */}
-        {(
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed bottom-[240px] left-4 z-[500] pointer-events-auto"
-          >
-            <button
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                setIsShiftPressed(true);
-              }}
-              onPointerUp={(e) => {
-                e.stopPropagation();
-                setIsShiftPressed(false);
-              }}
-              onPointerLeave={(e) => {
-                e.stopPropagation();
-                setIsShiftPressed(false);
-              }}
-              className={`w-8 h-12 rounded-full shadow-lg flex items-center justify-center transition-all ${
-                isShiftPressed 
-                  ? 'text-white' 
-                  : 'bg-white text-gray-700 hover:bg-gray-50'
-              }`}
-                style={isShiftPressed ? { backgroundColor: themeColor } : undefined}
-              title={isEditMode ? "Hold for multi-select" : "Hold for multi-frame filter"}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 4 L4 12 L9 12 L9 19 L16 19 L16 12 L21 12 Z" />
-              </svg>
-            </button>
-          </motion.div>
-        )}
-
-        {/* ZoomSlider - Always Visible */}
-        <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed bottom-24 left-4 z-[500] pointer-events-auto"
-          >
-            <ZoomSlider value={transform.scale} min={0.2} max={3.0} onChange={(val) => zoomAtViewCenter(val)} themeColor={themeColor} />
-        </motion.div>
 
         {isUIVisible && (
-          <div className="fixed top-4 right-4 z-[500] flex gap-3 pointer-events-auto items-center" style={{ height: '40px' }} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
-            {isEditMode && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    setIsEditMode(false);
-                  }}
-                  onPointerDown={(e) => {
-                    e.stopPropagation();
-                  }}
-                  className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 text-white rounded-xl shadow-lg font-bold h-full"
-                  style={{ backgroundColor: themeColor, paddingTop: '6px', paddingBottom: '6px' }}
-                  onMouseEnter={(e) => {
-                    const darkR = Math.max(0, Math.floor(parseInt(themeColor.slice(1, 3), 16) * 0.9));
-                    const darkG = Math.max(0, Math.floor(parseInt(themeColor.slice(3, 5), 16) * 0.9));
-                    const darkB = Math.max(0, Math.floor(parseInt(themeColor.slice(5, 7), 16) * 0.9));
-                    const darkHex = '#' + [darkR, darkG, darkB].map(x => {
-                      const hex = x.toString(16);
-                      return hex.length === 1 ? '0' + hex : hex;
-                    }).join('').toUpperCase();
-                    e.currentTarget.style.backgroundColor = darkHex;
-                  }}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
-                >
-                    <Check size={18} className="sm:w-5 sm:h-5" />
-                    <span className="hidden sm:inline">Done</span>
-                </button>
-            )}
-          </div>
+          <BoardTopRightEditToggle
+            isUIVisible={isUIVisible}
+            isEditMode={isEditMode}
+            themeColor={themeColor}
+            chromeSurfaceStyle={panelChromeStyle}
+            chromeHoverBackground={chHover}
+            onEnterEditMode={() => {
+              if (isSelectingNotePosition) setIsSelectingNotePosition(false);
+              setIsEditMode(true);
+            }}
+            onExitEditMode={() => {
+              if (isSelectingNotePosition) setIsSelectingNotePosition(false);
+              setIsEditMode(false);
+              setIsBoxSelecting(false);
+              setBoxSelectStart(null);
+              setBoxSelectEnd(null);
+              setIsDrawingFrame(false);
+              setDrawingFrameStart(null);
+              setDrawingFrameEnd(null);
+              setSelectedFrameId(null);
+              setFrameResizeState(null);
+              setCurrentFrameNameInput('');
+              setEditingFrameNameId(null);
+            }}
+          />
         )}
 
-        {/* Edit Toolbar: Unified White Buttons at Top Left */}
-            <div 
-                className={`fixed top-2 sm:top-4 z-[500] pointer-events-auto animate-in fade-in flex items-center gap-1.5 sm:gap-2 ${
-                    isEditMode ? 'left-1/2 -translate-x-1/2' : 'left-2 sm:left-4 slide-in-from-left-4'
-                }`}
-                style={{ height: '40px', alignItems: 'center' }}
-                onPointerDown={(e) => {
-                    e.stopPropagation();
-                    // 退出位置选择模式
-                    if (isSelectingNotePosition) {
-                        setIsSelectingNotePosition(false);
-                    }
-                }}
-                onClick={(e) => {
-                    e.stopPropagation();
-                    // 退出位置选择模式
-                    if (isSelectingNotePosition) {
-                        setIsSelectingNotePosition(false);
-                    }
-                }}
-            >
-                {/* Layout Buttons: L+ and L- */}
+        {/* Edit Toolbar: 编辑模式下居中（L+ / L- / 工具） */}
         {isEditMode && (
-            <div 
-                        className="bg-white rounded-xl border border-gray-100 flex gap-1.5 sm:gap-2 items-center p-0.5 sm:p-1" 
-                        style={{ height: '40px' }}
-                onPointerDown={(e) => e.stopPropagation()} 
-                        onClick={(e) => e.stopPropagation()}
-            >
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            if (!onUpdateProject || !project) return;
-                            
-                            // Get current global standard size scale, default to 1
-                            const currentScale = project?.standardSizeScale || 1;
-                            const newScale = currentScale * 2;
-                            
-                            // Update all notes to use new standard size scale
-                            notes.forEach(note => {
-                                // Calculate note dimensions (original, unscaled standard sizes)
-                                const noteWidth = note.variant === 'compact' ? 180 : 256;
-                                const noteHeight = note.variant === 'compact' ? 180 : 256;
-                                
-                                // Calculate current center position (using current scale)
-                                const currentCenterX = (note.boardX || 0) + (noteWidth * currentScale) / 2;
-                                const currentCenterY = (note.boardY || 0) + (noteHeight * currentScale) / 2;
-                                
-                                // Calculate new boardX/boardY to keep the center fixed (using new scale)
-                                const newBoardX = currentCenterX - (noteWidth * newScale) / 2;
-                                const newBoardY = currentCenterY - (noteHeight * newScale) / 2;
-                                
-                                // Update note position
-                                const updatedNote: Note = {
-                                    ...note,
-                                    boardX: newBoardX,
-                                    boardY: newBoardY
-                                };
-                                
-                                onUpdateNote(updatedNote);
-                            });
-                            
-                            // Update project with new standard size scale
-                            onUpdateProject({
-                                ...project,
-                                standardSizeScale: newScale
-                            });
-                        }}
-                        className="p-2 sm:p-3 text-gray-700 flex items-center justify-center transition-colors active:scale-95"
-                        style={{
-                          backgroundColor: 'transparent',
-                          '--hover-color': themeColor
-                        } as React.CSSProperties}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor = `${themeColor}1A`;
-                          e.currentTarget.style.color = themeColor;
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.backgroundColor = 'transparent';
-                          e.currentTarget.style.color = 'rgb(55, 65, 81)'; // text-gray-700
-                        }}
-                        title="放大布局"
-                    >
-                        <span className="text-base sm:text-lg">L+</span>
-                    </button>
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            if (!onUpdateProject || !project) return;
-                            
-                            // Get current global standard size scale, default to 1
-                            const currentScale = project?.standardSizeScale || 1;
-                            const newScale = currentScale * 0.5;
-                            
-                            // Update all notes to use new standard size scale
-                            notes.forEach(note => {
-                                // Calculate note dimensions (original, unscaled standard sizes)
-                                const noteWidth = note.variant === 'compact' ? 180 : 256;
-                                const noteHeight = note.variant === 'compact' ? 180 : 256;
-                                
-                                // Calculate current center position (using current scale)
-                                const currentCenterX = (note.boardX || 0) + (noteWidth * currentScale) / 2;
-                                const currentCenterY = (note.boardY || 0) + (noteHeight * currentScale) / 2;
-                                
-                                // Calculate new boardX/boardY to keep the center fixed (using new scale)
-                                const newBoardX = currentCenterX - (noteWidth * newScale) / 2;
-                                const newBoardY = currentCenterY - (noteHeight * newScale) / 2;
-                                
-                                // Update note position
-                                const updatedNote: Note = {
-                                    ...note,
-                                    boardX: newBoardX,
-                                    boardY: newBoardY
-                                };
-                                
-                                onUpdateNote(updatedNote);
-                            });
-                            
-                            // Update project with new standard size scale
-                            onUpdateProject({
-                                ...project,
-                                standardSizeScale: newScale
-                            });
-                        }}
-                        className="p-2 sm:p-3 text-gray-700 flex items-center justify-center transition-colors active:scale-95"
-                        style={{
-                          backgroundColor: 'transparent',
-                          '--hover-color': themeColor
-                        } as React.CSSProperties}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor = `${themeColor}1A`;
-                          e.currentTarget.style.color = themeColor;
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.backgroundColor = 'transparent';
-                          e.currentTarget.style.color = 'rgb(55, 65, 81)'; // text-gray-700
-                        }}
-                        onPointerDown={(e) => e.stopPropagation()}
-                        title="缩小布局"
-                    >
-                        <span className="text-base sm:text-lg">L-</span>
-                    </button>
-                </div>
-                )}
-                <div 
-                    className={`flex gap-1.5 sm:gap-2 items-center ${
-                        isEditMode ? 'p-0.5 sm:p-1' : ''
-                    }`} 
-                    style={{ height: '40px' }}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={(e) => e.stopPropagation()}
-                >
-                    {!isEditMode ? (
-                        // 非编辑模式：进入编辑 + 导入按钮并排
-                        <>
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    setIsEditMode(true);
-                                }}
-                                onPointerDown={(e) => {
-                                    e.stopPropagation();
-                                    e.currentTarget.style.backgroundColor = themeColor;
-                                }}
-                                onPointerUp={(e) => {
-                                    e.stopPropagation();
-                                    e.currentTarget.style.backgroundColor = '';
-                                }}
-                                onMouseEnter={(e) => {
-                                    e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
-                                }}
-                                onMouseLeave={(e) => {
-                                    e.currentTarget.style.backgroundColor = '';
-                                }}
-                                className="bg-white p-2 sm:p-3 rounded-xl shadow-lg text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
-                                title="进入编辑模式"
-                            >
-                                <Pencil size={18} className="sm:w-5 sm:h-5" />
-                            </button>
-                            <div className="relative" ref={menuRef}>
-                                <button 
-                                    onClick={(e) => { 
-                                        e.stopPropagation(); 
-                                        setShowImportMenu(!showImportMenu);
-                                    }}
-                                    className="bg-white p-2 sm:p-3 rounded-xl shadow-lg hover:bg-yellow-50 text-gray-700 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
-                                    title="Import"
-                                >
-                                    <svg width="18" height="18" className="sm:w-5 sm:h-5" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                        <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" fill="none"/>
-                                        <path d="M8 11V5M5 8l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                                    </svg>
-                                </button>
-                                {showImportMenu && (
-                                    <div className="absolute left-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-[2000]">
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                fileInputRef.current?.click();
-                                                setShowImportMenu(false);
-                                            }}
-                                            className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
-                                        >
-                                            <ImageIcon size={16} /> Import from Photos
-                                        </button>
-                                        <div className="h-px bg-gray-100 my-1" />
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                dataImportInputRef.current?.click();
-                                                setShowImportMenu(false);
-                                            }}
-                                            className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
-                                        >
-                                            <FileJson size={16} /> Import from Data
-                                        </button>
-            </div>
+          <BoardTopCenterEditToolbar
+            isEditMode={isEditMode}
+            isSelectingNotePosition={isSelectingNotePosition}
+            isDrawingFrame={isDrawingFrame}
+            isBoxSelecting={isBoxSelecting}
+            themeColor={themeColor}
+            chromeSurfaceStyle={panelChromeStyle}
+            chromeHoverBackground={chHover}
+            onClearSelectingNotePosition={() => setIsSelectingNotePosition(false)}
+            onToggleSelectNotePosition={() => {
+              if (isSelectingNotePosition) {
+                setIsSelectingNotePosition(false);
+              } else {
+                setIsBoxSelecting(false);
+                setBoxSelectStart(null);
+                setBoxSelectEnd(null);
+                setIsDrawingFrame(false);
+                setDrawingFrameStart(null);
+                setDrawingFrameEnd(null);
+                setIsSelectingNotePosition(true);
+              }
+            }}
+            onAddImage={() => {
+              if (isSelectingNotePosition) setIsSelectingNotePosition(false);
+              handleAddImageClick();
+            }}
+            onEnableDrawFrame={() => {
+              if (isSelectingNotePosition) setIsSelectingNotePosition(false);
+              setIsDrawingFrame(true);
+              setIsBoxSelecting(false);
+              setBoxSelectStart(null);
+              setBoxSelectEnd(null);
+              setSelectedFrameId(null);
+            }}
+            onToggleBoxSelect={() => {
+              setIsBoxSelecting(!isBoxSelecting);
+              if (!isBoxSelecting) {
+                setSelectedNoteIds(new Set());
+                setSelectedNoteId(null);
+                setIsDrawingFrame(false);
+                setDrawingFrameStart(null);
+                setDrawingFrameEnd(null);
+                setIsSelectingNotePosition(false);
+              } else {
+                setBoxSelectStart(null);
+                setBoxSelectEnd(null);
+              }
+            }}
+          />
         )}
-                            </div>
-                        </>
-                    ) : (
-                        // 编辑模式：显示编辑工具
-                        <>
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            if (isSelectingNotePosition) {
-                                // Cancel position selection mode
-                                setIsSelectingNotePosition(false);
-                            } else {
-                                // Enter position selection mode
-                                // 退出多选模式
-                                setIsBoxSelecting(false);
-                                setBoxSelectStart(null);
-                                setBoxSelectEnd(null);
-                                // 退出 frame 创建模式
-                                setIsDrawingFrame(false);
-                                setDrawingFrameStart(null);
-                                setDrawingFrameEnd(null);
-                                setIsSelectingNotePosition(true);
-                            }
-                        }}
-                        onPointerDown={(e) => {
-                            e.stopPropagation();
-                            e.currentTarget.style.backgroundColor = themeColor;
-                        }}
-                        onPointerUp={(e) => {
-                            e.stopPropagation();
-                            if (!isSelectingNotePosition) {
-                                e.currentTarget.style.backgroundColor = '';
-                            }
-                        }}
-                        className={`w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 flex items-center justify-center transition-colors active:scale-95 ${
-                            isSelectingNotePosition 
-                                ? 'text-white' 
-                                : 'text-gray-700'
-                        }`}
-                        style={{ backgroundColor: isSelectingNotePosition ? themeColor : 'transparent' }}
-                        onMouseEnter={(e) => {
-                            if (!isSelectingNotePosition) {
-                                e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
-                            }
-                        }}
-                        onMouseLeave={(e) => {
-                            if (!isSelectingNotePosition) {
-                                e.currentTarget.style.backgroundColor = 'transparent';
-                            }
-                        }}
-                        title={isSelectingNotePosition ? "Click on board to place note (click again to cancel)" : "Add Sticky Note"}
-                    >
-                            <StickyNote size={18} className="sm:w-5 sm:h-5" />
-                    </button>
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            // 退出位置选择模式
-                            if (isSelectingNotePosition) {
-                                setIsSelectingNotePosition(false);
-                            }
-                            handleAddImageClick();
-                        }}
-                        onPointerDown={(e) => {
-                            e.stopPropagation();
-                            // 退出位置选择模式
-                            if (isSelectingNotePosition) {
-                                setIsSelectingNotePosition(false);
-                            }
-                            e.currentTarget.style.backgroundColor = themeColor;
-                        }}
-                        onPointerUp={(e) => {
-                            e.stopPropagation();
-                            e.currentTarget.style.backgroundColor = '';
-                        }}
-                        className="w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 text-gray-700 flex items-center justify-center transition-colors active:scale-95"
-                        style={{ backgroundColor: 'transparent' }}
-                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#F3F4F6'} // gray-100
-                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                        title="Add Image"
-                    >
-                            <ImageIcon size={18} className="sm:w-5 sm:h-5" />
-                    </button>
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                // 退出位置选择模式
-                                if (isSelectingNotePosition) {
-                                    setIsSelectingNotePosition(false);
-                                }
-                                setIsDrawingFrame(true);
-                                setIsBoxSelecting(false); // 确保框选模式退出
-                                setBoxSelectStart(null);
-                                setBoxSelectEnd(null);
-                                setSelectedFrameId(null);
-                            }}
-                            onPointerDown={(e) => {
-                                e.stopPropagation();
-                                // 退出位置选择模式
-                                if (isSelectingNotePosition) {
-                                    setIsSelectingNotePosition(false);
-                                }
-                                e.currentTarget.style.backgroundColor = themeColor;
-                            }}
-                            onPointerUp={(e) => {
-                                e.stopPropagation();
-                                if (!isDrawingFrame) {
-                                    e.currentTarget.style.backgroundColor = '';
-                                }
-                            }}
-                            className={`w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 flex items-center justify-center transition-colors active:scale-95 ${isDrawingFrame ? 'text-white' : 'text-gray-700'}`}
-                            style={isDrawingFrame ? { backgroundColor: themeColor } : undefined}
-                            onMouseEnter={(e) => !isDrawingFrame && (e.currentTarget.style.backgroundColor = '#F3F4F6')} // gray-100
-                            onMouseLeave={(e) => !isDrawingFrame && (e.currentTarget.style.backgroundColor = '')}
-                            title="Add Frame"
-                        >
-                            <svg width="18" height="18" className="sm:w-5 sm:h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                {/* 左竖线 - 纵向出头更短，中间格子更大 */}
-                                <line x1="5" y1="2" x2="5" y2="22" />
-                                {/* 右竖线 - 纵向出头更短，中间格子更大 */}
-                                <line x1="19" y1="2" x2="19" y2="22" />
-                                {/* 上横线 - 出头更短 */}
-                                <line x1="3" y1="5" x2="21" y2="5" />
-                                {/* 下横线 - 出头更短 */}
-                                <line x1="3" y1="19" x2="21" y2="19" />
-                            </svg>
-                        </button>
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            // Toggle box selection mode
-                            setIsBoxSelecting(!isBoxSelecting);
-                            if (!isBoxSelecting) {
-                                // Clear selection when entering box select mode
-                                setSelectedNoteIds(new Set());
-                                setSelectedNoteId(null);
-                                // 确保frame创建模式退出
-                                setIsDrawingFrame(false);
-                                setDrawingFrameStart(null);
-                                setDrawingFrameEnd(null);
-                                // 退出位置选择模式
-                                setIsSelectingNotePosition(false);
-                            } else {
-                                // 退出框选模式时也清除相关状态
-                                setBoxSelectStart(null);
-                                setBoxSelectEnd(null);
-                            }
-                        }}
-                        onPointerDown={(e) => {
-                            e.stopPropagation();
-                            e.currentTarget.style.backgroundColor = themeColor;
-                        }}
-                        onPointerUp={(e) => {
-                            e.stopPropagation();
-                            if (!isBoxSelecting) {
-                                e.currentTarget.style.backgroundColor = '';
-                            }
-                        }}
-                        className={`w-10 h-10 sm:w-12 sm:h-12 p-2 sm:p-3 flex items-center justify-center transition-colors active:scale-95 ${
-                            isBoxSelecting ? 'text-white' : 'text-gray-700'
-                        }`}
-                        style={{ backgroundColor: isBoxSelecting ? themeColor : 'transparent' }}
-                        onMouseEnter={(e) => !isBoxSelecting && (e.currentTarget.style.backgroundColor = '#F3F4F6')} // gray-100
-                        onMouseLeave={(e) => !isBoxSelecting && (e.currentTarget.style.backgroundColor = 'transparent')}
-                        title="Box Select (Click to toggle, then drag to select)"
-                    >
-                            <svg width="18" height="18" className="sm:w-5 sm:h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="5 5">
-                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                            </svg>
-                    </button>
-                    </>
-                )}
-            </div>
-        </div>
 
         
         {/* Hidden file inputs */}
@@ -5331,6 +5018,7 @@ const createNoteAtCenter = (variant: 'compact') => {
               onSwitchToMapView={onSwitchToMapView}
               onSwitchToBoardView={onSwitchToBoardView}
               themeColor={themeColor}
+              panelChromeStyle={panelChromeStyle}
               onSave={(updated) => {
                   // Text variant removed
                   if (updated.id && notes.some(n => n.id === updated.id)) {
@@ -5352,189 +5040,106 @@ const createNoteAtCenter = (variant: 'compact') => {
                       // This ensures that if the editor is reopened, it will use the updated data
                       setEditingNote(fullNote);
                   } else if (onAddNote && updated.id) {
-                      // 新Note必须指定variant，如果没有则默认为standard
+                      // 新便签：必须先以 editingNote 为底（保留 boardX/boardY/coords 等位置字段），
+                      // 再覆盖编辑器返回的内容字段。
+                      const base = editingNote ?? {};
                       const fullNote: Note = {
+                          ...base,
                           ...updated,
-                          variant: updated.variant || 'standard',
-                          // Ensure images is always an array for new notes
-                          images: updated.images || []
+                          variant: updated.variant || (base as Note).variant || 'standard',
+                          images: updated.images !== undefined ? updated.images : ((base as Note).images || []),
+                          sketch: 'sketch' in updated ? updated.sketch : (base as Note).sketch
                       } as Note;
                       onAddNote(fullNote);
-                      // For new notes, close editor since the note is now saved
                       setEditingNote(null);
                   }
               }}
           />
         )}
 
-        {/* Import preview dialog */}
-        {showImportDialog && (
-          <div 
-            className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/50 backdrop-blur-sm"
-            onClick={(e) => {
-              // Close dialog when clicking on the backdrop
-              e.preventDefault();
-              e.stopPropagation();
-              handleCancelImport(e);
-            }}
-            onPointerDown={(e) => {
-              // Also handle pointer down to ensure it works
-              if (e.target === e.currentTarget) {
-                e.preventDefault();
-                e.stopPropagation();
-              }
-            }}
-          >
-            <div 
-              className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-              }}
-              onPointerDown={(e) => {
-                e.stopPropagation();
-              }}
-            >
-              <div className="p-4 flex justify-between items-center border-b border-gray-200">
-                <div>
-                  <h3 className="text-lg font-bold text-gray-800">Import Photo Preview</h3>
-                  <div className="mt-1 text-sm text-gray-600">
-                    Importable: {importPreview.filter(p => !p.error && !p.isDuplicate).length} | 
-                    Already imported: {importPreview.filter(p => !p.error && p.isDuplicate).length} | 
-                    Cannot import: {importPreview.filter(p => p.error).length}
-                  </div>
-                </div>
-                <button
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    handleCancelImport(e);
-                  }}
-                  onPointerDown={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                  }}
-                  className="p-2 hover:bg-gray-100 rounded-full transition-colors flex-shrink-0"
-                  title="Close (ESC)"
-                >
-                  <X size={20} className="text-gray-600" />
-                </button>
-              </div>
-              
-              <div className="flex-1 overflow-y-auto p-4">
-                <div className="grid grid-cols-3 gap-2">
-                  {importPreview.map((preview, index) => (
-                    <div key={index} className="relative aspect-square">
-                      <img 
-                        src={preview.imageUrl} 
-                        alt={`Preview ${index + 1}`}
-                        className="w-full h-full object-cover rounded-lg"
-                      />
-                      {preview.error ? (
-                        <div className="absolute inset-0 bg-red-500/20 rounded-lg flex items-center justify-center">
-                          <div className="text-center text-red-600 text-xs px-2">
-                            <X size={16} className="mx-auto mb-1" />
-                            <span className="font-bold">{preview.error}</span>
-                          </div>
-                        </div>
-                      ) : preview.isDuplicate ? (
-                        <div className="absolute inset-0 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${themeColor}20` }}>
-                          <div className="text-center text-xs px-2" style={{ color: themeColor }}>
-                            <Check size={16} className="mx-auto mb-1" />
-                            <span className="font-bold">Already imported</span>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="absolute top-2 right-2 bg-green-500 text-white rounded-full p-1.5">
-                          <Check size={12} />
-                        </div>
-                      )}
-                      {!preview.error && (
-                        <div className="mt-1 text-xs text-gray-600">
-                          {preview.lat.toFixed(6)}, {preview.lng.toFixed(6)}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-              
-              <div className="p-4 flex justify-end gap-2">
-                <button
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    handleCancelImport(e);
-                  }}
-                  onPointerDown={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                  }}
-                  className="px-6 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700 font-medium transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleConfirmImport}
-                  disabled={importPreview.filter(p => !p.error && !p.isDuplicate).length === 0}
-                  className="px-6 py-2 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg text-gray-900 font-medium transition-colors"
-                  style={{ backgroundColor: themeColor }}
-                  onMouseEnter={(e) => {
-                    if (!e.currentTarget.disabled) {
-                      const darkR = Math.max(0, Math.floor(parseInt(themeColor.slice(1, 3), 16) * 0.9));
-                      const darkG = Math.max(0, Math.floor(parseInt(themeColor.slice(3, 5), 16) * 0.9));
-                      const darkB = Math.max(0, Math.floor(parseInt(themeColor.slice(5, 7), 16) * 0.9));
-                      const darkHex = '#' + [darkR, darkG, darkB].map(x => {
-                        const hex = x.toString(16);
-                        return hex.length === 1 ? '0' + hex : hex;
-                      }).join('').toUpperCase();
-                      e.currentTarget.style.backgroundColor = darkHex;
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!e.currentTarget.disabled) {
-                      e.currentTarget.style.backgroundColor = themeColor;
-                    }
-                  }}
-                >
-                  Confirm Import ({importPreview.filter(p => !p.error && !p.isDuplicate).length})
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-        
-        {/* Image Preview Modal */}
-        {previewImage && (
-          <div 
-            className="fixed inset-0 z-[10000] bg-black/80 flex items-center justify-center"
-            onClick={() => setPreviewImage(null)}
-          >
-            <div 
-              className="relative max-w-[90vw] max-h-[90vh] p-4 pointer-events-none"
-            >
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setPreviewImage(null);
-                }}
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                }}
-                className="absolute -top-2 -right-2 z-10 bg-white rounded-full p-2 shadow-lg hover:bg-gray-100 transition-colors pointer-events-auto"
-              >
-                <X size={20} />
-              </button>
-              <img
-                src={previewImage}
-                alt="Preview"
-                className="max-w-full max-h-[90vh] object-contain rounded-lg pointer-events-auto"
-                onClick={(e) => e.stopPropagation()}
-              />
-            </div>
-          </div>
-        )}
+        <BoardImportPreviewDialog
+          open={showImportDialog}
+          importPreview={importPreview}
+          themeColor={themeColor}
+          panelChromeStyle={panelChromeStyle}
+          mapUiChromeOpacity={mapUiChromeOpacity}
+          mapUiChromeBlurPx={mapUiChromeBlurPx}
+          onCancel={handleCancelImport}
+          onConfirm={handleConfirmImport}
+        />
+
+        <BoardImageLightbox src={previewImage} onClose={() => setPreviewImage(null)} />
       </div>
+
+      <BoardBrowseTagFilterPanel
+        open={browseTagFilterPanelOpen}
+        isEditMode={isEditMode}
+        selectedCount={selectedNoteIds.size}
+        anchorRef={boardBrowseTagFilterButtonRef}
+        layoutRevision={browseTagFilterLayoutRevision}
+        themeColor={themeColor}
+        panelChromeStyle={panelChromeStyle}
+        labelsInSelection={browseTagLabelsInSelection}
+        selectionHasUntagged={browseSelectionHasUntagged}
+        pendingDefault={browseTagFilterPendingDefault}
+        onPendingDefaultChange={setBrowseTagFilterPendingDefault}
+        pendingUntagged={browseTagFilterPendingUntagged}
+        onPendingUntaggedChange={setBrowseTagFilterPendingUntagged}
+        pendingLabels={browseTagFilterPendingLabels}
+        onPendingLabelsChange={setBrowseTagFilterPendingLabels}
+        canApply={browseTagFilterCanApply}
+        onCancel={() => setBrowseTagFilterPanelOpen(false)}
+        onApply={applyBrowseTagFilterFromPanel}
+      />
+
+      <BoardBrowseTimeFilterPanel
+        open={browseTimeFilterPanelOpen}
+        isEditMode={isEditMode}
+        selectedCount={selectedNoteIds.size}
+        anchorRef={boardBrowseTimeFilterButtonRef}
+        layoutRevision={browseTimeFilterLayoutRevision}
+        themeColor={themeColor}
+        panelChromeStyle={panelChromeStyle}
+        hasTimedNotesInSelection={browseTimeSelectionHasTimedNotes}
+        sliderMinBound={browseTimeFilterSliderMinBound}
+        sliderMaxBound={browseTimeFilterSliderMaxBound}
+        pendingMin={browseTimeFilterPendingMin}
+        pendingMax={browseTimeFilterPendingMax}
+        onPendingMinChange={setBrowseTimeFilterPendingMin}
+        onPendingMaxChange={setBrowseTimeFilterPendingMax}
+        onCancel={() => setBrowseTimeFilterPanelOpen(false)}
+        onApply={applyBrowseTimeFilterFromPanel}
+      />
+
+      <SettingsPanel
+        isOpen={showSettingsPanel}
+        onClose={() => setShowSettingsPanel(false)}
+        settingsContextView="board"
+        themeColor={themeColor}
+        onThemeColorChange={onThemeColorChange ?? (() => {})}
+        mapUiChromeOpacity={mapUiChromeOpacity}
+        onMapUiChromeOpacityChange={onMapUiChromeOpacityChange ?? (() => {})}
+        mapUiChromeBlurPx={mapUiChromeBlurPx}
+        onMapUiChromeBlurPxChange={onMapUiChromeBlurPxChange ?? (() => {})}
+        currentMapStyle={mapStyleId}
+        onMapStyleChange={onMapStyleChange ?? (() => {})}
+        graphProject={project as Project | undefined}
+        onGraphProjectPatch={
+          onUpdateProject && project
+            ? projectId
+              ? (patch) =>
+                  void (onUpdateProject as (a: string | Project, b?: Partial<Project>) => void)(
+                    projectId,
+                    patch
+                  )
+              : (patch) =>
+                  void onUpdateProject({
+                    ...project,
+                    ...patch
+                  } as { notes: Note[]; standardSizeScale?: number })
+            : undefined
+        }
+      />
     </motion.div>
   );
 };

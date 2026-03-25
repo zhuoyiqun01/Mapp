@@ -1,20 +1,24 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { X, Palette } from 'lucide-react';
 import { get, set } from 'idb-keyval';
+import { getThemeChromeForegroundHex } from '../utils/theme/themeChrome';
+import { DEFAULT_MAP_UI_CHROME_BLUR_PX, DEFAULT_MAP_UI_CHROME_OPACITY, mapChromeSurfaceStyle } from '../utils/map/mapChromeStyle';
 
 interface ThemeColorPickerProps {
   isOpen: boolean;
   onClose: () => void;
   currentColor: string;
   onColorChange: (color: string) => void;
+  /** 与设置面板卡片一致的玻璃底 */
+  panelChromeStyle?: React.CSSProperties;
 }
 
 export const ThemeColorPicker: React.FC<ThemeColorPickerProps> = ({ 
   isOpen, 
   onClose, 
   currentColor, 
-  onColorChange 
+  onColorChange,
+  panelChromeStyle
 }) => {
   const [hsl, setHsl] = useState({ h: 50, s: 100, l: 50 });
   const [hex, setHex] = useState('#FFDD00');
@@ -143,21 +147,43 @@ export const ThemeColorPicker: React.FC<ThemeColorPickerProps> = ({
     setHsl(prev => ({ ...prev, [channel]: value }));
   }
 
-  function handleHexChange(value: string) {
-    // Remove # if present
-    const cleanValue = value.replace('#', '');
-    // Only allow hex characters
-    if (/^[0-9A-Fa-f]{0,6}$/.test(cleanValue)) {
-      const newHex = '#' + cleanValue.toUpperCase();
-      setHex(newHex);
-      if (cleanValue.length === 6) {
-        const hslValue = hexToHsl(newHex);
-        if (hslValue) {
-          setHsl(hslValue);
-        }
+  function handleHexChange(raw: string) {
+    let v = raw.trim().toUpperCase();
+    if (!v.startsWith('#')) {
+      v = '#' + v.replace(/^#+/, '');
+    }
+    const cleanValue = v.replace('#', '');
+    if (!/^[0-9A-Fa-f]{0,6}$/.test(cleanValue)) return;
+    const newHex = '#' + cleanValue.toUpperCase();
+    setHex(newHex);
+    if (cleanValue.length === 6) {
+      const hslValue = hexToHsl(newHex);
+      if (hslValue) {
+        setHsl(hslValue);
       }
     }
   }
+
+  /** 预览块背景：完整 6 位 hex 用其本身，否则用当前 HSL 以免非法 CSS 颜色 */
+  const previewBackground = useMemo(() => {
+    if (/^#[0-9A-Fa-f]{6}$/i.test(hex)) {
+      return hex;
+    }
+    const { r, g, b } = hslToRgb(hsl.h, hsl.s, hsl.l);
+    return rgbToHex(r, g, b);
+  }, [hex, hsl.h, hsl.s, hsl.l]);
+
+  const previewChromeFg = useMemo(
+    () => getThemeChromeForegroundHex(previewBackground),
+    [previewBackground]
+  );
+
+  const applyBaseBg = useMemo(
+    () => (/^#[0-9A-Fa-f]{6}$/i.test(hex) ? hex : previewBackground),
+    [hex, previewBackground]
+  );
+
+  const applyButtonFg = useMemo(() => getThemeChromeForegroundHex(applyBaseBg), [applyBaseBg]);
 
   function handleApply() {
     // Just notify parent - let parent handle all updates
@@ -176,16 +202,20 @@ export const ThemeColorPicker: React.FC<ThemeColorPickerProps> = ({
 
   if (!isOpen) return null;
 
+  const cardChrome =
+    panelChromeStyle ??
+    mapChromeSurfaceStyle(DEFAULT_MAP_UI_CHROME_OPACITY, DEFAULT_MAP_UI_CHROME_BLUR_PX);
+
   return (
-    <div className="fixed inset-0 z-[5000] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+    <div className="km-theme-color-picker fixed inset-0 z-[6000] min-h-[100dvh] min-h-screen w-full bg-black/50 flex items-center justify-center p-4">
       <style>{`
-        input[type="range"] {
+        .km-theme-color-picker input[type="range"] {
           -webkit-appearance: none;
           appearance: none;
           background: transparent;
           cursor: pointer;
         }
-        input[type="range"]::-webkit-slider-thumb {
+        .km-theme-color-picker input[type="range"]::-webkit-slider-thumb {
           -webkit-appearance: none;
           appearance: none;
           width: 2px;
@@ -194,7 +224,7 @@ export const ThemeColorPicker: React.FC<ThemeColorPickerProps> = ({
           border: none;
           cursor: pointer;
         }
-        input[type="range"]::-moz-range-thumb {
+        .km-theme-color-picker input[type="range"]::-moz-range-thumb {
           width: 2px;
           height: 20px;
           background: #000;
@@ -202,7 +232,10 @@ export const ThemeColorPicker: React.FC<ThemeColorPickerProps> = ({
           cursor: pointer;
         }
       `}</style>
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-4 animate-in zoom-in-95">
+      <div
+        className="rounded-xl shadow-2xl w-full max-w-md p-4 animate-in zoom-in-95 border border-gray-200/80"
+        style={cardChrome}
+      >
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Palette size={20} className="text-gray-700" />
@@ -216,28 +249,27 @@ export const ThemeColorPicker: React.FC<ThemeColorPickerProps> = ({
           </button>
         </div>
 
-        {/* Preview */}
+        {/* 预览 + 内联 Hex 编辑 */}
         <div className="mb-4">
-          <div 
-            className="w-full h-16 rounded-lg shadow-inner flex items-center justify-center"
-            style={{ backgroundColor: hex }}
+          <div
+            className="flex h-16 w-full items-center justify-center rounded-lg px-3 shadow-inner"
+            style={{ backgroundColor: previewBackground }}
           >
-            <div className="text-white text-base font-bold drop-shadow-lg">
-              {hex}
-            </div>
+            <input
+              type="text"
+              value={hex}
+              onChange={(e) => handleHexChange(e.target.value)}
+              className={`max-w-[10.5rem] w-full border-0 bg-transparent text-center font-mono text-base font-bold outline-none focus:ring-2 focus:ring-offset-0 rounded-md px-1 py-0.5 ${
+                previewChromeFg === '#ffffff'
+                  ? 'drop-shadow-[0_1px_3px_rgba(0,0,0,0.85)] focus:ring-white/45'
+                  : 'focus:ring-black/20'
+              }`}
+              style={{ color: previewChromeFg }}
+              spellCheck={false}
+              autoComplete="off"
+              aria-label="十六进制颜色"
+            />
           </div>
-        </div>
-
-        {/* Hex Input */}
-        <div className="mb-4">
-          <label className="block text-xs font-medium text-gray-600 mb-1.5">Hex Color</label>
-          <input
-            type="text"
-            value={hex}
-            onChange={(e) => handleHexChange(e.target.value)}
-            className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono"
-            placeholder="#FFDD00"
-          />
         </div>
 
         {/* HSL Sliders */}
@@ -324,15 +356,18 @@ export const ThemeColorPicker: React.FC<ThemeColorPickerProps> = ({
           </button>
           <button
             onClick={handleApply}
-            className="flex-1 py-2 text-sm text-white font-bold rounded-lg shadow-lg transition-colors"
-            style={{ backgroundColor: hex }}
+            className="flex-1 py-2 text-sm font-bold rounded-lg shadow-lg transition-colors"
+            style={{ backgroundColor: applyBaseBg, color: applyButtonFg }}
             onMouseEnter={(e) => {
               const darkL = Math.max(0, hsl.l - 10);
               const darkRgb = hslToRgb(hsl.h, hsl.s, darkL);
-              e.currentTarget.style.backgroundColor = rgbToHex(darkRgb.r, darkRgb.g, darkRgb.b);
+              const darkHex = rgbToHex(darkRgb.r, darkRgb.g, darkRgb.b);
+              e.currentTarget.style.backgroundColor = darkHex;
+              e.currentTarget.style.color = getThemeChromeForegroundHex(darkHex);
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = hex;
+              e.currentTarget.style.backgroundColor = applyBaseBg;
+              e.currentTarget.style.color = applyButtonFg;
             }}
           >
             Apply

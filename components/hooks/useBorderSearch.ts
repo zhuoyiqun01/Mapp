@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import type { Note } from '../../types';
-import { fetchRelationGeometry } from '../../utils/overpass';
+import { fetchRelationGeometry } from '../../utils/map/overpass';
 import { generateId } from '../../utils';
 
 interface UseBorderSearchProps {

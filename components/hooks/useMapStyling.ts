@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { MAP_STYLE_OPTIONS } from '../../constants';
+import { MAP_STYLE_OPTIONS, MAP_SATELLITE_URL, MAP_SATELLITE_ATTRIBUTION } from '../../constants';
 
 interface UseMapStylingProps {
   mapStyleId?: string;
@@ -33,8 +33,8 @@ export const useMapStyling = ({ mapStyleId, onMapStyleChange }: UseMapStylingPro
   const tileLayerConfig = useMemo(() => {
     if (effectiveMapStyle === 'satellite') {
       return {
-        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+        url: MAP_SATELLITE_URL,
+        attribution: MAP_SATELLITE_ATTRIBUTION
       };
     } else {
       const styleOption = MAP_STYLE_OPTIONS.find(s => s.id === effectiveMapStyle) || MAP_STYLE_OPTIONS[0];

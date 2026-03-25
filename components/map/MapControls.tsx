@@ -1,40 +1,36 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useMap } from 'react-leaflet';
-import { Note, Frame } from '../../types';
+import { Note } from '../../types';
 import { THEME_COLOR } from '../../constants';
-import { Search, Locate, Loader2, X, Check, Satellite, Type, Settings, MapPin, Route } from 'lucide-react';
+import { Locate, Loader2, Type, Settings, MapPin } from 'lucide-react';
+import { ChromeIconButton } from '../ui/ChromeIconButton';
 
 interface MapControlsProps {
   onLocateCurrentPosition: () => void;
   isLocating?: boolean;
-  mapStyle: 'standard' | 'satellite';
-  onMapStyleChange: (style: 'standard' | 'satellite') => void;
   mapNotes: Note[];
   themeColor?: string;
+  /** 非主题色浮层面板：半透明白底 + backdrop-filter */
+  chromeSurfaceStyle?: React.CSSProperties;
+  chromeHoverBackground?: string;
   showTextLabels: boolean;
   setShowTextLabels: (show: boolean) => void;
-  pinSize: number;
-  setPinSize: (size: number) => void;
-  clusterThreshold: number;
-  setClusterThreshold: (threshold: number) => void;
   onOpenSettings: () => void;
 }
 
 export const MapControls: React.FC<MapControlsProps> = ({
   onLocateCurrentPosition,
   isLocating = false,
-  mapStyle,
-  onMapStyleChange,
   mapNotes,
   themeColor = THEME_COLOR,
+  chromeSurfaceStyle,
+  chromeHoverBackground,
   showTextLabels,
   setShowTextLabels,
-  pinSize,
-  setPinSize,
-  clusterThreshold,
-  setClusterThreshold,
   onOpenSettings
 }) => {
+  const neutralStyle = chromeSurfaceStyle;
+  const neutralHover = chromeHoverBackground;
   const map = useMap();
   const [showLocateMenu, setShowLocateMenu] = useState(false);
   const locateMenuRef = useRef<HTMLDivElement>(null);
@@ -87,7 +83,7 @@ export const MapControls: React.FC<MapControlsProps> = ({
   return (
     <div
       ref={controlsRef}
-      className="flex flex-row gap-1.5 sm:gap-2 pointer-events-auto"
+      className="flex flex-row items-center gap-1.5 sm:gap-2 pointer-events-auto"
       onPointerDown={(e) => e.stopPropagation()}
       onPointerMove={(e) => e.stopPropagation()}
       onPointerUp={(e) => e.stopPropagation()}
@@ -102,26 +98,22 @@ export const MapControls: React.FC<MapControlsProps> = ({
     >
       {/* First Row: Main Controls */}
       <div className="relative" ref={locateMenuRef}>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setShowLocateMenu(!showLocateMenu);
-          }}
-          onPointerDown={(e) => e.stopPropagation()}
+        <ChromeIconButton
+          className="group"
+          themeColor={themeColor}
+          chromeSurfaceStyle={neutralStyle}
+          chromeHoverBackground={neutralHover}
+          active={showLocateMenu}
+          onClick={() => setShowLocateMenu(!showLocateMenu)}
           onPointerMove={(e) => e.stopPropagation()}
-          className={`group p-2 sm:p-3 rounded-xl shadow-lg transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${
-            showLocateMenu
-              ? 'text-white'
-              : 'bg-white text-gray-700 hover:bg-gray-50'
-          }`}
-          style={showLocateMenu ? { backgroundColor: themeColor } : undefined}
-          title="Locate"
+          title="定位"
         >
           <Locate size={18} className="sm:w-5 sm:h-5" />
-        </button>
+        </ChromeIconButton>
         {showLocateMenu && (
           <div
-            className="absolute left-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-[2000]"
+            className={`absolute left-0 top-full mt-2 w-48 rounded-xl shadow-xl border border-gray-100 py-1 z-[2000] ${neutralStyle ? '' : 'bg-white'}`}
+            style={neutralStyle}
             onPointerDown={(e) => {
               e.stopPropagation();
             }}
@@ -173,61 +165,29 @@ export const MapControls: React.FC<MapControlsProps> = ({
         )}
       </div>
 
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onMapStyleChange(mapStyle === 'standard' ? 'satellite' : 'standard');
-        }}
-        onPointerDown={(e) => e.stopPropagation()}
+      <ChromeIconButton
+        themeColor={themeColor}
+        chromeSurfaceStyle={neutralStyle}
+        chromeHoverBackground={neutralHover}
+        active={showTextLabels}
+        onClick={() => setShowTextLabels(!showTextLabels)}
         onPointerMove={(e) => e.stopPropagation()}
-        className={`p-2 sm:p-3 rounded-xl shadow-lg transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${
-          mapStyle === 'satellite'
-            ? 'text-white'
-            : 'bg-white text-gray-700 hover:bg-gray-50'
-        }`}
-        style={mapStyle === 'satellite' ? { backgroundColor: themeColor } : undefined}
-        title={mapStyle === 'standard' ? 'Switch to Satellite' : 'Switch to Standard'}
-      >
-        <Satellite size={18} className="sm:w-5 sm:h-5" />
-      </button>
-
-
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          setShowTextLabels(!showTextLabels);
-        }}
-        onPointerDown={(e) => e.stopPropagation()}
-        onPointerMove={(e) => e.stopPropagation()}
-        className={`p-2 sm:p-3 rounded-xl shadow-lg transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${
-          showTextLabels
-            ? 'text-white'
-            : 'bg-white text-gray-700 hover:bg-gray-50'
-        }`}
-        style={showTextLabels ? { backgroundColor: themeColor } : undefined}
-        title={showTextLabels ? 'Hide Labels' : 'Show Labels'}
+        title={showTextLabels ? '隐藏 label' : 'label'}
       >
         <Type size={18} className="sm:w-5 sm:h-5" />
-      </button>
+      </ChromeIconButton>
 
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onOpenSettings();
-        }}
-        onPointerDown={(e) => e.stopPropagation()}
+      <ChromeIconButton
+        themeColor={themeColor}
+        chromeSurfaceStyle={neutralStyle}
+        chromeHoverBackground={neutralHover}
+        nonChromeIdleHover="imperative-gray100"
+        onClick={() => onOpenSettings()}
         onPointerMove={(e) => e.stopPropagation()}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.backgroundColor = '#F3F4F6'; // gray-100
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.backgroundColor = '';
-        }}
-        className="bg-white p-2 sm:p-3 rounded-xl shadow-lg text-gray-700 hover:bg-gray-50 transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center"
-        title="Settings"
+        title="设置"
       >
         <Settings size={18} className="sm:w-5 sm:h-5" />
-      </button>
+      </ChromeIconButton>
     </div>
   );
 };

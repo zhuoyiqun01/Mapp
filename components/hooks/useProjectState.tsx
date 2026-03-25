@@ -9,7 +9,7 @@ import {
   loadNoteImages,
   cleanBrokenReferences,
   ProjectSummary
-} from '../../utils/storage';
+} from '../../utils/persistence/storage';
 
 interface UseProjectStateReturn {
   // Project state

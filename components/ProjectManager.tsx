@@ -1,12 +1,14 @@
-
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Project, Note } from '../types';
-import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check, Upload, Palette, Settings, ZoomIn, Copy } from 'lucide-react';
+import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check, Upload, Settings, ZoomIn, Copy } from 'lucide-react';
 import { generateId, formatDate, exportToJpeg, exportToJpegCentered, compressImageFromBase64 } from '../utils';
-import { loadProject, loadNoteImages, saveProject, loadAllProjects } from '../utils/storage';
-import { getLastSyncTime, type SyncStatus } from '../utils/sync';
+import { loadProject, loadNoteImages, saveProject, loadAllProjects } from '../utils/persistence/storage';
+import { getLastSyncTime, type SyncStatus } from '../utils/persistence/sync';
 import { DEFAULT_THEME_COLOR } from '../constants';
 import { ThemeColorPicker } from './ThemeColorPicker';
+import { AppearanceSettingsBlock } from './AppearanceSettingsBlock';
+import { mapChromeSurfaceStyle, mapChromeHoverBackground } from '../utils/map/mapChromeStyle';
 
 // Export resolution dialog component
 const ExportResolutionDialog: React.FC<{
@@ -15,7 +17,9 @@ const ExportResolutionDialog: React.FC<{
   onConfirm: (pixelRatio: number, options: { includeBackground: boolean; includeBorder: boolean; includePins: boolean }) => void;
   currentDimensions: { width: number; height: number };
   themeColor: string;
-}> = ({ isOpen, onClose, onConfirm, currentDimensions, themeColor }) => {
+  mapUiChromeOpacity?: number;
+  mapUiChromeBlurPx?: number;
+}> = ({ isOpen, onClose, onConfirm, currentDimensions, themeColor, mapUiChromeOpacity = 0.9, mapUiChromeBlurPx = 8 }) => {
   const [selectedRatio, setSelectedRatio] = useState(2);
   const [exportOptions, setExportOptions] = useState({
     includeBackground: true,
@@ -48,7 +52,8 @@ const ExportResolutionDialog: React.FC<{
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[3000]" onClick={onClose}>
       <div
-        className="bg-white rounded-2xl shadow-2xl max-w-[320px] w-full mx-4 p-5 animate-in zoom-in-95 duration-200"
+        className="rounded-2xl shadow-2xl max-w-[320px] w-full mx-4 p-5 animate-in zoom-in-95 duration-200 border border-gray-200/80"
+        style={mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx)}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2.5 mb-4">
@@ -79,7 +84,10 @@ const ExportResolutionDialog: React.FC<{
               </button>
 
               {showOptions && (
-                <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-100 rounded-xl shadow-xl z-10 py-1 animate-in fade-in slide-in-from-top-2">
+                <div
+                  className="absolute top-full left-0 right-0 mt-2 border border-gray-200/80 rounded-xl shadow-xl z-10 py-1 animate-in fade-in slide-in-from-top-2"
+                  style={mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx)}
+                >
                   {[
                     { id: 'includeBackground', label: '背景 (Background)' },
                     { id: 'includeBorder', label: '边界 (Border)' },
@@ -149,7 +157,7 @@ const ExportResolutionDialog: React.FC<{
               onClose();
             }}
             disabled={selectedOptionsCount === 0}
-            className="flex-1 px-4 py-2 text-white rounded-lg transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex-1 px-4 py-2 text-theme-chrome-fg rounded-lg transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ backgroundColor: themeColor }}
             onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${themeColor}E6`}
             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
@@ -174,7 +182,8 @@ const MenuDropdown: React.FC<{
   onCleanupBrokenReferences?: (project: Project) => Promise<void>;
   onDelete: (id: string) => void;
   onClose: () => void;
-}> = ({ project, onRename, onDuplicate, onExportData, onExportFullProject, onCompressImages, onCheckData, onCleanupBrokenReferences, onDelete, onClose }) => {
+  surfaceStyle: React.CSSProperties;
+}> = ({ project, onRename, onDuplicate, onExportData, onExportFullProject, onCompressImages, onCheckData, onCleanupBrokenReferences, onDelete, onClose, surfaceStyle }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<'bottom' | 'top'>('bottom');
 
@@ -202,9 +211,10 @@ const MenuDropdown: React.FC<{
   return (
     <div 
       ref={menuRef}
-      className={`absolute right-0 w-48 max-h-[60vh] overflow-auto bg-white rounded-xl shadow-xl z-[2030] border border-gray-100 py-1 animate-in fade-in zoom-in-95 origin-top-right ${
+      className={`absolute right-0 w-48 max-h-[60vh] overflow-auto theme-surface-scrollbar rounded-xl shadow-xl z-[2030] border border-gray-200/80 py-1 animate-in fade-in zoom-in-95 origin-top-right ${
         position === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'
       }`}
+      style={surfaceStyle}
     >
       <button
         onClick={() => { onRename(project.id); onClose(); }}
@@ -290,7 +300,7 @@ interface ProjectManagerProps {
   isSidebar?: boolean;
   onCloseSidebar?: () => void;
   onBackToHome?: () => void;
-  viewMode?: 'map' | 'board' | 'table';
+  viewMode?: 'map' | 'board' | 'table' | 'graph';
   activeProject?: Project | null;
   onExportCSV?: (project: Project) => void;
   onCheckData?: () => Promise<void>;
@@ -298,6 +308,10 @@ interface ProjectManagerProps {
   syncStatus?: SyncStatus;
   themeColor?: string;
   onThemeColorChange?: (color: string) => void;
+  mapUiChromeOpacity?: number;
+  onMapUiChromeOpacityChange?: (opacity: number) => void;
+  mapUiChromeBlurPx?: number;
+  onMapUiChromeBlurPxChange?: (blurPx: number) => void;
   currentMapStyle?: string;
   onMapStyleChange?: (styleId: string) => void;
 }
@@ -321,6 +335,10 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   onCleanupBrokenReferences,
   themeColor = DEFAULT_THEME_COLOR,
   onThemeColorChange,
+  mapUiChromeOpacity = 0.9,
+  onMapUiChromeOpacityChange,
+  mapUiChromeBlurPx = 8,
+  onMapUiChromeBlurPxChange,
   currentMapStyle = 'carto-light-nolabels',
   onMapStyleChange
 }) => {
@@ -351,8 +369,12 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   const importFileInputRef = React.useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [showThemeColorPicker, setShowThemeColorPicker] = useState(false);
+  const [showHomeSettings, setShowHomeSettings] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [pendingExport, setPendingExport] = useState<{ elementId: string; fileName: string } | null>(null);
+  const [homeCardHoverId, setHomeCardHoverId] = useState<string | null>(null);
+  const [settingsFabHover, setSettingsFabHover] = useState(false);
+  const [newProjectHover, setNewProjectHover] = useState(false);
 
   const handleCreate = () => {
     if (!newProjectName.trim()) return;
@@ -388,7 +410,12 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       }
     } else {
       // Show export dialog for image export
-      const elementId = viewMode === 'map' ? 'map-view-container' : 'board-view-container';
+      const elementId =
+        viewMode === 'map'
+          ? 'map-view-container'
+          : viewMode === 'graph'
+            ? 'graph-view-container'
+            : 'board-view-container';
       const fileName = `${activeProject.name}-${viewMode}`;
       setPendingExport({ elementId, fileName });
       setShowExportDialog(true);
@@ -448,7 +475,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       // 否则，尝试从存储中加载完整项目数据
       try {
         // 这里我们需要导入loadProject函数
-        const { loadProject } = await import('../utils/storage');
+        const { loadProject } = await import('../utils/persistence/storage');
         const loadedProject = await loadProject(editingProjectId, true);
         if (loadedProject) {
           fullProject = loadedProject;
@@ -513,10 +540,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   };
 
   const handleExportData = (project: Project) => {
-    // Only export standard notes (excluding compact and text-only notes)
-    const standardNotes = project.notes.filter(note => 
-      note.variant !== 'compact'
-    );
+    const standardNotes = project.notes;
     
     if (standardNotes.length === 0) {
       alert("This project has no standard note data");
@@ -745,20 +769,20 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           const newId = generateId();
           noteIdMap.set(note.id, newId);
           // 不要根据内容自动判断 variant，保持原始 variant 或默认为 standard
-          const variant: 'standard' | 'compact' | 'image' = note.variant || 'standard';
+          const raw = (note as Note & { variant?: string }).variant || 'standard';
+          const variant: 'standard' | 'image' = raw === 'image' ? 'image' : 'standard';
           return { ...note, id: newId, variant };
         });
         
-        // Debug: count notes by variant
         const noteCounts = {
           standard: importedNotes.filter(n => n.variant === 'standard').length,
-          compact: importedNotes.filter(n => n.variant === 'compact').length,
+          image: importedNotes.filter(n => n.variant === 'image').length,
           total: importedNotes.length
         };
         console.log('Merging notes into existing project:', {
           totalNotes: noteCounts.total,
           standard: noteCounts.standard,
-          compact: noteCounts.compact,
+          image: noteCounts.image,
           frames: (newProject.frames || []).length,
           connections: (newProject.connections || []).length
         });
@@ -812,7 +836,8 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         // Create as new project - regenerate all IDs
         const regeneratedNotes = (newProject.notes || []).map(note => {
           // 不要根据内容自动判断 variant，保持原始 variant 或默认为 standard
-          const variant: 'standard' | 'compact' | 'image' = note.variant || 'standard';
+          const raw = (note as Note & { variant?: string }).variant || 'standard';
+          const variant: 'standard' | 'image' = raw === 'image' ? 'image' : 'standard';
           return {
             ...note,
             id: generateId(),
@@ -831,7 +856,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         // Debug: count notes by variant
         const noteCounts = {
           standard: regeneratedNotes.filter(n => n.variant === 'standard').length,
-          compact: regeneratedNotes.filter(n => n.variant === 'compact').length,
+          image: regeneratedNotes.filter(n => n.variant === 'image').length,
           total: regeneratedNotes.length
         };
         
@@ -959,13 +984,13 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     }
   };
 
-  const containerClass = isSidebar 
-    ? "h-full w-full shadow-2xl flex flex-col border-r overflow-hidden" 
-    : "w-full min-h-screen flex flex-col items-center justify-start pt-40 pb-0 p-4 relative"; 
+  const containerClass = isSidebar
+    ? "h-full w-full shadow-2xl flex flex-col border-r overflow-hidden"
+    : "w-full h-[100dvh] min-h-0 overflow-y-auto theme-surface-scrollbar flex flex-col items-center justify-start pt-40 pb-0 p-4 relative"; 
 
   const titleClass = isSidebar
     ? "hidden" // Hide title in sidebar
-    : "text-6xl md:text-8xl font-black text-white tracking-tighter mb-12 text-center drop-shadow-sm leading-[0.9] flex flex-col";
+    : "text-6xl md:text-8xl font-black text-theme-chrome-fg tracking-tighter mb-12 text-center drop-shadow-sm leading-[0.9] flex flex-col";
 
   return (
     <div 
@@ -981,8 +1006,14 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       onDrop={handleDrop}
     >
       {isDragging && (
-        <div className="fixed inset-0 z-[4000] backdrop-blur-sm flex items-center justify-center pointer-events-none" style={{ backgroundColor: `${themeColor}33` }}>
-          <div className="bg-white rounded-2xl shadow-2xl p-8 border-4" style={{ borderColor: themeColor }}>
+        <div className="fixed inset-0 z-[4000] flex items-center justify-center pointer-events-none" style={{ backgroundColor: `${themeColor}33` }}>
+          <div
+            className="rounded-2xl shadow-2xl p-8 border-4 border-solid"
+            style={{
+              borderColor: themeColor,
+              ...mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx)
+            }}
+          >
             <div className="text-center">
               <div className="text-4xl mb-4">📁</div>
               <div className="text-xl font-bold text-gray-800">Drop JSON file to merge project</div>
@@ -991,15 +1022,72 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           </div>
         </div>
       )}
-      {/* Theme Color Button - Top Left */}
-      {!isSidebar && onThemeColorChange && (
-        <button
-          onClick={() => setShowThemeColorPicker(true)}
-          className="absolute top-4 left-4 p-2 bg-white/90 hover:bg-white rounded-xl shadow-lg text-gray-700 transition-all z-[2010]"
-          title="Change Theme Color"
-        >
-          <Palette size={20} />
-        </button>
+      {/* 主页：设置按钮，呼出与地图侧一致的「界面外观」面板 */}
+      {!isSidebar && onThemeColorChange && onMapUiChromeOpacityChange && onMapUiChromeBlurPxChange && (
+        <>
+          <button
+            type="button"
+            onClick={() => setShowHomeSettings(true)}
+            className="absolute top-4 left-4 z-[2010] p-2.5 rounded-xl shadow-lg border border-white/40 text-gray-700 transition-colors pointer-events-auto"
+            title="设置"
+            style={{
+              ...mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx),
+              ...(settingsFabHover ? { backgroundColor: mapChromeHoverBackground(mapUiChromeOpacity) } : {})
+            }}
+            onMouseEnter={() => setSettingsFabHover(true)}
+            onMouseLeave={() => setSettingsFabHover(false)}
+          >
+            <Settings size={22} />
+          </button>
+          {showHomeSettings &&
+            typeof document !== 'undefined' &&
+            createPortal(
+              <>
+                <div
+                  className="fixed inset-0 z-[5000] bg-black/50 min-h-[100dvh] min-h-screen w-full"
+                  onClick={() => setShowHomeSettings(false)}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  aria-hidden
+                />
+                <div
+                  data-allow-context-menu
+                  className="fixed top-1/2 left-3 right-3 z-[5001] mx-auto w-full max-w-md sm:max-w-lg sm:left-4 sm:right-4 -translate-y-1/2 transform"
+                >
+                  <div
+                    className="rounded-xl shadow-2xl flex flex-col max-h-[min(85dvh,85vh)] overflow-hidden border border-gray-200/80"
+                    style={mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx)}
+                  >
+                    <div className="flex items-center justify-between px-4 py-3 shrink-0">
+                      <div className="flex items-center gap-2">
+                        <Settings size={20} className="text-gray-700" />
+                        <h2 className="text-xl font-semibold text-gray-900">设置</h2>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowHomeSettings(false)}
+                        className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+                      >
+                        <X size={20} className="text-gray-600" />
+                      </button>
+                    </div>
+                    <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-4 theme-surface-scrollbar">
+                      <AppearanceSettingsBlock
+                        themeColor={themeColor}
+                        onRequestThemeEdit={() => {
+                          setShowThemeColorPicker(true);
+                        }}
+                        mapUiChromeOpacity={mapUiChromeOpacity}
+                        onMapUiChromeOpacityChange={onMapUiChromeOpacityChange}
+                        mapUiChromeBlurPx={mapUiChromeBlurPx}
+                        onMapUiChromeBlurPxChange={onMapUiChromeBlurPxChange}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </>,
+              document.body
+            )}
+        </>
       )}
 
       {isSidebar && (
@@ -1013,7 +1101,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                 onCloseSidebar();
               }
             }} 
-            className="absolute top-4 left-4 p-2 rounded-xl text-white transition-colors z-[2010]"
+            className="absolute top-4 left-4 p-2 rounded-xl text-theme-chrome-fg transition-colors z-[2010]"
             style={{ backgroundColor: themeColor }}
             onMouseEnter={(e) => e.currentTarget.style.backgroundColor = themeColorDark}
             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
@@ -1023,7 +1111,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           <div className="absolute top-4 right-4 z-[2000] flex items-center gap-2">
             {activeProject && syncStatus === 'idle' && getLastSyncTime() && (
               <div
-                className="flex items-center justify-center w-10 h-10 rounded-xl text-white transition-colors cursor-help"
+                className="flex items-center justify-center w-10 h-10 rounded-xl text-theme-chrome-fg transition-colors cursor-help"
                 style={{ backgroundColor: themeColor }}
                 onMouseEnter={(e) => e.currentTarget.style.backgroundColor = themeColorDark}
                 onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
@@ -1035,7 +1123,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
             {activeProject && (
               <button 
                 onClick={handleExportCurrentView}
-                className="w-10 h-10 p-2 rounded-xl text-white transition-colors flex items-center justify-center"
+                className="w-10 h-10 p-2 rounded-xl text-theme-chrome-fg transition-colors flex items-center justify-center"
                 style={{ backgroundColor: themeColor }}
                 onMouseEnter={(e) => e.currentTarget.style.backgroundColor = themeColorDark}
                 onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
@@ -1046,7 +1134,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
             )}
             <button 
               onClick={onCloseSidebar} 
-              className="w-10 h-10 p-2 rounded-xl text-white transition-colors flex items-center justify-center"
+              className="w-10 h-10 p-2 rounded-xl text-theme-chrome-fg transition-colors flex items-center justify-center"
               style={{ backgroundColor: themeColor }}
               onMouseEnter={(e) => e.currentTarget.style.backgroundColor = themeColorDark}
               onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
@@ -1067,9 +1155,16 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           </h1>
         
             {/* New Project Button */}
-          <button 
+          <button
+            type="button"
             onClick={() => setIsCreating(true)}
-              className="mt-8 px-8 py-4 bg-white text-black rounded-full font-bold text-lg shadow-xl hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
+            className="mt-8 px-8 py-4 text-black rounded-full font-bold text-lg shadow-xl border border-white/50 hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
+            style={{
+              ...mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx),
+              ...(newProjectHover ? { backgroundColor: mapChromeHoverBackground(mapUiChromeOpacity) } : {})
+            }}
+            onMouseEnter={() => setNewProjectHover(true)}
+            onMouseLeave={() => setNewProjectHover(false)}
           >
             <Plus size={24} /> New Project
           </button>
@@ -1080,7 +1175,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       <div
         className={
           isSidebar
-            ? "flex-1 overflow-y-auto custom-scrollbar w-full p-4"
+            ? "flex-1 overflow-y-auto theme-surface-scrollbar w-full p-4"
             : "w-full max-w-md mt-8 bg-transparent p-4 pb-8"
         }
         style={isSidebar ? { 
@@ -1114,25 +1209,46 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
             <div 
               key={p.id} 
               className={`group relative flex items-center justify-between p-4 rounded-2xl transition-all ${
-                p.id === currentProjectId 
-                  ? 'bg-white shadow-lg ring-2 text-black' 
-                  : isSidebar 
-                    ? 'border' 
-                    : 'bg-white/90 hover:bg-white shadow-lg text-gray-800'
+                p.id === currentProjectId
+                  ? isSidebar
+                    ? 'bg-white shadow-lg ring-2 text-black'
+                    : 'shadow-lg border border-white/50 text-black'
+                  : isSidebar
+                    ? 'border'
+                    : 'shadow-lg border border-white/50 text-gray-800'
               }`}
-              style={p.id === currentProjectId 
-                ? { boxShadow: `0 0 0 2px ${themeColor}` }
-                : isSidebar 
-                  ? { backgroundColor: `${themeColor}E6`, borderColor: `${themeColor}33` }
-                  : undefined
+              style={
+                isSidebar
+                  ? p.id === currentProjectId
+                    ? { boxShadow: `0 0 0 2px ${themeColor}` }
+                    : { backgroundColor: `${themeColor}E6`, borderColor: `${themeColor}33` }
+                  : {
+                      ...mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx),
+                      ...(p.id === currentProjectId
+                        ? {
+                            backgroundColor: `rgba(255,255,255,${Math.min(1, mapUiChromeOpacity + 0.1)})`,
+                            boxShadow: `0 0 0 2px ${themeColor}`
+                          }
+                        : homeCardHoverId === p.id
+                          ? { backgroundColor: mapChromeHoverBackground(mapUiChromeOpacity) }
+                          : {})
+                    }
               }
               onMouseEnter={(e) => {
-                if (isSidebar && p.id !== currentProjectId) {
+                if (!isSidebar) {
+                  setHomeCardHoverId(p.id);
+                  return;
+                }
+                if (p.id !== currentProjectId) {
                   e.currentTarget.style.backgroundColor = themeColor;
                 }
               }}
               onMouseLeave={(e) => {
-                if (isSidebar && p.id !== currentProjectId) {
+                if (!isSidebar) {
+                  setHomeCardHoverId((id) => (id === p.id ? null : id));
+                  return;
+                }
+                if (p.id !== currentProjectId) {
                   e.currentTarget.style.backgroundColor = `${themeColor}E6`;
                 }
               }}
@@ -1166,7 +1282,6 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                       onClick={(e) => e.stopPropagation()}
                       className="flex-1 px-2 py-1 bg-white border-2 rounded-lg outline-none text-lg font-bold"
                       style={{ borderColor: themeColor }}
-                      placeholder="输入项目名称"
                     />
                     <button
                       onClick={(e) => {
@@ -1244,9 +1359,14 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                         onCleanupBrokenReferences={onCleanupBrokenReferences}
                         onDelete={onDeleteProject}
                         onClose={() => setOpenMenuId(null)}
+                        surfaceStyle={mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx)}
                       />
                     ) : (
-                      <div className="fixed inset-x-4 bottom-6 z-[2030] bg-white rounded-3xl shadow-2xl border border-gray-200 py-2 animate-in slide-in-from-bottom-4" onClick={(e) => e.stopPropagation()}>
+                      <div
+                        className="fixed inset-x-4 bottom-6 z-[2030] rounded-3xl shadow-2xl border border-white/50 py-2 animate-in slide-in-from-bottom-4"
+                        style={mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx)}
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <div className="px-4 pt-2 pb-1">
                           <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Project</div>
                           <div className="text-sm font-bold text-gray-800 truncate">{p.name}</div>
@@ -1301,14 +1421,17 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           ))}
           
           {projects.length === 0 && !isSidebar && (
-             <div className="text-white/60 text-center py-8 italic">No projects yet. Start one!</div>
+             <div className="text-center py-8 italic opacity-60 text-theme-chrome-fg">No projects yet. Start one!</div>
           )}
         </div>
       </div>
 
       {isCreating && (
-        <div className="fixed inset-0 z-[3000] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 animate-in zoom-in-95">
+        <div className="fixed inset-0 z-[3000] bg-black/50 flex items-center justify-center p-4">
+          <div
+            className="rounded-3xl shadow-2xl w-full max-w-md p-6 animate-in zoom-in-95 border border-gray-200/80"
+            style={mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx)}
+          >
             <h2 className="text-2xl font-black text-gray-800 mb-6">New Project</h2>
             <div className="space-y-4">
               <div>
@@ -1327,7 +1450,6 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                   style={{ '--tw-ring-color': themeColor } as React.CSSProperties}
                   onFocus={(e) => e.currentTarget.style.boxShadow = `0 0 0 2px ${themeColor}`}
                   onBlur={(e) => e.currentTarget.style.boxShadow = ''}
-                  placeholder="My Mapp Trip"
                 />
               </div>
 
@@ -1344,7 +1466,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
               <button 
                 onClick={handleCreate}
                 disabled={!newProjectName.trim()}
-                className="flex-1 py-3 text-white font-bold rounded-xl shadow-lg disabled:opacity-50 disabled:shadow-none"
+                className="flex-1 py-3 text-theme-chrome-fg font-bold rounded-xl shadow-lg disabled:opacity-50 disabled:shadow-none"
                 style={{ backgroundColor: themeColor }}
                 onMouseEnter={(e) => !e.currentTarget.disabled && (e.currentTarget.style.backgroundColor = themeColorDark)}
                 onMouseLeave={(e) => !e.currentTarget.disabled && (e.currentTarget.style.backgroundColor = themeColor)}
@@ -1358,8 +1480,11 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
 
       {/* Import Dialog */}
       {showImportDialog && (
-        <div className="fixed inset-0 z-[3000] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 animate-in zoom-in-95">
+        <div className="fixed inset-0 z-[3000] bg-black/50 flex items-center justify-center p-4">
+          <div
+            className="rounded-3xl shadow-2xl w-full max-w-md p-6 animate-in zoom-in-95 border border-gray-200/80"
+            style={mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx)}
+          >
             <h2 className="text-2xl font-black text-gray-800 mb-6">
               {isImportingFromData ? 'Import from Data' : 'Import Project'}
             </h2>
@@ -1387,7 +1512,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
               </button>
               <button 
                 onClick={() => importFileInputRef.current?.click()}
-                className="flex-1 py-3 text-white font-bold rounded-xl shadow-lg"
+                className="flex-1 py-3 text-theme-chrome-fg font-bold rounded-xl shadow-lg"
                 style={{ backgroundColor: themeColor }}
                 onMouseEnter={(e) => e.currentTarget.style.backgroundColor = themeColorDark}
                 onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
@@ -1406,6 +1531,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           onClose={() => setShowThemeColorPicker(false)}
           currentColor={themeColor}
           onColorChange={onThemeColorChange}
+          panelChromeStyle={mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx)}
         />
       )}
 
@@ -1421,7 +1547,9 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           width: window.innerWidth,
           height: window.innerHeight
         }}
-          themeColor={themeColor}
+        themeColor={themeColor}
+        mapUiChromeOpacity={mapUiChromeOpacity}
+        mapUiChromeBlurPx={mapUiChromeBlurPx}
         />
 
     </div>

@@ -1,11 +1,11 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Map as MapIcon, Grid, Menu, Loader2, Table2, Cloud, CloudOff, CheckCircle2, AlertCircle, RefreshCw, Image as ImageIcon, Plus } from 'lucide-react';
+import { Map as MapIcon, Grid, Menu, Loader2, Table2, GitBranch, Cloud, CloudOff, CheckCircle2, AlertCircle, RefreshCw, Plus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapView } from './components/MapView';
 import { BoardView } from './components/BoardView';
-import { GalleryView } from './components/GalleryView';
 import { TableView } from './components/TableView';
+import { GraphView } from './components/GraphView';
 import { ProjectManager } from './components/ProjectManager';
 import { Note, ViewMode, Project } from './types';
 import { get, set } from 'idb-keyval';
@@ -20,7 +20,7 @@ import {
   shouldSync,
   getLastSyncTime,
   type SyncStatus 
-} from './utils/sync';
+} from './utils/persistence/sync';
 import {
   migrateFromOldFormat,
   deleteImage,
@@ -41,12 +41,13 @@ import {
   cleanBrokenReferences,
   loadAllProjects,
   ProjectSummary
-} from './utils/storage';
+} from './utils/persistence/storage';
+import { mapChromeSurfaceStyle, mapChromeHoverBackground } from './utils/map/mapChromeStyle';
+import { applyThemeChromeCssVars } from './utils/theme/themeChrome';
 
 export default function App() {
   const emptyNotes = useMemo(() => [], []);
   const emptyFrames = useMemo(() => [], []);
-  const emptyConnections = useMemo(() => [], []);
 
   // Use custom hooks for state management
   const projectState = useProjectState();
@@ -338,6 +339,30 @@ export default function App() {
   // Map Style State
   const [mapStyle, setMapStyle] = useState<string>('carto-light-nolabels');
 
+  const [mapUiChromeOpacity, setMapUiChromeOpacity] = useState(0.9);
+  const [mapUiChromeBlurPx, setMapUiChromeBlurPx] = useState(8);
+
+  const panelChromeStyle = useMemo(
+    () => mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx),
+    [mapUiChromeOpacity, mapUiChromeBlurPx]
+  );
+
+  const mapChromeHoverBg = useMemo(
+    () => mapChromeHoverBackground(mapUiChromeOpacity),
+    [mapUiChromeOpacity]
+  );
+
+  useEffect(() => {
+    applyThemeChromeCssVars(document.documentElement, themeColor);
+  }, [themeColor]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty('--map-ui-chrome-opacity', String(mapUiChromeOpacity));
+    const b = Math.min(48, Math.max(0, Math.round(mapUiChromeBlurPx)));
+    root.style.setProperty('--map-ui-chrome-blur-px', b === 0 ? '0px' : `${b}px`);
+  }, [mapUiChromeOpacity, mapUiChromeBlurPx]);
+
   // Load Theme Color from IndexedDB
   useEffect(() => {
     const loadThemeColor = async () => {
@@ -383,6 +408,24 @@ export default function App() {
       }
     };
     loadMapStyle();
+  }, []);
+
+  useEffect(() => {
+    const loadMapUiChrome = async () => {
+      try {
+        const savedOpacity = await get<number>('mapp-map-ui-chrome-opacity');
+        if (typeof savedOpacity === 'number' && !Number.isNaN(savedOpacity)) {
+          setMapUiChromeOpacity(Math.min(1, Math.max(0.15, savedOpacity)));
+        }
+        const savedBlur = await get<number>('mapp-map-ui-chrome-blur-px');
+        if (typeof savedBlur === 'number' && !Number.isNaN(savedBlur)) {
+          setMapUiChromeBlurPx(Math.min(48, Math.max(0, Math.round(savedBlur))));
+        }
+      } catch (err) {
+        console.error('Failed to load map UI chrome settings', err);
+      }
+    };
+    loadMapUiChrome();
   }, []);
 
   // Load Projects from IndexedDB and Cloud
@@ -537,6 +580,17 @@ export default function App() {
     };
 
     const preventContextMenu = (e: Event) => {
+      const target = e.target as HTMLElement;
+      // 允许在 UI 上使用右键：输入框、按钮、或带 data-allow-context-menu 的容器内
+      if (
+        target.closest('[data-allow-context-menu]') ||
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.tagName === 'SELECT' ||
+        target.tagName === 'BUTTON'
+      ) {
+        return;
+      }
       e.preventDefault();
     };
 
@@ -738,9 +792,7 @@ export default function App() {
 
   const handleExportCSV = (project: Project) => {
     // 只导出标准便签（不包括小便签和纯文本）
-    const standardNotes = project.notes.filter(note => 
-      note.variant !== 'compact'
-    );
+    const standardNotes = project.notes;
     
     if (standardNotes.length === 0) {
       alert("该项目没有标准便签数据可导出。");
@@ -847,9 +899,21 @@ export default function App() {
     await set('mapp-theme-color-dark', darkHex);
   };
 
+  const handleMapUiChromeOpacityChange = async (opacity: number) => {
+    const o = Math.min(1, Math.max(0.15, opacity));
+    setMapUiChromeOpacity(o);
+    await set('mapp-map-ui-chrome-opacity', o);
+  };
+
+  const handleMapUiChromeBlurPxChange = async (blurPx: number) => {
+    const b = Math.min(48, Math.max(0, Math.round(blurPx)));
+    setMapUiChromeBlurPx(b);
+    await set('mapp-map-ui-chrome-blur-px', b);
+  };
+
   if (isLoading) {
     return (
-      <div className="w-full min-h-screen flex flex-col items-center justify-center text-white" style={{ backgroundColor: themeColor }}>
+      <div className="w-full min-h-screen flex flex-col items-center justify-center text-theme-chrome-fg" style={{ backgroundColor: themeColor }}>
          <Loader2 size={48} className="animate-spin mb-4" />
          <div className="font-bold text-xl">Loading your maps...</div>
       </div>
@@ -931,6 +995,10 @@ export default function App() {
           onCleanupBrokenReferences={handleCleanupBrokenReferences}
          themeColor={themeColor}
          onThemeColorChange={handleThemeColorChange}
+         mapUiChromeOpacity={mapUiChromeOpacity}
+         onMapUiChromeOpacityChange={handleMapUiChromeOpacityChange}
+         mapUiChromeBlurPx={mapUiChromeBlurPx}
+         onMapUiChromeBlurPxChange={handleMapUiChromeBlurPxChange}
       />
       </div>
     );
@@ -979,7 +1047,7 @@ export default function App() {
       {isSidebarOpen && isUIVisible && (
           <div className="fixed inset-0 z-[2000] flex overflow-hidden">
              <motion.div 
-               className="fixed inset-0 bg-black/20 backdrop-blur-sm" 
+               className="fixed inset-0 bg-black/20"
                onClick={() => setIsSidebarOpen(false)}
                initial={{ opacity: 0 }}
                animate={{ opacity: 1 }}
@@ -1031,7 +1099,7 @@ export default function App() {
       )}
       </AnimatePresence>
 
-      <div className="flex-1 relative overflow-hidden z-0">
+      <div className="flex-1 relative min-h-0 overflow-hidden z-0">
         
         {/* 同步状态指示器 - 只在侧边栏打开时显示（在侧边栏内） */}
         {/* 主视图中不再显示云图标，统一在侧边栏显示 */}
@@ -1091,7 +1159,7 @@ export default function App() {
                  sidebarButtonDragRef.current.isDragging = false;
                }, 10);
              }}
-            className="absolute left-0 z-[900] pl-3 pr-4 rounded-r-xl shadow-lg text-white transition-none cursor-move"
+            className="absolute left-0 z-[900] pl-3 pr-4 rounded-r-xl shadow-lg text-theme-chrome-fg transition-none cursor-move"
              style={{ 
                backgroundColor: themeColor,
                top: `${sidebarButtonY}px`, 
@@ -1165,6 +1233,12 @@ export default function App() {
             setIsRouteMode={setIsRouteMode}
             waypoints={waypoints}
             setWaypoints={setWaypoints}
+            onThemeColorChange={handleThemeColorChange}
+            mapUiChromeOpacity={mapUiChromeOpacity}
+            mapUiChromeBlurPx={mapUiChromeBlurPx}
+            onMapUiChromeOpacityChange={handleMapUiChromeOpacityChange}
+            onMapUiChromeBlurPxChange={handleMapUiChromeBlurPxChange}
+            panelChromeStyle={panelChromeStyle}
           />
         ) : viewMode === 'board' ? (
           <BoardView 
@@ -1175,11 +1249,6 @@ export default function App() {
             onDeleteNotesBatch={deleteNotesBatch}
             onToggleEditor={setIsEditorOpen}
             onEditModeChange={setIsBoardEditMode}
-            connections={activeProject.connections || emptyConnections}
-            onUpdateConnections={async (connections) => {
-              if (!currentProjectId || !activeProject) return;
-              await projectState.updateProject({ ...activeProject, connections });
-            }}
             frames={activeProject.frames || emptyFrames}
             onUpdateFrames={async (frames) => {
               if (!currentProjectId || !activeProject) return;
@@ -1218,11 +1287,6 @@ export default function App() {
               // Set navigation coordinates and switch view
               navigateToMap(navigationCoords || undefined);
               setViewMode('map');
-
-              // Trigger MapView's file input after a short delay
-              setTimeout(() => {
-                mapViewFileInputRef.current?.click();
-              }, 200);
             }}
             onSwitchToBoardView={(coords?: { x: number; y: number }) => {
               if (coords) {
@@ -1232,18 +1296,39 @@ export default function App() {
             }}
             mapViewFileInputRef={mapViewFileInputRef}
             themeColor={themeColor}
+            panelChromeStyle={panelChromeStyle}
+            chromeHoverBackground={mapChromeHoverBg}
+            onThemeColorChange={handleThemeColorChange}
+            mapUiChromeOpacity={mapUiChromeOpacity}
+            onMapUiChromeOpacityChange={handleMapUiChromeOpacityChange}
+            mapUiChromeBlurPx={mapUiChromeBlurPx}
+            onMapUiChromeBlurPxChange={handleMapUiChromeBlurPxChange}
+            mapStyleId={mapStyle}
+            onMapStyleChange={setMapStyle}
           />
-        ) : viewMode === 'gallery' ? (
-          <GalleryView
+        ) : viewMode === 'graph' ? (
+          <GraphView
+            projectId={currentProjectId ?? ''}
             project={activeProject}
+            themeColor={themeColor}
+            isUIVisible={isUIVisible}
+            onUpdateNote={updateNote}
+            onDeleteNote={deleteNote}
+            onToggleEditor={setIsEditorOpen}
+            onUpdateConnections={async (connections) => {
+              if (!currentProjectId || !activeProject) return;
+              await projectState.updateProject({ ...activeProject, connections });
+            }}
+            onSwitchToBoardView={(coords?: { x: number; y: number }) => {
+              if (coords) {
+                navigateToBoard(coords);
+              }
+              setViewMode('board');
+            }}
             onSwitchToMapView={(coords?: { lat: number; lng: number; zoom?: number }) => {
-              // Close editor first to ensure UI state is correct
               setIsEditorOpen(false);
-
-              // Prepare navigation coordinates
               let navigationCoords = coords;
               if (!navigationCoords && currentProjectId) {
-                // Read cached position from previous map session
                 const cached = getViewPositionCache(currentProjectId, 'map');
                 if (cached?.center && cached.zoom) {
                   navigationCoords = {
@@ -1253,25 +1338,32 @@ export default function App() {
                   };
                 }
               }
-
-              // Set navigation coordinates and switch view
               navigateToMap(navigationCoords || undefined);
               setViewMode('map');
             }}
-            onSwitchToBoardView={() => {
-              // Close editor first to ensure UI state is correct
-              setIsEditorOpen(false);
-              setViewMode('board');
-            }}
-            themeColor={themeColor}
+            panelChromeStyle={panelChromeStyle}
+            chromeHoverBackground={mapChromeHoverBg}
+            onThemeColorChange={handleThemeColorChange}
+            mapUiChromeOpacity={mapUiChromeOpacity}
+            onMapUiChromeOpacityChange={handleMapUiChromeOpacityChange}
+            mapUiChromeBlurPx={mapUiChromeBlurPx}
+            onMapUiChromeBlurPxChange={handleMapUiChromeBlurPxChange}
+            mapStyleId={mapStyle}
+            onMapStyleChange={setMapStyle}
+            onUpdateProject={handleUpdateProject}
           />
         ) : (
           <TableView 
             project={activeProject}
             onUpdateNote={updateNote}
+            onDeleteNote={deleteNote}
             onUpdateFrames={async (frames) => {
               if (!currentProjectId || !activeProject) return;
               await projectState.updateProject({ ...activeProject, frames });
+            }}
+            onUpdateConnections={async (connections) => {
+              if (!currentProjectId || !activeProject) return;
+              await projectState.updateProject({ ...activeProject, connections });
             }}
             onSwitchToBoardView={(coords?: { x: number; y: number }) => {
               if (coords) {
@@ -1280,33 +1372,37 @@ export default function App() {
               setViewMode('board');
             }}
             themeColor={themeColor}
+            panelChromeStyle={panelChromeStyle}
+            isUIVisible={isUIVisible}
+            chromeHoverBackground={mapChromeHoverBg}
+            onThemeColorChange={handleThemeColorChange}
+            mapUiChromeOpacity={mapUiChromeOpacity}
+            onMapUiChromeOpacityChange={handleMapUiChromeOpacityChange}
+            mapUiChromeBlurPx={mapUiChromeBlurPx}
+            onMapUiChromeBlurPxChange={handleMapUiChromeBlurPxChange}
+            mapStyleId={mapStyle}
+            onMapStyleChange={setMapStyle}
+            projectId={currentProjectId ?? ''}
+            onUpdateProject={handleUpdateProject}
           />
         )}
       </div>
 
-      {/* Upload Button - only show in mapping view */}
-      {viewMode === 'map' && !isEditorOpen && !isBoardEditMode && activeProject && isUIVisible && (
-        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-4 fade-in">
-          <button
-            onClick={() => setShowMapImportMenu(!showMapImportMenu)}
-            className="w-12 h-12 rounded-full shadow-xl border-1 border-white flex items-center justify-center transition-all hover:scale-105 active:scale-95"
-            style={{ backgroundColor: themeColor }}
-            title="Upload Photos"
-          >
-            <Plus size={24} className="text-white" />
-          </button>
-        </div>
-      )}
-
       {!isEditorOpen && !isBoardEditMode && isUIVisible && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-white/90 backdrop-blur-md p-1.5 rounded-2xl shadow-xl border border-white/50 flex gap-1 animate-in slide-in-from-bottom-4 fade-in">
+        <div
+          data-allow-context-menu
+          className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-50 max-w-[min(100vw-1rem,28rem)] p-1.5 rounded-2xl shadow-xl border flex flex-wrap justify-center gap-1 animate-in slide-in-from-bottom-4 fade-in ${
+            panelChromeStyle ? 'border-gray-200/80 ring-1 ring-black/[0.04]' : 'border-white/50 map-chrome-surface-fallback'
+          }`}
+          style={panelChromeStyle}
+        >
           <button
             onClick={() => !isImportDialogOpen && setViewMode('map')}
             disabled={isImportDialogOpen}
             className={`
               flex items-center gap-2 ${viewMode === 'map' ? 'px-4' : 'px-3'} py-2 rounded-xl transition-all font-bold text-sm
               ${viewMode === 'map' 
-                ? 'text-white shadow-md scale-105' 
+                ? 'text-theme-chrome-fg shadow-md scale-105' 
                 : 'hover:bg-gray-100 text-gray-500'}
               ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
             `}
@@ -1325,7 +1421,7 @@ export default function App() {
             className={`
               flex items-center gap-2 ${viewMode === 'board' ? 'px-4' : 'px-3'} py-2 rounded-xl transition-all font-bold text-sm
               ${viewMode === 'board' 
-                ? 'text-white shadow-md scale-105' 
+                ? 'text-theme-chrome-fg shadow-md scale-105' 
                 : 'hover:bg-gray-100 text-gray-500'}
               ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
             `}
@@ -1335,19 +1431,19 @@ export default function App() {
             {viewMode === 'board' && 'Board'}
           </button>
           <button
-            onClick={() => !isImportDialogOpen && setViewMode('gallery')}
+            onClick={() => !isImportDialogOpen && setViewMode('graph')}
             disabled={isImportDialogOpen}
             className={`
-              flex items-center gap-2 ${viewMode === 'gallery' ? 'px-4' : 'px-3'} py-2 rounded-xl transition-all font-bold text-sm
-              ${viewMode === 'gallery'
-                ? 'text-white shadow-md scale-105'
+              flex items-center gap-2 ${viewMode === 'graph' ? 'px-4' : 'px-3'} py-2 rounded-xl transition-all font-bold text-sm
+              ${viewMode === 'graph' 
+                ? 'text-theme-chrome-fg shadow-md scale-105' 
                 : 'hover:bg-gray-100 text-gray-500'}
               ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
             `}
-            style={viewMode === 'gallery' ? { backgroundColor: themeColor } : undefined}
+            style={viewMode === 'graph' ? { backgroundColor: themeColor } : undefined}
           >
-            <ImageIcon size={20} />
-            {viewMode === 'gallery' && 'Gallery'}
+            <GitBranch size={20} />
+            {viewMode === 'graph' && 'graph'}
           </button>
           <button
             onClick={() => !isImportDialogOpen && setViewMode('table')}
@@ -1355,7 +1451,7 @@ export default function App() {
             className={`
               flex items-center gap-2 ${viewMode === 'table' ? 'px-4' : 'px-3'} py-2 rounded-xl transition-all font-bold text-sm
               ${viewMode === 'table' 
-                ? 'text-white shadow-md scale-105' 
+                ? 'text-theme-chrome-fg shadow-md scale-105' 
                 : 'hover:bg-gray-100 text-gray-500'}
               ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
             `}

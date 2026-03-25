@@ -15,7 +15,13 @@ export const EMOJI_LIST = EMOJI_CATEGORIES['Recent'];
 export const MAP_TILE_URL = "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png";
 export const MAP_TILE_URL_FALLBACK = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 export const MAP_SATELLITE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+// 1x1 transparent PNG tile for "blank background" map style.
+// Leaflet will request it for each tile, but the image itself is empty.
+export const MAP_BLANK_TILE_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+Xx7wAAAAASUVORK5CYII=';
 export const MAP_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
+export const MAP_SATELLITE_ATTRIBUTION =
+  'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community';
 
 // Map Style Options
 export interface MapStyleOption {
@@ -27,6 +33,18 @@ export interface MapStyleOption {
 }
 
 export const MAP_STYLE_OPTIONS: MapStyleOption[] = [
+  {
+    id: 'blank',
+    name: '空白背景',
+    url: MAP_BLANK_TILE_URL,
+    attribution: '',
+  },
+  {
+    id: 'satellite',
+    name: '卫星背景',
+    url: MAP_SATELLITE_URL,
+    attribution: MAP_SATELLITE_ATTRIBUTION,
+  },
   {
     id: 'carto-light-nolabels',
     name: 'Carto Light (No Labels)',

@@ -5,13 +5,15 @@ interface UseFileDropProps {
   themeColor: string;
   handleImageImport: (files: FileList | null, showLimitMessage?: boolean) => void;
   handleDataImport: (file: File) => void;
+  handleCsvImport: (file: File) => void;
 }
 
 export function useFileDrop({
   isEditorOpen,
   themeColor,
   handleImageImport,
-  handleDataImport
+  handleDataImport,
+  handleCsvImport
 }: UseFileDropProps) {
   const [isDragging, setIsDragging] = useState(false);
 
@@ -75,6 +77,10 @@ export function useFileDrop({
         (file: File) =>
           file.type === 'application/json' || file.name.endsWith('.json')
       );
+      const csvFiles = Array.from(files).filter(
+        (file: File) =>
+          file.type === 'text/csv' || file.name.toLowerCase().endsWith('.csv')
+      );
 
       if (imageFiles.length > 0) {
         const dataTransfer = new DataTransfer();
@@ -82,9 +88,11 @@ export function useFileDrop({
         handleImageImport(dataTransfer.files, true);
       } else if (jsonFiles.length > 0 && jsonFiles[0]) {
         handleDataImport(jsonFiles[0] as File);
+      } else if (csvFiles.length > 0 && csvFiles[0]) {
+        handleCsvImport(csvFiles[0] as File);
       }
     },
-    [isEditorOpen, handleImageImport, handleDataImport]
+    [isEditorOpen, handleImageImport, handleDataImport, handleCsvImport]
   );
 
   const rootProps = {

@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
 import { Note } from '../../types';
-import { loadImage } from '../../utils/storage';
+import { loadImage } from '../../utils/persistence/storage';
 
 export interface ImportPreview {
   file: File;

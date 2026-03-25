@@ -2,7 +2,7 @@
  * Image processing utilities - fingerprint calculation, pixel sampling, etc.
  */
 
-import type { Note } from '../types';
+import type { Note } from '../../types';
 
 /**
  * Image fingerprint: GPS coordinates + 3 sampled pixels (top-left, bottom-left, bottom-right)

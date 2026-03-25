@@ -1,5 +1,6 @@
 import { get, set, del, keys } from 'idb-keyval';
-import { Project, Note } from '../types';
+import { Project, Note } from '../../types';
+import type { GraphLayoutMode } from '../graph/graphRuntimeCore';
 
 // Storage keys
 const PROJECT_LIST_KEY = 'mapp-project-list';
@@ -37,10 +38,33 @@ export function setViewPositionCache(projectId: string, viewType: 'map' | 'board
   }
 }
 
+const getGraphLayoutCacheKey = (projectId: string): string => `mapp-graph-layout-${projectId}`;
+
+export function getGraphLayoutCache(projectId: string): GraphLayoutMode | null {
+  if (!projectId) return null;
+  try {
+    const raw = sessionStorage.getItem(getGraphLayoutCacheKey(projectId));
+    if (raw === 'tagGrid' || raw === 'circle' || raw === 'time' || raw === 'cose') return raw;
+  } catch (err) {
+    console.warn('Failed to load graph layout cache', err);
+  }
+  return null;
+}
+
+export function setGraphLayoutCache(projectId: string, mode: GraphLayoutMode): void {
+  if (!projectId) return;
+  try {
+    sessionStorage.setItem(getGraphLayoutCacheKey(projectId), mode);
+  } catch (err) {
+    console.warn('Failed to save graph layout cache', err);
+  }
+}
+
 export function clearViewPositionCache(projectId: string): void {
   try {
     sessionStorage.removeItem(getViewPositionCacheKey(projectId, 'map'));
     sessionStorage.removeItem(getViewPositionCacheKey(projectId, 'board'));
+    sessionStorage.removeItem(getGraphLayoutCacheKey(projectId));
   } catch (err) {
     console.warn('Failed to clear view position cache', err);
   }
@@ -1304,9 +1328,13 @@ function ensureNoteVariant(note: Note): Note {
     return { ...note, variant: 'standard' };
   }
   
-  // 对于旧数据，如果 variant 不在有效值列表中，修复为 standard
-  const validVariants: ('standard' | 'compact' | 'image')[] = ['standard', 'compact', 'image'];
-  if (!validVariants.includes(note.variant)) {
+  // 小便签 compact 已废弃，统一为大便签 standard（旧 JSON 仍可能带 compact）
+  const rawVariant = (note as { variant?: string }).variant;
+  if (rawVariant === 'compact') {
+    return ensureNoteVariant({ ...note, variant: 'standard' });
+  }
+  const validVariants: ('standard' | 'image')[] = ['standard', 'image'];
+  if (!validVariants.includes(note.variant as 'standard' | 'image')) {
     return { ...note, variant: 'standard' };
   }
   

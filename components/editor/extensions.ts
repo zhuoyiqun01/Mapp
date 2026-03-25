@@ -1,6 +1,5 @@
 import { Extension } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
-import Placeholder from '@tiptap/extension-placeholder';
 import { Markdown } from 'tiptap-markdown';
 
 // Custom extension to handle Feishu-like backspace behavior
@@ -46,9 +45,6 @@ export const EDITOR_EXTENSIONS = [
     heading: {
       levels: [1, 2, 3]
     }
-  }),
-  Placeholder.configure({
-    placeholder: '在此输入内容 (支持 Markdown 语法)...'
   }),
   Markdown.configure({
     html: false,

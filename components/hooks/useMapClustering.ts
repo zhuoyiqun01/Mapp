@@ -51,7 +51,8 @@ function calculatePinDistance(
 function detectClusters(
   notes: Note[],
   map: L.Map,
-  threshold: number
+  threshold: number,
+  forceSingleNoteIds: string[] = []
 ): ClusterResult[] {
   if (!map || notes.length === 0) return [];
 
@@ -63,6 +64,7 @@ function detectClusters(
   }
 
   const sortedNotes = sortNotes(notes);
+  const forceSet = new Set(forceSingleNoteIds);
   const clusters: ClusterResult[] = [];
   const processed = new Set<string>();
 
@@ -72,15 +74,19 @@ function detectClusters(
     const cluster: Note[] = [note];
     processed.add(note.id);
 
-    sortedNotes.forEach((otherNote) => {
-      if (processed.has(otherNote.id)) return;
+    // 被强制单独显示的点不与其他点聚合
+    if (!forceSet.has(note.id)) {
+      sortedNotes.forEach((otherNote) => {
+        if (processed.has(otherNote.id)) return;
+        if (forceSet.has(otherNote.id)) return;
 
-      const distance = calculatePinDistance(map, note, otherNote);
-      if (distance !== null && distance < threshold) {
-        cluster.push(otherNote);
-        processed.add(otherNote.id);
-      }
-    });
+        const distance = calculatePinDistance(map, note, otherNote);
+        if (distance !== null && distance < threshold) {
+          cluster.push(otherNote);
+          processed.add(otherNote.id);
+        }
+      });
+    }
 
     const clusterNotes = sortNotes(cluster);
     const bottomNote = clusterNotes[0];
@@ -97,12 +103,15 @@ interface UseMapClusteringProps {
   mapInstance: L.Map | null;
   getFilteredNotes: () => Note[];
   clusterThreshold: number;
+  /** 这些 noteId 强制不参与聚合，始终以单独 pin 显示（用于连线端点） */
+  forceSingleNoteIds?: string[];
 }
 
 export function useMapClustering({
   mapInstance,
   getFilteredNotes,
-  clusterThreshold
+  clusterThreshold,
+  forceSingleNoteIds = []
 }: UseMapClusteringProps) {
   const [clusteredMarkers, setClusteredMarkers] = useState<ClusterResult[]>([]);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -155,7 +164,8 @@ export function useMapClustering({
           const clusters = detectClusters(
             getFilteredNotes(),
             currentMap,
-            clusterThreshold
+            clusterThreshold,
+            forceSingleNoteIds
           );
           setClusteredMarkers(clusters);
         } catch (e) {

@@ -34,7 +34,7 @@ export function useNoteState({ initialNote, isOpen }: UseNoteStateArgs) {
   const [newTagLabel, setNewTagLabel] = useState('');
   const [newTagColor, setNewTagColor] = useState(TAG_COLORS[2]);
 
-  const isCompactMode = initialNote?.variant === 'compact';
+  const isCompactMode = false;
 
   // Track if editor was just opened to only reset state on open, not on every initialNote change
   const prevIsOpenRef = useRef(false);

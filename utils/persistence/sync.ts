@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Project } from '../types';
+import { Project } from '../../types';
 
 // Supabase configuration
 // These values need to be obtained from Supabase project settings

@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>社交网络关系编辑器 (SNA Station Pro)</title>
+    <!-- 引入 Tailwind CSS 及 Typography 插件 -->
+    <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- HTML Label 插件，用于在节点上渲染 HTML -->
+    <script src="https://cdn.jsdelivr.net/npm/cytoscape-node-html-label@1.2.2/dist/cytoscape-node-html-label.min.js"></script>
+    <!-- 布局算法 -->
+    <script src="https://unpkg.com/layout-base/layout-base.js"></script>
+    <script src="https://unpkg.com/cose-base/cose-base.js"></script>
+    <script src="https://unpkg.com/cytoscape-cose-bilkent/cytoscape-cose-bilkent.js"></script>
+    <style>
+        #cy {
+            width: 100%;
+            height: calc(100vh - 64px);
+            background: #ffffff;
+            background-image: radial-gradient(#e5e7eb 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+        .prose { max-width: none !important; }
+        /* 自定义滚动条 */
+        .custom-scrollbar::-webkit-scrollbar { width: 3px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        
+        .view-btn-active {
+            background-color: #4f46e5 !important;
+            color: white !important;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        }
+
+        /* 强制覆盖 prose 内的边距以适应小卡片 */
+        .card-prose p { margin-top: 0.25rem !important; margin-bottom: 0.25rem !important; }
+        .card-prose h1, .card-prose h2 { margin-top: 0.5rem !important; margin-bottom: 0.25rem !important; font-size: 1rem !important; }
+        .card-prose ul, .card-prose ol { margin-top: 0.25rem !important; margin-bottom: 0.25rem !important; }
+    </style>
+</head>
+<body class="bg-gray-50 overflow-hidden font-sans">
+
+    <!-- 导航栏 -->
+    <nav class="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 z-10 relative shadow-sm">
+        <div class="flex items-center gap-3">
+            <div class="p-2 bg-indigo-600 rounded-lg text-white font-bold">SN</div>
+            <h1 class="text-xl font-bold text-gray-800 tracking-tight">关系网络工作站 <span class="text-xs font-normal text-gray-400 ml-2 italic text-indigo-500" id="currentViewName">关系图模式</span></h1>
+        </div>
+        
+        <!-- 视图切换 -->
+        <div class="flex items-center bg-gray-100 p-1 rounded-lg border border-gray-200">
+            <button onclick="switchView('graph')" id="btnGraphView" class="view-btn-active px-4 py-1.5 rounded-md text-sm font-medium transition-all">
+                关系图
+            </button>
+            <button onclick="switchView('card')" id="btnCardView" class="px-4 py-1.5 text-gray-500 rounded-md text-sm font-medium transition-all hover:bg-gray-200">
+                卡片墙
+            </button>
+        </div>
+
+        <div class="flex items-center gap-2">
+            <button onclick="applyTimeLayout()" class="px-4 py-2 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-md text-sm font-medium transition border border-indigo-200">时间轴重排</button>
+            <button onclick="exportData()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm font-medium transition">导出 JSON</button>
+        </div>
+    </nav>
+
+    <div class="flex h-full">
+        <!-- 侧边栏 -->
+        <aside id="sidebar" class="w-80 bg-white border-r border-gray-200 p-6 flex flex-col gap-6 overflow-y-auto pb-24 shadow-sm custom-scrollbar">
+            <section>
+                <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">添加新节点</h2>
+                <div class="flex flex-col gap-3">
+                    <input type="text" id="nodeName" placeholder="人物名称" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 outline-none text-sm">
+                    <div class="flex gap-2">
+                        <input type="date" id="nodeDate" class="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 outline-none text-sm">
+                        <select id="nodeCluster" class="w-24 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 outline-none text-sm bg-white">
+                            <option value="A">群组 A</option>
+                            <option value="B">群组 B</option>
+                            <option value="C">群组 C</option>
+                        </select>
+                    </div>
+                    <button onclick="addNode()" class="w-full py-2 bg-indigo-50 text-indigo-600 font-semibold rounded-md hover:bg-indigo-100 transition text-sm text-center">确认添加</button>
+                </div>
+            </section>
+
+            <section id="relationSection" class="border-t pt-6">
+                <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">建立关系线</h2>
+                <div class="flex flex-col gap-3 text-sm">
+                    <div class="grid grid-cols-2 gap-2">
+                        <input type="text" id="sourceId" placeholder="源节点" class="px-3 py-2 border border-gray-300 rounded-md bg-gray-50 font-mono text-xs cursor-default" readonly>
+                        <input type="text" id="targetId" placeholder="目标节点" class="px-3 py-2 border border-gray-300 rounded-md bg-gray-50 font-mono text-xs cursor-default" readonly>
+                    </div>
+                    <input type="text" id="edgeLabel" placeholder="关系描述" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 outline-none">
+                    <div class="flex items-center gap-2">
+                         <span class="text-gray-500 text-xs shrink-0">权重:</span>
+                         <input type="range" id="edgeWeight" min="1" max="10" value="1" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
+                    </div>
+                    <button onclick="addEdge()" class="w-full py-2 bg-green-50 text-green-600 font-semibold rounded-md hover:bg-green-100 transition text-center">建立连接</button>
+                </div>
+            </section>
+        </aside>
+
+        <!-- 主画布 -->
+        <main class="flex-1 relative">
+            <div id="cy"></div>
+            
+            <!-- 详情面板 -->
+            <div id="infoPanel" class="hidden absolute top-4 right-4 w-96 bg-white border border-gray-200 rounded-xl shadow-2xl flex flex-col max-h-[90%] overflow-hidden">
+                <div class="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                    <h3 class="font-bold text-gray-800 truncate flex items-center gap-2" id="infoTitle">详情</h3>
+                    <button onclick="hidePanel()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+                </div>
+                <div class="flex-1 overflow-y-auto p-5 custom-scrollbar" id="infoContent"></div>
+                <div class="p-4 border-t border-gray-100 bg-white">
+                    <details class="group">
+                        <summary class="list-none flex items-center justify-between text-xs font-semibold text-gray-400 cursor-pointer hover:text-indigo-600 uppercase tracking-widest outline-none">
+                            <span>更多选项</span>
+                            <svg class="w-4 h-4 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                        </summary>
+                        <div class="mt-4 space-y-4 text-sm" id="moreOptionsContent"></div>
+                    </details>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // 初始化数据
+        let initialElements = [
+            { data: { id: 'n1', label: '张三', cluster: 'A', timestamp: '2023-01-10', description: '# 个人简介\n这是核心节点 **张三**。\n\n- 擅长：社交\n- 活跃：极高\n\n> 备注：核心发起人。' }, position: { x: 200, y: 300 } },
+            { data: { id: 'n2', label: '李四', cluster: 'B', timestamp: '2023-05-15', description: '## 技术专员\n负责后端架构设计，擅长 **Go** 和 **Rust**。' }, position: { x: 500, y: 300 } },
+            { data: { id: 'e1', source: 'n1', target: 'n2', weight: 3, label: '合作', direction: 'forward' } }
+        ];
+
+        let currentMode = 'graph';
+
+        // 配置 Cytoscape
+        var cy = cytoscape({
+            container: document.getElementById('cy'),
+            elements: initialElements,
+            style: [
+                {
+                    selector: 'node',
+                    style: {
+                        'label': 'data(label)',
+                        'background-color': '#6366f1',
+                        'color': '#374151',
+                        'text-valign': 'bottom',
+                        'text-margin-y': 6,
+                        'font-size': '12px',
+                        'font-weight': 'bold',
+                        'width': 32,
+                        'height': 32
+                    }
+                },
+                { selector: 'node[cluster="A"]', style: { 'background-color': '#ef4444' } },
+                { selector: 'node[cluster="B"]', style: { 'background-color': '#10b981' } },
+                { selector: 'node[cluster="C"]', style: { 'background-color': '#f59e0b' } },
+                { selector: 'node:selected', style: { 'border-width': 4, 'border-color': '#c7d2fe' } },
+                { 
+                    selector: 'edge', 
+                    style: { 
+                        'label': 'data(label)', 
+                        'width': 'mapData(weight, 1, 10, 1, 8)', 
+                        'line-color': '#e5e7eb', 
+                        'curve-style': 'bezier', 
+                        'target-arrow-shape': 'triangle', 
+                        'target-arrow-color': '#e5e7eb', 
+                        'font-size': '10px',
+                        'text-rotation': 'autorotate',
+                        'text-margin-y': -10
+                    } 
+                },
+                // 箭头方向样式增强
+                { selector: 'edge[direction="forward"]', style: { 'source-arrow-shape': 'none', 'target-arrow-shape': 'triangle' } },
+                { selector: 'edge[direction="backward"]', style: { 'source-arrow-shape': 'triangle', 'target-arrow-shape': 'none' } },
+                { selector: 'edge[direction="both"]', style: { 'source-arrow-shape': 'triangle', 'target-arrow-shape': 'triangle' } },
+                { selector: 'edge:selected', style: { 'line-color': '#6366f1', 'target-arrow-color': '#6366f1', 'source-arrow-color': '#6366f1' } },
+                
+                // 卡片模式样式设定
+                { selector: 'node.view-card', style: { 'shape': 'round-rectangle', 'width': 260, 'height': 180, 'background-opacity': 0, 'border-width': 0, 'label': '' } },
+                { selector: 'edge.view-card-hidden', style: { 'display': 'none' } }
+            ]
+        });
+
+        // 初始化 HTML Label 插件
+        cy.nodeHtmlLabel([
+            {
+                query: '.view-card',
+                halign: 'center', valign: 'center',
+                halignBox: 'center', valignBox: 'center',
+                tpl: function(data) {
+                    const dateStr = data.timestamp || '无日期';
+                    const rawDesc = data.description || '*暂无内容*';
+                    const renderedContent = marked.parse(rawDesc);
+                    const colors = { 'A': '#ef4444', 'B': '#10b981', 'C': '#f59e0b' };
+                    const accentColor = colors[data.cluster] || '#6366f1';
+
+                    return `
+                        <div class="flex flex-col bg-white border border-gray-200 rounded-xl shadow-xl w-[260px] h-[180px] overflow-hidden select-none pointer-events-none">
+                            <div class="px-3 py-2 flex justify-between items-center shrink-0" style="background-color: ${accentColor}">
+                                <span class="text-white text-sm font-bold truncate">${data.label}</span>
+                                <span class="text-white/80 text-[10px] font-mono">${dateStr}</span>
+                            </div>
+                            <div class="p-4 flex-1 overflow-y-auto custom-scrollbar prose prose-xs card-prose bg-white text-gray-600">
+                                ${renderedContent}
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+        ]);
+
+        function switchView(mode) {
+            currentMode = mode;
+            const btnGraph = document.getElementById('btnGraphView');
+            const btnCard = document.getElementById('btnCardView');
+            const relationSection = document.getElementById('relationSection');
+            const currentViewName = document.getElementById('currentViewName');
+
+            if (mode === 'card') {
+                btnCard.classList.add('view-btn-active');
+                btnCard.classList.remove('text-gray-500');
+                btnGraph.classList.remove('view-btn-active');
+                btnGraph.classList.add('text-gray-500');
+                relationSection.classList.add('opacity-30', 'pointer-events-none');
+                currentViewName.textContent = '卡片墙模式';
+                
+                cy.nodes().addClass('view-card');
+                cy.edges().addClass('view-card-hidden');
+                
+                cy.layout({ name: 'grid', animate: true, padding: 80, spacingFactor: 1.3 }).run();
+            } else {
+                btnGraph.classList.add('view-btn-active');
+                btnGraph.classList.remove('text-gray-500');
+                btnCard.classList.remove('view-btn-active');
+                btnCard.classList.add('text-gray-500');
+                relationSection.classList.remove('opacity-30', 'pointer-events-none');
+                currentViewName.textContent = '关系图模式';
+
+                cy.nodes().removeClass('view-card');
+                cy.edges().removeClass('view-card-hidden');
+                
+                cy.layout({ name: 'cose-bilkent', animate: true, padding: 50 }).run();
+            }
+        }
+
+        // 交互逻辑
+        let activeElement = null;
+        cy.on('tap', 'node', function(evt){
+            activeElement = evt.target;
+            if(currentMode === 'graph') {
+                if(!document.getElementById('sourceId').value) document.getElementById('sourceId').value = activeElement.id();
+                else if(!document.getElementById('targetId').value) document.getElementById('targetId').value = activeElement.id();
+            }
+            showNodePanel(activeElement);
+        });
+        cy.on('tap', 'edge', function(evt){
+            if(currentMode === 'card') return;
+            activeElement = evt.target;
+            showEdgePanel(activeElement);
+        });
+        cy.on('tap', function(event){ if(event.target === cy) hidePanel(); });
+
+        function showNodePanel(node) {
+            const data = node.data();
+            document.getElementById('infoTitle').textContent = data.label;
+            const content = `
+                <div class="mb-4">
+                    <label class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">姓名</label>
+                    <input type="text" value="${data.label}" onchange="updateActiveData('label', this.value)" class="w-full border-b focus:border-indigo-500 outline-none py-1 font-bold text-lg transition-colors">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">发生时间</label>
+                    <input type="date" value="${data.timestamp || ''}" onchange="updateActiveData('timestamp', this.value)" class="w-full border-b outline-none text-sm text-indigo-600 font-medium">
+                </div>
+                <div class="mb-4">
+                    <div class="flex justify-between items-center mb-1">
+                        <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider">简介 (Markdown)</label>
+                        <button onclick="toggleEditMd()" id="mdToggleBtn" class="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">编辑</button>
+                    </div>
+                    <div id="mdDisplay" class="prose prose-sm text-gray-700 min-h-[120px] p-4 bg-gray-50 rounded-lg border border-gray-100 shadow-inner">
+                        ${marked.parse(data.description || '*暂无详细说明...*')}
+                    </div>
+                    <textarea id="mdEditor" class="hidden w-full h-48 p-4 text-xs border border-indigo-200 rounded-lg outline-none font-mono leading-relaxed" onchange="updateActiveData('description', this.value)">${data.description || ''}</textarea>
+                </div>
+            `;
+            const more = `
+                <div class="grid grid-cols-2 gap-4 bg-gray-50 p-3 rounded border border-gray-100 mb-4">
+                    <div><span class="text-[10px] text-gray-400 block">ID</span><span class="text-xs font-mono">${data.id}</span></div>
+                    <div><span class="text-[10px] text-gray-400 block">连接数</span><span class="text-xs font-bold">${node.degree()}</span></div>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-xs font-bold text-gray-400 mb-2">切换群组</label>
+                    <select onchange="updateActiveData('cluster', this.value)" class="w-full px-3 py-2 border rounded text-xs bg-white focus:ring-2 focus:ring-indigo-500 outline-none">
+                        <option value="A" ${data.cluster === 'A' ? 'selected' : ''}>群组 A (红)</option>
+                        <option value="B" ${data.cluster === 'B' ? 'selected' : ''}>群组 B (绿)</option>
+                        <option value="C" ${data.cluster === 'C' ? 'selected' : ''}>群组 C (橙)</option>
+                    </select>
+                </div>
+                <button onclick="deleteActive()" class="w-full py-2 bg-red-50 text-red-600 rounded text-xs font-bold hover:bg-red-100 transition-colors">永久删除节点</button>
+            `;
+            document.getElementById('infoContent').innerHTML = content;
+            document.getElementById('moreOptionsContent').innerHTML = more;
+            document.getElementById('infoPanel').classList.remove('hidden');
+        }
+
+        function showEdgePanel(edge) {
+            const data = edge.data();
+            document.getElementById('infoTitle').textContent = `连线详情`;
+            
+            // 恢复权重与方向修改的 UI
+            document.getElementById('infoContent').innerHTML = `
+                <div class="mb-6">
+                    <label class="block text-xs font-bold text-gray-400 mb-1 uppercase tracking-wider">关系描述</label>
+                    <input type="text" value="${data.label || ''}" onchange="updateActiveData('label', this.value)" class="w-full border-b mb-2 font-bold text-md outline-none focus:border-indigo-500 transition-colors">
+                </div>
+                
+                <div class="mb-6">
+                    <label class="block text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider">方向选择</label>
+                    <div class="flex p-1 bg-gray-100 rounded-lg gap-1">
+                        <button onclick="updateActiveData('direction', 'forward')" class="flex-1 py-1.5 rounded-md text-[10px] font-bold transition-all ${data.direction === 'forward' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}">A → B</button>
+                        <button onclick="updateActiveData('direction', 'backward')" class="flex-1 py-1.5 rounded-md text-[10px] font-bold transition-all ${data.direction === 'backward' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}">B → A</button>
+                        <button onclick="updateActiveData('direction', 'both')" class="flex-1 py-1.5 rounded-md text-[10px] font-bold transition-all ${data.direction === 'both' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:bg-gray-200'}">双向 ↔</button>
+                    </div>
+                </div>
+
+                <div class="mb-6">
+                    <label class="block text-xs font-bold text-gray-400 mb-2 flex justify-between uppercase tracking-wider">
+                        <span>关系强度 (权重)</span>
+                        <span class="text-indigo-600 font-bold" id="currentEdgeWeight">${data.weight || 1}</span>
+                    </label>
+                    <input type="range" min="1" max="10" value="${data.weight || 1}" 
+                        oninput="document.getElementById('currentEdgeWeight').textContent = this.value; updateActiveData('weight', this.value)" 
+                        class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
+                </div>
+
+                <button onclick="deleteActive()" class="w-full py-2 bg-red-50 text-red-600 rounded text-xs font-bold hover:bg-red-100 transition-colors">删除关系连接</button>
+            `;
+            
+            document.getElementById('moreOptionsContent').innerHTML = `<p class="text-[10px] text-gray-400">关系 ID: <span class="font-mono">${data.id}</span></p>`;
+            document.getElementById('infoPanel').classList.remove('hidden');
+        }
+
+        function updateActiveData(key, value) {
+            if(!activeElement) return;
+            
+            // 如果是权重，转为数字
+            let finalValue = value;
+            if(key === 'weight') finalValue = parseInt(value);
+            
+            activeElement.data(key, finalValue);
+            
+            // 实时触发重绘
+            if(activeElement.isNode()) {
+                cy.nodes().update(); 
+                if(key === 'description') {
+                    const mdDisplay = document.getElementById('mdDisplay');
+                    if (mdDisplay) mdDisplay.innerHTML = marked.parse(value || '*暂无详细说明...*');
+                }
+            } else {
+                // 如果是连线，刷新面板中的按钮状态（主要是方向切换）
+                if(key === 'direction') showEdgePanel(activeElement);
+            }
+        }
+
+        function toggleEditMd() {
+            const display = document.getElementById('mdDisplay'), editor = document.getElementById('mdEditor'), btn = document.getElementById('mdToggleBtn');
+            if(editor.classList.contains('hidden')) {
+                editor.classList.remove('hidden'); display.classList.add('hidden'); btn.textContent = "完成预览";
+            } else {
+                editor.classList.add('hidden'); display.classList.remove('hidden');
+                display.innerHTML = marked.parse(editor.value || '*暂无详细说明...*');
+                btn.textContent = "编辑";
+            }
+        }
+
+        function addNode() {
+            const name = document.getElementById('nodeName').value;
+            if(!name) return;
+            const node = cy.add({ group: 'nodes', data: { id: 'n'+Date.now(), label: name, cluster: document.getElementById('nodeCluster').value, timestamp: document.getElementById('nodeDate').value, description: '' }, position: { x: cy.width()/2, y: cy.height()/2 } });
+            if(currentMode === 'card') node.addClass('view-card');
+            document.getElementById('nodeName').value = '';
+        }
+
+        function addEdge() {
+            const s = document.getElementById('sourceId').value, t = document.getElementById('targetId').value;
+            if(!s || !t || s === t) return;
+            const edge = cy.add({ group: 'edges', data: { id: 'e'+Date.now(), source: s, target: t, weight: document.getElementById('edgeWeight').value, label: document.getElementById('edgeLabel').value, direction: 'forward' } });
+            if(currentMode === 'card') edge.addClass('view-card-hidden');
+            document.getElementById('sourceId').value = ''; document.getElementById('targetId').value = '';
+        }
+
+        function applyTimeLayout() {
+            const valid = cy.nodes().filter(n => n.data('timestamp'));
+            if(valid.length === 0) return alert("请先设置节点日期！");
+            const dates = valid.map(n => new Date(n.data('timestamp')).getTime());
+            const minT = Math.min(...dates), maxT = Math.max(...dates), range = (maxT - minT) || 86400000;
+            cy.nodes().layout({ name: 'preset', animate: true, transform: (n) => ({ x: 60 + ((new Date(n.data('timestamp') || 0).getTime() - minT)/range)*(cy.width()-120), y: 60 + (Math.random()*(cy.height()-120)) }) }).run();
+        }
+
+        function deleteActive() { if(activeElement) activeElement.remove(); hidePanel(); }
+        function hidePanel() { document.getElementById('infoPanel').classList.add('hidden'); }
+        function exportData() {
+            const blob = new Blob([JSON.stringify(cy.json(), null, 2)], {type : 'application/json'});
+            const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+            a.download = `sna_export_${Date.now()}.json`; a.click();
+        }
+    </script>
+</body>
+</html>

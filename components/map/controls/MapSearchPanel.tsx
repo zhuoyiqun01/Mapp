@@ -1,5 +1,6 @@
 import React from 'react';
 import { Search, X, Copy, Loader2 } from 'lucide-react';
+import { ChromeIconButton } from '../../ui/ChromeIconButton';
 
 export interface BorderSearchState {
   borderSearchQuery: string;
@@ -18,6 +19,8 @@ interface MapSearchPanelProps {
   isOpen: boolean;
   onToggle: () => void;
   themeColor: string;
+  chromeSurfaceStyle?: React.CSSProperties;
+  chromeHoverBackground?: string;
   borderSearch: BorderSearchState;
   borderGeoJSON: any;
   onClearBorder: () => void;
@@ -28,6 +31,8 @@ export const MapSearchPanel: React.FC<MapSearchPanelProps> = ({
   isOpen,
   onToggle,
   themeColor,
+  chromeSurfaceStyle,
+  chromeHoverBackground,
   borderSearch,
   borderGeoJSON,
   onClearBorder,
@@ -48,20 +53,23 @@ export const MapSearchPanel: React.FC<MapSearchPanelProps> = ({
 
   return (
   <div className="relative">
-    <button
+    <ChromeIconButton
+      themeColor={themeColor}
+      chromeSurfaceStyle={chromeSurfaceStyle}
+      chromeHoverBackground={chromeHoverBackground}
+      active={isOpen}
+      nonChromeIdleHover="none"
+      className="transition-all hover:scale-105 active:scale-95"
       onClick={onToggle}
-      className={`bg-white p-2 sm:p-3 rounded-xl shadow-lg transition-all w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center ${
-        isOpen ? 'text-white' : 'text-gray-700'
-      } hover:scale-105 active:scale-95`}
-      style={{ backgroundColor: isOpen ? themeColor : undefined }}
-      title="Search Region or Place"
+      title="搜索"
     >
       <Search size={18} className="sm:w-5 sm:h-5" />
-    </button>
+    </ChromeIconButton>
 
     {isOpen && (
       <div
-        className="absolute right-0 top-full mt-2 w-72 sm:w-80 bg-white rounded-2xl shadow-2xl border border-gray-100 p-4 z-[2000] animate-in fade-in slide-in-from-top-4"
+        className={`absolute right-0 top-full mt-2 w-72 sm:w-80 rounded-2xl shadow-2xl border border-gray-100 p-4 z-[2000] animate-in fade-in slide-in-from-top-4 ${chromeSurfaceStyle ? '' : 'bg-white'}`}
+        style={chromeSurfaceStyle}
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       >
@@ -122,7 +130,6 @@ export const MapSearchPanel: React.FC<MapSearchPanelProps> = ({
             <input
               autoFocus
               type="text"
-              placeholder={borderSearchMode === 'region' ? 'Search region (e.g. London)' : 'Search place (e.g. Cafe)'}
               value={borderSearchQuery}
               onChange={(e) => setBorderSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleBorderSearch()}
@@ -137,7 +144,7 @@ export const MapSearchPanel: React.FC<MapSearchPanelProps> = ({
           <button
             onClick={handleBorderSearch}
             disabled={isSearchingBorder || !borderSearchQuery.trim()}
-            className="px-3 py-2 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50"
+            className="px-3 py-2 rounded-xl text-sm font-bold text-theme-chrome-fg transition-all disabled:opacity-50"
             style={{ backgroundColor: themeColor }}
           >
             Search
