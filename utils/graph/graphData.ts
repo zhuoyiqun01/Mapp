@@ -83,6 +83,47 @@ export function buildGraphElements(
   // edgeWeight 本质上用于连线粗细映射；你的需求需要让“收藏端点数”对每条边生效，
   // 因此这里为每条边计算出独立的 line width 数据字段（供样式表 data(...) 引用）。
   const baseEdgeWeight = edgeWeightBase ?? DEFAULT_GRAPH_STYLESHEET_SIZING.edgeWeight;
+  // Cytoscape 的箭头几何由 `arrow-scale` 控制；但其内部对小线宽存在最小值截断，
+  // 导致箭头尺寸在小边权上会“看起来不随边权变化”。这里显式把 arrow-scale
+  // 与 edgeWeight 的等比缩放绑定起来，并保持当前基准外观（默认对应 0.8）。
+  const EDGE_ARROW_SCALE_BASE = 0.8;
+  const EDGE_ARROW_SCALE_MIN_FACTOR = 0.25;
+  // 当边权进入“较大步进”区间时，避免箭头尺寸随 edgeWidth 近似线性增长过快。
+  // 小于等于 baseEdgeWidth 的区间保持原逻辑（edge=0.2 时的观感锚定），
+  // 大于 baseEdgeWidth 时用低于 1 的幂次做衰减。
+  const EDGE_ARROW_WIDTH_GROWTH_HIGH_EXP = 0.75;
+  // Cytoscape 内部 getArrowWidth 实际为：
+  //   size = max((edgeWidth * 13.37)^0.9, 29) * arrow-scale
+  // 我们按这个公式反推一个 arrow-scale，使“箭头端点尺寸”随 edgeWidth 单调增长；
+  // 同时把最小 edgeWidth 对应的箭头尺寸压到当前的一半（通过 EDGE_ARROW_SCALE_MIN_FACTOR 实现）。
+  const arrowWidthDenom = (edgeWidth: number) => Math.max(Math.pow(edgeWidth * 13.37, 0.9), 29);
+
+  const getArrowScaleForEdgeWidth = (
+    edgeWidth: number,
+    baseEdgeWidth: number,
+    minEdgeWidth: number
+  ): number => {
+    const safeBase = baseEdgeWidth > 0 ? baseEdgeWidth : 1;
+    const safeMin = minEdgeWidth > 0 ? minEdgeWidth : 1;
+    const baseDenom = arrowWidthDenom(safeBase);
+    const denom = arrowWidthDenom(edgeWidth);
+
+    // 在 [minEdgeWidth, baseEdgeWidth] 内做 minFactor -> 1 的过渡；
+    // 在 baseEdgeWidth 及以上进入“衰减增长”以减少大步进造成的箭头过大。
+    const range = safeBase - safeMin;
+    const t = range <= 1e-6 ? 1 : Math.max(0, Math.min(1, (edgeWidth - safeMin) / range));
+    const factor = EDGE_ARROW_SCALE_MIN_FACTOR + (1 - EDGE_ARROW_SCALE_MIN_FACTOR) * t; // minFactor..1
+
+    const growthExp = edgeWidth <= safeBase ? 1 : EDGE_ARROW_WIDTH_GROWTH_HIGH_EXP;
+
+    // 目标 arrowWidth：先用 baseEdgeWidth 对齐到 EDGE_ARROW_SCALE_BASE，再乘因子与衰减幂次。
+    const baseArrowWidth = EDGE_ARROW_SCALE_BASE * baseDenom;
+    const targetArrowWidth =
+      baseArrowWidth * factor * Math.pow(edgeWidth / safeBase, growthExp);
+
+    // arrow-scale = targetArrowWidth / denom
+    return targetArrowWidth / denom;
+  };
   const edgeWeightToLines = (edgeWeight: number) => {
     const ewNorm = (Math.max(0.1, edgeWeight) - 0.1) / 0.9;
     const edgeLine = Math.max(
@@ -91,14 +132,20 @@ export function buildGraphElements(
     );
     const edgeLineFocus = Math.max(
       0.8,
-      Math.min(6.6, Math.round(edgeLine * 1.35 * 100) / 100)
+      Math.min(6.6, Math.round((edgeLine * 1.35) * 100) / 100)
     );
     const edgeLineHi = Math.max(
       0.8,
-      Math.min(9.2, Math.round(edgeLine * 1.85 * 100) / 100)
+      Math.min(9.2, Math.round((edgeLine * 1.85) * 100) / 100)
     );
     return { edgeLine, edgeLineFocus, edgeLineHi };
   };
+  // 箭头缩放的“参照基准”固定为默认 edgeWeight，避免当面板 edgeWeight 变大时，
+  // 基准系数反向变化，导致在 clamp 到上限的粗边上出现“越大越小”的真实反比。
+  const refLines = edgeWeightToLines(DEFAULT_GRAPH_STYLESHEET_SIZING.edgeWeight);
+  const refEdgeLine = refLines.edgeLine;
+  const refEdgeLineFocus = refLines.edgeLineFocus;
+  const refEdgeLineHi = refLines.edgeLineHi;
 
   const linkedIds = new Set<string>();
   for (const c of connections) {
@@ -165,6 +212,11 @@ export function buildGraphElements(
     const edgeWeight = baseEdgeWeight + favEndpointCount * 0.5;
     const { edgeLine, edgeLineFocus, edgeLineHi } = edgeWeightToLines(edgeWeight);
 
+    // 分普通/收藏加粗/收藏高亮态：minEdgeWidth 由 edgeWeightToLines 的 clamp 决定。
+    const edgeArrowScale = getArrowScaleForEdgeWidth(edgeLine, refEdgeLine, 0.4);
+    const edgeArrowScaleFocus = getArrowScaleForEdgeWidth(edgeLineFocus, refEdgeLineFocus, 0.8);
+    const edgeArrowScaleHi = getArrowScaleForEdgeWidth(edgeLineHi, refEdgeLineHi, 0.8);
+
     edges.push({
       data: {
         id: c.id,
@@ -178,7 +230,11 @@ export function buildGraphElements(
         // 用于样式表中按数据决定连线粗细
         edgeLineWidth: edgeLine,
         edgeLineFocusWidth: edgeLineFocus,
-        edgeLineHiWidth: edgeLineHi
+        edgeLineHiWidth: edgeLineHi,
+        // 用于样式表中按数据决定箭头端点几何大小
+        edgeArrowScale,
+        edgeArrowScaleFocus,
+        edgeArrowScaleHi
       }
     });
   }
@@ -277,11 +333,14 @@ function graphSizingCss(themeColor: string, s: GraphStylesheetSizing) {
   const txtBorderHi = Math.max(2, Math.min(4, nf * 0.24));
   const txtBorderHiFav = Math.max(2, Math.min(4, favNf * 0.24));
   const edgeLine = Math.max(0.4, Math.min(4.6, Math.round((0.4 + ewNorm * 2.8) * 100) / 100));
+  // edge label 字号整体收缩（包括 margin 与描边厚度），避免在小边权下视觉显得过大
+  const EDGE_LABEL_SCALE = 0.5;
   const edgeFont = Math.max(6, Math.min(32, Math.round((6 + ewNorm * 10) * 10) / 10));
-  const edgeMarginY = Math.max(5, Math.round(edgeFont * 0.72));
+  const edgeFontScaled = Math.max(3, edgeFont * EDGE_LABEL_SCALE);
+  const edgeMarginY = Math.max(2, Math.round(edgeFontScaled * 0.72));
   const edgeOutline = Math.max(0.6, Math.min(1.4, Math.round((0.6 + ewNorm * 0.8) * 100) / 100));
   // 高亮态 label 描边不受面板 edgeWeight 影响：固定为当前最大值(1.4)的 4 倍。
-  const edgeOutlineHighlight = 5.6;
+  const edgeOutlineHighlight = 5.6 * EDGE_LABEL_SCALE;
   const edgeLineFocus = Math.max(0.8, Math.min(6.6, Math.round((edgeLine * 1.35) * 100) / 100));
   const edgeLineHi = Math.max(0.8, Math.min(9.2, Math.round((edgeLine * 1.85) * 100) / 100));
   const vpEdgeOff = Math.max(48, Math.round(ns * 3.2));
@@ -314,7 +373,7 @@ function graphSizingCss(themeColor: string, s: GraphStylesheetSizing) {
     edgeLine,
     edgeLineFocus,
     edgeLineHi,
-    edgeFont,
+    edgeFont: edgeFontScaled,
     edgeMarginY,
     edgeOutline,
     edgeOutlineHighlight,
@@ -529,6 +588,7 @@ export function getGraphStylesheet(
         label: 'data(label)',
         'line-color': '#d1d5db',
         width: 'data(edgeLineWidth)',
+        'arrow-scale': 'data(edgeArrowScale)',
         'curve-style': 'bezier',
         'target-arrow-shape': 'triangle',
         'target-arrow-color': '#d1d5db',
@@ -587,6 +647,7 @@ export function getGraphStylesheet(
         'target-arrow-color': z.themeColor,
         'source-arrow-color': z.themeColor,
         width: 'data(edgeLineFocusWidth)',
+        'arrow-scale': 'data(edgeArrowScaleFocus)',
         /** 高于 focus-nh(14000)，低于 focus-core(16000)，避免被邻居节点与其它未高亮点挡住 */
         'z-index': 15000,
         'font-weight': '600',
@@ -604,6 +665,7 @@ export function getGraphStylesheet(
         'target-arrow-color': z.themeColor,
         'source-arrow-color': z.themeColor,
         width: 'data(edgeLineHiWidth)',
+        'arrow-scale': 'data(edgeArrowScaleHi)',
         'z-index': 30000,
         'font-weight': '600',
         color: '#374151',
@@ -620,6 +682,7 @@ export function getGraphStylesheet(
         'target-arrow-color': z.themeColor,
         'source-arrow-color': z.themeColor,
         width: 'data(edgeLineHiWidth)',
+        'arrow-scale': 'data(edgeArrowScaleHi)',
         'z-index': 35000,
         'font-weight': '600',
         color: '#374151',
@@ -721,17 +784,19 @@ export function getGraphStylesheet(
         opacity: 1,
         label: 'data(label)',
         color: '#6B7280',
-        'font-size': '12px',
+        'font-size': '6px',
         'font-weight': '800',
         'text-valign': 'center',
         'text-halign': 'center',
         'text-margin-y': 0,
         'text-background-opacity': 0,
         'text-border-width': 0,
-        'text-outline-width': 6,
+        'text-outline-width': 3,
         'text-outline-color': '#ffffff',
         'text-outline-opacity': 1,
         'text-events': 'yes',
+        // 只允许文字本身接收事件：避免 108x30 的 label 包围盒挡住下层 hover/selected
+        events: 'no',
         'z-index': 22000,
         'z-index-compare': 'manual',
         cursor: 'pointer'
@@ -752,14 +817,14 @@ export function getGraphStylesheet(
       style: {
         color: '#111827',
         opacity: 1,
-        'text-outline-width': 8
+        'text-outline-width': 4
       }
     },
     {
       selector: 'node.frame-cluster-label.graph-frame-peek-dim',
       style: {
         opacity: 0.34,
-        'text-outline-width': 5
+        'text-outline-width': 2.5
       }
     },
     {
