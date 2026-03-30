@@ -1,6 +1,7 @@
 import { get, set, del, keys } from 'idb-keyval';
 import { Project, Note } from '../../types';
 import type { GraphLayoutMode } from '../graph/graphRuntimeCore';
+import { normalizeProjectConnections } from '../graph/graphData';
 
 // Storage keys
 const PROJECT_LIST_KEY = 'mapp-project-list';
@@ -10,6 +11,9 @@ const SKETCH_PREFIX = 'mapp-sketch-';
 const BACKGROUND_IMAGE_PREFIX = 'mapp-bg-';
 const STORAGE_VERSION_KEY = 'mapp-storage-version';
 const CURRENT_STORAGE_VERSION = 2; // 版本号，用于数据迁移
+
+/** 连线规范化（删孤儿边、箭头方向修正）后待写回 IndexedDB 的项目 id */
+const projectIdsPendingConnectionMigration = new Set<string>();
 
 // View position cache (sessionStorage, cleared on page close or project switch)
 const getViewPositionCacheKey = (projectId: string, viewType: 'map' | 'board'): string => {
@@ -1531,8 +1535,38 @@ function ensureProjectCompatibility(project: Project): Project {
   
   // 修复所有 notes 的兼容性问题
   fixedProject.notes = fixedProject.notes.map(ensureNoteVariant);
-  
-  return fixedProject;
+
+  const { project: withConnections, mutated: connectionsMutated } = normalizeProjectConnections(fixedProject);
+  if (connectionsMutated) {
+    projectIdsPendingConnectionMigration.add(withConnections.id);
+  }
+  return withConnections;
+}
+
+/**
+ * 将本次打开项目时产生的连线规范化结果异步写回存储（不阻塞 UI）。
+ * 在完整加载便签（含图片）之后再调用，避免过早 save 与主流程打架。
+ */
+export async function flushPendingConnectionMigrationSave(project: Project): Promise<void> {
+  if (!projectIdsPendingConnectionMigration.has(project.id)) {
+    return;
+  }
+  projectIdsPendingConnectionMigration.delete(project.id);
+  try {
+    await saveProject(project);
+  } catch (e) {
+    console.warn('flushPendingConnectionMigrationSave failed', e);
+  }
+}
+
+function scheduleConnectionMigrationPersist(project: Project): void {
+  if (!projectIdsPendingConnectionMigration.has(project.id)) {
+    return;
+  }
+  const snapshot = project;
+  setTimeout(() => {
+    void flushPendingConnectionMigrationSave(snapshot);
+  }, 0);
 }
 
 // 保存项目（分片存储，图片分离）
@@ -1582,8 +1616,9 @@ export async function loadProject(projectId: string, loadImages: boolean = false
     compatibleProject.notes = await Promise.all(
       compatibleProject.notes.map(note => loadNoteImages(note))
     );
+    scheduleConnectionMigrationPersist(compatibleProject);
   }
-  
+
   return compatibleProject;
 }
 

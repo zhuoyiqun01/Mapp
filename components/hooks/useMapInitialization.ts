@@ -1,11 +1,11 @@
 import { useState, useRef, useCallback } from 'react';
-import type L from 'leaflet';
+import type { Map as LeafletMap } from 'leaflet';
 
 export function useMapInitialization() {
-  const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
-  const mapInitRef = useRef<WeakSet<L.Map>>(new WeakSet());
+  const [mapInstance, setMapInstance] = useState<LeafletMap | null>(null);
+  const mapInitRef = useRef<WeakSet<LeafletMap>>(new WeakSet());
 
-  const mapRefCallback = useCallback((map: L.Map | null) => {
+  const mapRefCallback = useCallback((map: LeafletMap | null) => {
     if (!map) return;
     setMapInstance(map);
 

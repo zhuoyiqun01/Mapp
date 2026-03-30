@@ -49,6 +49,11 @@ export interface Note {
 
   // Lightweight note group (not a visual Frame; used for multi-select auto-group)
   noteGroupId?: string;
+
+  /** 全视图共用：在对应分组未隐藏时仍可单独隐藏该节点（与 graphLayers 组隐为 AND） */
+  layerItemHidden?: boolean;
+  /** 同组内叠放顺序，越大越靠近上层；未设时回退 createdAt */
+  layerStackOrder?: number;
 }
 
 export interface Connection {
@@ -58,7 +63,13 @@ export interface Connection {
   fromSide: 'top' | 'right' | 'bottom' | 'left';
   toSide: 'top' | 'right' | 'bottom' | 'left';
   arrow?: 'none' | 'forward' | 'reverse'; // 箭头方向：无、正向、反向
-  label?: string; // 连线文本标签
+  /**
+   * 连线标签：挂在整条 Connection 上（与 `id`、两端便签同属一条记录），不是独立于端点的另一条数据。
+   * 规范化交换端点时仍保留在同一 `id` 下；若要显式标明标签贴近哪一端可填 `labelAnchorNoteId`。
+   */
+  label?: string;
+  /** 若设置则须等于 `fromNoteId` 或 `toNoteId`；供展示定位与打开项目时的校验 */
+  labelAnchorNoteId?: string;
   fromArrow?: 'arrow' | 'none'; // 起点端样式
   toArrow?: 'arrow' | 'none';   // 终点端样式
 }
@@ -78,7 +89,7 @@ export interface Frame {
 export interface GraphLayerState {
   order: string[];
   hidden: string[];
-  /** 各分组环形/时间轴纵轴权重，范围 0.1～1，越大离圆心越远、时间线纵轴越靠上 */
+  /** 各分组环形/时间轴纵轴权重，范围 0.1～1，越大越靠近圆心、时间线纵轴越靠上 */
   weights?: Record<string, number>;
 }
 
@@ -118,6 +129,12 @@ export interface Project {
    * 未设置时视为开启。
    */
   graphCircleRefineOrderWithForce?: boolean;
+  /**
+   * 力传导布局（cose）：编辑模式下拖动节点时，是否实时触发力导向重算，
+   * 让其它节点随拖动联动更新位置。
+   * 未设置时视为开启。
+   */
+  graphCoseDragRealtime?: boolean;
   /**
    * 无会话内布局缓存时，打开图谱使用的默认二级布局（与底部四钮一致）。
    * 同会话内仍以 sessionStorage 与底部工具栏为准。

@@ -1,4 +1,4 @@
-import cytoscape, { type CytoscapeOptions } from 'cytoscape';
+import cytoscape, { type Core, type CytoscapeOptions } from 'cytoscape';
 import coseBilkent from 'cytoscape-cose-bilkent';
 
 cytoscape.use(coseBilkent);

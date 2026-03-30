@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
+import type { Map as LeafletMap } from 'leaflet';
 import type { Note } from '../../types';
 
 interface ClusterResult {
@@ -19,7 +20,7 @@ function sortNotes(notes: Note[]): Note[] {
 }
 
 function calculatePinDistance(
-  map: L.Map,
+  map: LeafletMap,
   note1: Note,
   note2: Note
 ): number | null {
@@ -50,7 +51,7 @@ function calculatePinDistance(
 
 function detectClusters(
   notes: Note[],
-  map: L.Map,
+  map: LeafletMap,
   threshold: number,
   forceSingleNoteIds: string[] = []
 ): ClusterResult[] {
@@ -100,7 +101,7 @@ function detectClusters(
 }
 
 interface UseMapClusteringProps {
-  mapInstance: L.Map | null;
+  mapInstance: LeafletMap | null;
   getFilteredNotes: () => Note[];
   clusterThreshold: number;
   /** 这些 noteId 强制不参与聚合，始终以单独 pin 显示（用于连线端点） */
@@ -114,7 +115,7 @@ export function useMapClustering({
   forceSingleNoteIds = []
 }: UseMapClusteringProps) {
   const [clusteredMarkers, setClusteredMarkers] = useState<ClusterResult[]>([]);
-  const mapInstanceRef = useRef<L.Map | null>(null);
+  const mapInstanceRef = useRef<LeafletMap | null>(null);
 
   useEffect(() => {
     mapInstanceRef.current = mapInstance;

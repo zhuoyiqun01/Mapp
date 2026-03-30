@@ -26,6 +26,8 @@ type Props = {
   onUpdateNote: (note: Note) => void;
   onBatchUpdateNotes?: (nextNotes: Note[]) => void | Promise<void>;
   frames: Frame[];
+  projectId: string;
+  onActivateNoteFromLayer?: (note: Note) => void;
   chainLength: number;
   onChainLengthChange: (value: number) => void;
   quickStyleValues?: {
@@ -55,6 +57,8 @@ export const GraphTopLeftToolbar: React.FC<Props> = ({
   onUpdateNote,
   onBatchUpdateNotes,
   frames,
+  projectId,
+  onActivateNoteFromLayer,
   chainLength,
   onChainLengthChange,
   quickStyleValues,
@@ -100,7 +104,7 @@ export const GraphTopLeftToolbar: React.FC<Props> = ({
               onPointerDown={(e) => e.stopPropagation()}
               title={layerGroupStandard === 'tag' ? '图层（标签组顺序、显隐、半径权重）' : '图层（帧组顺序、显隐、半径权重）'}
             >
-              <LayerToolbarIcon />
+              <LayerToolbarIcon layerGroupStandard={layerGroupStandard} />
             </ChromeIconButton>
             {showLayerPanel ? (
               <GraphLayerPanel
@@ -114,6 +118,8 @@ export const GraphTopLeftToolbar: React.FC<Props> = ({
                 onUpdateNote={onUpdateNote}
                 onBatchUpdateNotes={onBatchUpdateNotes}
                 frames={frames}
+                projectId={projectId}
+                onActivateNote={onActivateNoteFromLayer}
               />
             ) : null}
           </div>

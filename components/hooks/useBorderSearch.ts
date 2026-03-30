@@ -1,10 +1,11 @@
 import { useState, useCallback } from 'react';
+import type { Map as LeafletMap } from 'leaflet';
 import type { Note } from '../../types';
 import { fetchRelationGeometry } from '../../utils/map/overpass';
 import { generateId } from '../../utils';
 
 interface UseBorderSearchProps {
-  mapInstance: L.Map | null;
+  mapInstance: LeafletMap | null;
   notes: Note[];
   onAddNote: (note: Note) => void;
   setBorderGeoJSON: ((data: any) => void) | undefined;

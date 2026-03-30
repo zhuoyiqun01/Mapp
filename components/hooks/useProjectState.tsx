@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Note, ViewMode, Project } from '../../types';
+import { Note, Project } from '../../types';
 import {
   loadAllProjects,
   loadProjectSummaries,
@@ -8,6 +8,7 @@ import {
   loadProject,
   loadNoteImages,
   cleanBrokenReferences,
+  flushPendingConnectionMigrationSave,
   ProjectSummary
 } from '../../utils/persistence/storage';
 
@@ -48,7 +49,6 @@ export const useProjectState = (): UseProjectStateReturn => {
   const [isLoadingProject, setIsLoadingProject] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [isDeletingProject, setIsDeletingProject] = useState(false);
-
   // Convert ProjectSummary to basic Project for display
   const summariesToProjects = useCallback((summaries: ProjectSummary[]): Project[] => {
     return summaries.map(summary => ({
@@ -67,26 +67,23 @@ export const useProjectState = (): UseProjectStateReturn => {
 
   // Load complete project data with progress
   const loadCompleteProject = useCallback(async (projectId: string): Promise<Project | null> => {
-    setIsLoadingProject(true);
     setLoadingProgress(0);
 
     try {
-      // Step 1: Load project without images (10%)
+      // Step 1: Load project without images（含 ensureProjectCompatibility 内连线规范化）
       setLoadingProgress(10);
       const project = await loadProject(projectId, false);
       if (!project) return null;
 
-      // Step 2: Load images for each note (remaining 90%)
+      // Step 2: Load images for each note（remaining 90%）
       if (project.notes.length > 0) {
         const totalNotes = project.notes.length;
         let loadedNotes = 0;
 
-        // Load images in batches to show progress
         const batchSize = 5;
         for (let i = 0; i < totalNotes; i += batchSize) {
           const batch = project.notes.slice(i, i + batchSize);
 
-          // Load images for this batch of notes
           const loadedBatch = await Promise.all(
             batch.map(async (note) => {
               try {
@@ -94,12 +91,11 @@ export const useProjectState = (): UseProjectStateReturn => {
                 return loadedNote;
               } catch (error) {
                 console.error(`Failed to load images for note ${note.id}:`, error);
-                return note; // Return original note if loading fails
+                return note;
               }
             })
           );
 
-          // Update the notes in the project
           for (let j = 0; j < batch.length; j++) {
             project.notes[i + j] = loadedBatch[j];
           }
@@ -112,19 +108,16 @@ export const useProjectState = (): UseProjectStateReturn => {
         setLoadingProgress(100);
       }
 
-      // 清理断链的资源引用
       setLoadingProgress(95);
-      console.log('Cleaning broken resource references...');
       project.notes = await cleanBrokenReferences(project.notes);
       setLoadingProgress(100);
+
+      await flushPendingConnectionMigrationSave(project);
 
       return project;
     } catch (error) {
       console.error('Failed to load complete project:', error);
       return null;
-    } finally {
-      setIsLoadingProject(false);
-      setLoadingProgress(0);
     }
   }, []);
 
@@ -173,14 +166,24 @@ export const useProjectState = (): UseProjectStateReturn => {
     return newProject.id;
   }, []);
 
-  // Select project
-  const selectProject = useCallback(async (projectId: string) => {
-    setCurrentProjectId(projectId);
-    const project = await loadCompleteProject(projectId);
-    if (project) {
-      setActiveProject(project);
-    }
-  }, [loadCompleteProject]);
+  const selectProject = useCallback(
+    async (projectId: string) => {
+      setCurrentProjectId(projectId);
+      setIsLoadingProject(true);
+      setLoadingProgress(0);
+      try {
+        const project = await loadCompleteProject(projectId);
+        if (!project) return;
+        setActiveProject(project);
+      } catch {
+        // noop
+      } finally {
+        setIsLoadingProject(false);
+        setLoadingProgress(0);
+      }
+    },
+    [loadCompleteProject]
+  );
 
   // Update project
   const updateProject = useCallback(async (updatedProject: Project) => {

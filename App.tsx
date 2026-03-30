@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Map as MapIcon, Grid, Menu, Loader2, Table2, GitBranch, Cloud, CloudOff, CheckCircle2, AlertCircle, RefreshCw, Plus } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { AnimatePresence } from 'framer-motion';
+import { MotionDiv } from './components/ui/MotionDiv';
 import { MapView } from './components/MapView';
 import { BoardView } from './components/BoardView';
 import { TableView } from './components/TableView';
@@ -9,7 +10,12 @@ import { GraphView } from './components/GraphView';
 import { ProjectManager } from './components/ProjectManager';
 import { Note, ViewMode, Project } from './types';
 import { get, set } from 'idb-keyval';
-import { MAP_STYLE_OPTIONS } from './constants';
+import {
+  MAP_STYLE_OPTIONS,
+  PROJECT_OPEN_OVERLAY_FADE_S,
+  PROJECT_OPEN_SLIDE_DURATION_S,
+  PROJECT_OPEN_SLIDE_EASE
+} from './constants';
 import { useProjectState } from './components/hooks/useProjectState';
 import { useViewState } from './components/hooks/useViewState';
 import { useAppState } from './components/hooks/useAppState';
@@ -44,6 +50,10 @@ import {
 } from './utils/persistence/storage';
 import { mapChromeSurfaceStyle, mapChromeHoverBackground } from './utils/map/mapChromeStyle';
 import { applyThemeChromeCssVars } from './utils/theme/themeChrome';
+import { useDataImport } from './components/hooks/useDataImport';
+import { useCsvImport } from './components/hooks/useCsvImport';
+import { useFileDrop } from './components/hooks/useFileDrop';
+import { EditInspectorProvider } from './components/editInspector/EditInspectorProvider';
 
 export default function App() {
   const emptyNotes = useMemo(() => [], []);
@@ -51,6 +61,9 @@ export default function App() {
 
   // Use custom hooks for state management
   const projectState = useProjectState();
+
+  const [sidebarExpandingToHome, setSidebarExpandingToHome] = useState(false);
+  const expandToHomeProjectIdRef = useRef<string | null>(null);
 
   const viewState = useViewState();
   const appState = useAppState();
@@ -76,12 +89,12 @@ export default function App() {
   const {
     viewMode,
     isEditorOpen,
-    isBoardEditMode,
+    mappingWorkspaceEditMode,
     navigateToMapCoords,
     navigateToBoardCoords,
     setViewMode,
     setIsEditorOpen,
-    setIsBoardEditMode,
+    setMappingWorkspaceEditMode,
     navigateToMap,
     navigateToBoard,
     clearMapNavigation,
@@ -119,7 +132,27 @@ export default function App() {
     waypoints,
     setWaypoints
   } = appState;
-  
+
+  const { handleDataImport: handleProjectDataImport } = useDataImport({
+    project: activeProject as Project,
+    onUpdateProject: async (p) => {
+      await projectState.updateProject(p);
+    }
+  });
+  const { handleCsvImport: handleProjectCsvImport } = useCsvImport({
+    project: activeProject as Project,
+    onUpdateProject: async (p) => {
+      await projectState.updateProject(p);
+    }
+  });
+  const tableGraphDataFileDrop = useFileDrop({
+    isEditorOpen,
+    themeColor,
+    handleImageImport: () => {},
+    handleDataImport: handleProjectDataImport,
+    handleCsvImport: handleProjectCsvImport,
+    dataOnly: true
+  });
 
 
 
@@ -319,11 +352,42 @@ export default function App() {
     }
 
     setIsSidebarOpen(false);
+    setSidebarExpandingToHome(false);
     clearMapNavigation();
     clearBoardNavigation();
 
     await projectState.selectProject(id);
   }, [currentProjectId, projectState, clearMapNavigation, clearBoardNavigation]);
+
+  const handleBackToHome = useCallback(() => {
+    if (sidebarExpandingToHome) return;
+    expandToHomeProjectIdRef.current = currentProjectId;
+    setSidebarExpandingToHome(true);
+  }, [sidebarExpandingToHome, currentProjectId]);
+
+  useEffect(() => {
+    if (!sidebarExpandingToHome) return;
+    const ms = Math.round(PROJECT_OPEN_SLIDE_DURATION_S * 1000);
+    const id = window.setTimeout(() => {
+      const pid = expandToHomeProjectIdRef.current;
+      expandToHomeProjectIdRef.current = null;
+      if (pid) clearViewPositionCache(pid);
+      clearMapNavigation();
+      clearBoardNavigation();
+      setCurrentProjectId(null);
+      setActiveProject(null);
+      setIsSidebarOpen(false);
+      setSidebarExpandingToHome(false);
+    }, ms);
+    return () => window.clearTimeout(id);
+  }, [
+    sidebarExpandingToHome,
+    clearMapNavigation,
+    clearBoardNavigation,
+    setCurrentProjectId,
+    setActiveProject,
+    setIsSidebarOpen
+  ]);
 
   // Cloud Sync State
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
@@ -604,7 +668,11 @@ export default function App() {
 
     // Tab key to toggle UI visibility
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Tab' && !isEditorOpen && !isBoardEditMode) {
+      if (
+        e.key === 'Tab' &&
+        !isEditorOpen &&
+        (!mappingWorkspaceEditMode || viewMode === 'board')
+      ) {
         e.preventDefault();
         setIsUIVisible(prev => !prev);
       }
@@ -851,6 +919,7 @@ export default function App() {
       await projectState.loadProjects();
       setViewMode('map');
       setIsSidebarOpen(false);
+      setSidebarExpandingToHome(false);
       await projectState.selectProject(project.id);
       return;
     }
@@ -861,6 +930,7 @@ export default function App() {
 
     setViewMode('map');
     setIsSidebarOpen(false);
+    setSidebarExpandingToHome(false);
     await projectState.selectProject(projectId);
   };
 
@@ -927,100 +997,27 @@ export default function App() {
 
   if (isLoading) {
     return (
-      <div className="w-full min-h-screen flex flex-col items-center justify-center text-theme-chrome-fg" style={{ backgroundColor: themeColor }}>
-         <Loader2 size={48} className="animate-spin mb-4" />
-         <div className="font-bold text-xl">Loading your maps...</div>
-      </div>
-    );
-  }
-
-  if (!activeProject) {
-    return (
-      <div className="w-full min-h-screen relative" style={{ backgroundColor: themeColor }}>
-        {/* 右上角清理按钮 */}
-        {isUIVisible && (
-          <div className="absolute top-4 right-4 z-10">
-            <button
-            onClick={() => setShowCleanupMenu(!showCleanupMenu)}
-            disabled={isRunningCleanup}
-            className="p-3 bg-white/90 hover:bg-white rounded-full shadow-lg transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed relative"
-            title="清理数据选项"
-          >
-            <RefreshCw
-              size={20}
-              className={`text-gray-700 ${isRunningCleanup ? 'animate-spin' : ''}`}
-            />
-          </button>
-
-          {/* 清理选项菜单 */}
-          {showCleanupMenu && (
-            <div className="absolute top-full right-0 mt-2 bg-white rounded-lg shadow-xl border border-gray-200 min-w-48 py-1 z-20">
-              <button
-                onClick={() => {
-                  setShowCleanupMenu(false);
-                  handleCleanupOrphanedData(false);
-                }}
-                disabled={isRunningCleanup}
-                className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 transition-colors flex items-center gap-2"
-              >
-                <RefreshCw size={16} className="text-green-600" />
-                <div>
-                  <div className="font-medium">安全清理</div>
-                  <div className="text-xs text-gray-500">只清理孤立数据和普通重复</div>
-                </div>
-              </button>
-
-              <button
-                onClick={() => {
-                  setShowCleanupMenu(false);
-                  handleCleanupOrphanedData(true);
-                }}
-                disabled={isRunningCleanup}
-                className="w-full text-left px-4 py-3 text-sm hover:bg-red-50 transition-colors flex items-center gap-2"
-              >
-                <RefreshCw size={16} className="text-red-600" />
-                <div>
-                  <div className="font-medium">深度清理</div>
-                  <div className="text-xs text-gray-500">清理所有重复（包括可疑的）</div>
-                </div>
-              </button>
-            </div>
-          )}
+      <>
+        <div
+          className="w-full min-h-screen flex flex-col items-center justify-center text-theme-chrome-fg"
+          style={{ backgroundColor: themeColor }}
+        >
+          <Loader2 size={48} className="animate-spin mb-4" />
+          <div className="font-bold text-xl">Loading your maps...</div>
         </div>
-        )}
-
-        {/* 点击其他地方关闭菜单 */}
-        {showCleanupMenu && (
-          <div
-            className="fixed inset-0 z-5"
-            onClick={() => setShowCleanupMenu(false)}
-          />
-        )}
-
-      <ProjectManager 
-           projects={summariesToProjects(projectSummaries)}
-         currentProjectId={null}
-         onCreateProject={handleCreateProject}
-           onSelectProject={handleSelectProject}
-         onDeleteProject={handleDeleteProject}
-         onUpdateProject={handleUpdateProject}
-         onDuplicateProject={handleDuplicateProject}
-          onCheckData={handleCheckData}
-          onCleanupBrokenReferences={handleCleanupBrokenReferences}
-         themeColor={themeColor}
-         onThemeColorChange={handleThemeColorChange}
-         mapUiChromeOpacity={mapUiChromeOpacity}
-         onMapUiChromeOpacityChange={handleMapUiChromeOpacityChange}
-         mapUiChromeBlurPx={mapUiChromeBlurPx}
-         onMapUiChromeBlurPxChange={handleMapUiChromeBlurPxChange}
-      />
-      </div>
+      </>
     );
   }
 
   return (
-    <div className="w-full h-screen flex flex-col bg-gray-50 overflow-hidden relative" style={{ touchAction: 'manipulation' }}>
-      {/* Loading Progress Overlay */}
+    <EditInspectorProvider>
+    <div
+      className="w-full h-screen flex flex-col overflow-hidden relative bg-gray-50"
+      style={{
+        touchAction: 'manipulation'
+      }}
+    >
+      {/* Loading Progress Overlay（删项 / 清理 / 加载项目） */}
       {(isLoadingProject || isDeletingProject) && (
         <div className="fixed inset-0 z-[10000] bg-black/50 flex items-center justify-center">
           <div className="bg-white rounded-2xl p-8 shadow-2xl max-w-sm w-full mx-4">
@@ -1056,33 +1053,132 @@ export default function App() {
           </div>
         </div>
       )}
-      
+
+      {!activeProject ? (
+        <div className="fixed inset-0 z-[150] flex flex-col" style={{ backgroundColor: themeColor }}>
+          {isUIVisible && (
+            <div className="absolute top-4 right-4 z-[160]">
+              <button
+                onClick={() => setShowCleanupMenu(!showCleanupMenu)}
+                disabled={isRunningCleanup}
+                className="p-3 bg-white/90 hover:bg-white rounded-full shadow-lg transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed relative"
+                title="清理数据选项"
+              >
+                <RefreshCw
+                  size={20}
+                  className={`text-gray-700 ${isRunningCleanup ? 'animate-spin' : ''}`}
+                />
+              </button>
+              {showCleanupMenu && (
+                <div className="absolute top-full right-0 mt-2 bg-white rounded-lg shadow-xl border border-gray-200 min-w-48 py-1 z-20">
+                  <button
+                    onClick={() => {
+                      setShowCleanupMenu(false);
+                      handleCleanupOrphanedData(false);
+                    }}
+                    disabled={isRunningCleanup}
+                    className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 transition-colors flex items-center gap-2"
+                  >
+                    <RefreshCw size={16} className="text-green-600" />
+                    <div>
+                      <div className="font-medium">安全清理</div>
+                      <div className="text-xs text-gray-500">只清理孤立数据和普通重复</div>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowCleanupMenu(false);
+                      handleCleanupOrphanedData(true);
+                    }}
+                    disabled={isRunningCleanup}
+                    className="w-full text-left px-4 py-3 text-sm hover:bg-red-50 transition-colors flex items-center gap-2"
+                  >
+                    <RefreshCw size={16} className="text-red-600" />
+                    <div>
+                      <div className="font-medium">深度清理</div>
+                      <div className="text-xs text-gray-500">清理所有重复（包括可疑的）</div>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          {showCleanupMenu && (
+            <div className="fixed inset-0 z-[155]" onClick={() => setShowCleanupMenu(false)} />
+          )}
+          <ProjectManager
+            isSidebar
+            expandToHomeLayout
+            projects={summariesToProjects(projectSummaries)}
+            currentProjectId={null}
+            activeProject={null}
+            onCreateProject={handleCreateProject}
+            onSelectProject={handleSelectProject}
+            onDeleteProject={handleDeleteProject}
+            onUpdateProject={handleUpdateProject}
+            onDuplicateProject={handleDuplicateProject}
+            onCheckData={handleCheckData}
+            onCleanupBrokenReferences={handleCleanupBrokenReferences}
+            themeColor={themeColor}
+            onThemeColorChange={handleThemeColorChange}
+            mapUiChromeOpacity={mapUiChromeOpacity}
+            onMapUiChromeOpacityChange={handleMapUiChromeOpacityChange}
+            mapUiChromeBlurPx={mapUiChromeBlurPx}
+            onMapUiChromeBlurPxChange={handleMapUiChromeBlurPxChange}
+            viewMode={viewMode}
+            syncStatus={syncStatus}
+            currentMapStyle={mapStyle}
+            onMapStyleChange={(styleId) => {
+              setMapStyle(styleId);
+              set('mapp-map-style', styleId);
+            }}
+          />
+        </div>
+      ) : (
+        <>
       <AnimatePresence>
       {isSidebarOpen && isUIVisible && (
           <div className="fixed inset-0 z-[2000] flex overflow-hidden">
-             <motion.div 
+             <MotionDiv
                className="fixed inset-0 bg-black/20"
-               onClick={() => setIsSidebarOpen(false)}
-               initial={{ opacity: 0 }}
-               animate={{ opacity: 1 }}
-               exit={{ opacity: 0 }}
-               transition={{ duration: 0.2 }}
-               style={{ willChange: 'opacity' }}
-             />
-             <motion.div 
-               className="relative h-full w-[62%] z-[2001] overflow-hidden"
-               initial={{ x: '-100%' }}
-               animate={{ x: 0 }}
-               exit={{ x: '-100%' }}
-               transition={{ 
-                 type: "tween", 
-                 duration: 0.3, 
-                 ease: [0.4, 0, 0.2, 1]
+               onClick={() => {
+                 if (sidebarExpandingToHome) return;
+                 setIsSidebarOpen(false);
                }}
-               style={{ willChange: 'transform' }}
+               initial={{ opacity: 0 }}
+               animate={{ opacity: sidebarExpandingToHome ? 0 : 1 }}
+               exit={{ opacity: 0 }}
+               transition={{ duration: PROJECT_OPEN_OVERLAY_FADE_S }}
+               style={{
+                 willChange: 'opacity',
+                 pointerEvents: sidebarExpandingToHome ? 'none' : 'auto'
+               }}
+             />
+             <MotionDiv
+               className="relative h-full z-[2001] overflow-hidden shrink-0"
+               initial={{ x: '-100%', width: '62%' }}
+               animate={{
+                 x: 0,
+                 width: sidebarExpandingToHome ? '100%' : '62%'
+               }}
+               exit={{ x: '-100%' }}
+               transition={{
+                 x: {
+                   type: 'tween',
+                   duration: PROJECT_OPEN_SLIDE_DURATION_S,
+                   ease: PROJECT_OPEN_SLIDE_EASE
+                 },
+                 width: {
+                   type: 'tween',
+                   duration: PROJECT_OPEN_SLIDE_DURATION_S,
+                   ease: PROJECT_OPEN_SLIDE_EASE
+                 }
+               }}
+               style={{ willChange: 'transform, width' }}
              >
               <ProjectManager 
                  isSidebar
+                 expandToHomeLayout={sidebarExpandingToHome}
                  projects={summariesToProjects(projectSummaries)}
                  currentProjectId={currentProjectId}
                  onCreateProject={handleCreateProject}
@@ -1090,16 +1186,14 @@ export default function App() {
                  onDeleteProject={handleDeleteProject}
          onUpdateProject={handleUpdateProject}
                  onDuplicateProject={handleDuplicateProject}
-                 onCloseSidebar={() => setIsSidebarOpen(false)}
-                  onBackToHome={() => {
-                    setCurrentProjectId(null);
-                    setActiveProject(null);
-                  }}
+                  onCloseSidebar={() => setIsSidebarOpen(false)}
+                  onBackToHome={handleBackToHome}
                   viewMode={viewMode}
                   activeProject={activeProject}
                   onExportCSV={handleExportCSV}
                   syncStatus={syncStatus}
                   onCleanupBrokenReferences={handleCleanupBrokenReferences}
+                  onCheckData={handleCheckData}
                   themeColor={themeColor}
                   onThemeColorChange={handleThemeColorChange}
                   currentMapStyle={mapStyle}
@@ -1108,17 +1202,27 @@ export default function App() {
                     set('mapp-map-style', styleId);
                   }}
               />
-             </motion.div>
+             </MotionDiv>
         </div>
       )}
       </AnimatePresence>
 
-      <div className="flex-1 relative min-h-0 overflow-hidden z-0">
+      <div
+        className={`flex-1 relative min-h-0 overflow-hidden z-0${viewMode === 'table' || viewMode === 'graph' ? ` ${tableGraphDataFileDrop.rootProps.className}` : ''}`}
+        style={viewMode === 'table' || viewMode === 'graph' ? tableGraphDataFileDrop.rootProps.style : undefined}
+        onDragEnter={viewMode === 'table' || viewMode === 'graph' ? tableGraphDataFileDrop.rootProps.onDragEnter : undefined}
+        onDragOver={viewMode === 'table' || viewMode === 'graph' ? tableGraphDataFileDrop.rootProps.onDragOver : undefined}
+        onDragLeave={viewMode === 'table' || viewMode === 'graph' ? tableGraphDataFileDrop.rootProps.onDragLeave : undefined}
+        onDrop={viewMode === 'table' || viewMode === 'graph' ? tableGraphDataFileDrop.rootProps.onDrop : undefined}
+        onDragEnd={viewMode === 'table' || viewMode === 'graph' ? tableGraphDataFileDrop.rootProps.onDragEnd : undefined}
+      >
         
         {/* 同步状态指示器 - 只在侧边栏打开时显示（在侧边栏内） */}
         {/* 主视图中不再显示云图标，统一在侧边栏显示 */}
         
-        {!isEditorOpen && !isBoardEditMode && isUIVisible && (
+        {!isEditorOpen &&
+          (!mappingWorkspaceEditMode || viewMode === 'board') &&
+          isUIVisible && (
           <button
              onClick={(e) => {
                // 只有在没有拖动时才触发点击
@@ -1199,6 +1303,8 @@ export default function App() {
         {viewMode === 'map' ? (
           <MapView 
             project={activeProject}
+            workspaceEditMode={mappingWorkspaceEditMode}
+            onWorkspaceEditModeChange={setMappingWorkspaceEditMode}
             onAddNote={addNote}
             onUpdateNote={updateNote}
             onDeleteNote={deleteNote}
@@ -1253,16 +1359,21 @@ export default function App() {
             onMapUiChromeOpacityChange={handleMapUiChromeOpacityChange}
             onMapUiChromeBlurPxChange={handleMapUiChromeBlurPxChange}
             panelChromeStyle={panelChromeStyle}
+            onUpdateConnections={async (connections) => {
+              if (!currentProjectId || !activeProject) return;
+              await projectState.updateProject({ ...activeProject, connections });
+            }}
           />
         ) : viewMode === 'board' ? (
           <BoardView 
             notes={activeProject.notes || emptyNotes}
+            workspaceEditMode={mappingWorkspaceEditMode}
+            onWorkspaceEditModeChange={setMappingWorkspaceEditMode}
             onAddNote={addNote}
             onUpdateNote={updateNote}
             onDeleteNote={deleteNote}
             onDeleteNotesBatch={deleteNotesBatch}
             onToggleEditor={setIsEditorOpen}
-            onEditModeChange={setIsBoardEditMode}
             frames={activeProject.frames || emptyFrames}
             onUpdateFrames={async (frames) => {
               if (!currentProjectId || !activeProject) return;
@@ -1319,11 +1430,18 @@ export default function App() {
             onMapUiChromeBlurPxChange={handleMapUiChromeBlurPxChange}
             mapStyleId={mapStyle}
             onMapStyleChange={setMapStyle}
+            connections={activeProject.connections ?? []}
+            onUpdateConnections={async (connections) => {
+              if (!currentProjectId || !activeProject) return;
+              await projectState.updateProject({ ...activeProject, connections });
+            }}
           />
         ) : viewMode === 'graph' ? (
           <GraphView
             projectId={currentProjectId ?? ''}
             project={activeProject}
+            workspaceEditMode={mappingWorkspaceEditMode}
+            onWorkspaceEditModeChange={setMappingWorkspaceEditMode}
             themeColor={themeColor}
             isUIVisible={isUIVisible}
             onUpdateNote={updateNote}
@@ -1402,7 +1520,9 @@ export default function App() {
         )}
       </div>
 
-      {!isEditorOpen && !isBoardEditMode && isUIVisible && (
+      {!isEditorOpen &&
+        (!mappingWorkspaceEditMode || viewMode === 'board') &&
+        isUIVisible && (
         <div
           data-allow-context-menu
           className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-50 max-w-[min(100vw-1rem,28rem)] p-1.5 rounded-2xl shadow-xl border flex flex-wrap justify-center gap-1 animate-in slide-in-from-bottom-4 fade-in ${
@@ -1476,7 +1596,10 @@ export default function App() {
           </button>
         </div>
       )}
+        </>
+      )}
 
     </div>
+    </EditInspectorProvider>
   );
 }

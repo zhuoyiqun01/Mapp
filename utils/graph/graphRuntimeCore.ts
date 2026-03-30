@@ -115,7 +115,16 @@ export function applyGraphLayerNodeVisibility(
   cy.batch(() => {
     cy.nodes().forEach((node) => {
       const g = getGraphLayerEffectiveGroupKey(node, standard, hiddenSet);
-      node.style('display', hiddenSet.has(g) ? 'none' : 'element');
+      let disp: 'none' | 'element' = hiddenSet.has(g) ? 'none' : 'element';
+      if (disp === 'element') {
+        const lh = node.data('layerItemHidden');
+        if (lh === true || lh === 'yes' || lh === 1) disp = 'none';
+      }
+      node.style('display', disp);
+      if (disp === 'element') {
+        const z = Number(node.data('stackZ'));
+        if (Number.isFinite(z)) node.style('z-index', z);
+      }
     });
   });
 }
@@ -217,10 +226,11 @@ function applyGraphWeightedCircleLayout(
   const pos = new Map<string, { x: number; y: number }>();
 
   // 每个标签组在自身权重半径上独立绕满 360°，并用稳定相位错开，避免只占一段弧。
+  // 约定：权重越大越靠近圆心。
   visibleGroups.forEach((groupNodes, tagKey) => {
     const wgt = layers.weights?.[tagKey] ?? 0.5;
     const norm = graphLayerWeightNorm(wgt);
-    const r = rInner + norm * (rOuter - rInner);
+    const r = rInner + (1 - norm) * (rOuter - rInner);
     const n = groupNodes.length;
     const phase = stableAngleSeed(tagKey || '__untagged__') * 2 * Math.PI - Math.PI / 2;
     for (let i = 0; i < n; i += 1) {
@@ -255,6 +265,15 @@ type RendererWithProject = {
 function getCyRenderer(cy: Core): RendererWithProject | null {
   const r = (cy as unknown as { renderer?: () => RendererWithProject }).renderer?.();
   return r && typeof r.projectIntoViewport === 'function' ? r : null;
+}
+
+function isCyActive(cy: Core | null | undefined): cy is Core {
+  if (!cy) return false;
+  try {
+    return !(cy as any).destroyed?.();
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -321,7 +340,10 @@ export function decodeGraphPayloadFromBase64(b64: string): GraphExportPayload {
 
 export function attachGraphResizeObserver(cy: Core, el: HTMLElement): () => void {
   const ro = new ResizeObserver(() => {
-    requestAnimationFrame(() => cy.resize());
+    requestAnimationFrame(() => {
+      if (!isCyActive(cy)) return;
+      cy.resize();
+    });
   });
   ro.observe(el);
   return () => ro.disconnect();
@@ -330,6 +352,7 @@ export function attachGraphResizeObserver(cy: Core, el: HTMLElement): () => void
 export function scheduleGraphResizeAndFit(cy: Core): void {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
+      if (!isCyActive(cy)) return;
       cy.resize();
       cy.fit(undefined, 40);
     });
@@ -347,13 +370,430 @@ export function animateGraphCenterOnNode(cy: Core, nodeId: string): void {
   });
 }
 
+const GRAPH_COSE_EDGE_LENGTH_MIN = 64;
+const GRAPH_COSE_EDGE_LENGTH_MAX = 276;
+const GRAPH_COSE_EDGE_WEIGHT_MIN = 0.1;
+const GRAPH_COSE_EDGE_WEIGHT_MAX = 3.2;
+const GRAPH_COSE_REPULSION_MIN = 3200;
+const GRAPH_COSE_REPULSION_MAX = 9200;
+const GRAPH_COSE_CROSSING_OPT_MAX_EDGES = 220;
+const GRAPH_COSE_FLOW_BIAS_MAX_EDGES = 500;
+
+type GraphCoseCentralityStats = {
+  normByNodeId: Map<string, number>;
+  avgNormByEdgeId: Map<string, number>;
+};
+
+function graphCoseBuildWeightedDegreeCentrality(cy: Core): GraphCoseCentralityStats {
+  const degreeByNodeId = new Map<string, number>();
+  cy.nodes().forEach((n) => {
+    degreeByNodeId.set(n.id(), 0);
+  });
+
+  cy.edges().forEach((e) => {
+    const raw = Number(e.data('edgeWeight'));
+    const edgeW = Number.isFinite(raw) ? Math.max(GRAPH_COSE_EDGE_WEIGHT_MIN, raw) : 0.3;
+    const s = e.source().id();
+    const t = e.target().id();
+    degreeByNodeId.set(s, (degreeByNodeId.get(s) ?? 0) + edgeW);
+    degreeByNodeId.set(t, (degreeByNodeId.get(t) ?? 0) + edgeW);
+  });
+
+  let maxDeg = 0;
+  degreeByNodeId.forEach((v) => {
+    if (v > maxDeg) maxDeg = v;
+  });
+  const denom = maxDeg > 0 ? maxDeg : 1;
+
+  const normByNodeId = new Map<string, number>();
+  degreeByNodeId.forEach((v, k) => {
+    normByNodeId.set(k, Math.max(0, Math.min(1, v / denom)));
+  });
+
+  const avgNormByEdgeId = new Map<string, number>();
+  cy.edges().forEach((e) => {
+    const sNorm = normByNodeId.get(e.source().id()) ?? 0;
+    const tNorm = normByNodeId.get(e.target().id()) ?? 0;
+    avgNormByEdgeId.set(e.id(), (sNorm + tNorm) / 2);
+  });
+
+  return { normByNodeId, avgNormByEdgeId };
+}
+
+/** 与「加权度归一化」对比：邻居中心度高于该阈值视为 hub，用于多 hub 竞争拉长辐条边 */
+const GRAPH_COSE_HUB_CENTRALITY_THRESHOLD = 0.52;
+
+function graphCoseBuildHubNeighborCounts(cy: Core, normByNodeId: Map<string, number>): Map<string, number> {
+  const counts = new Map<string, number>();
+  cy.nodes().forEach((n) => {
+    counts.set(n.id(), 0);
+  });
+  cy.edges().forEach((e) => {
+    const s = e.source();
+    const t = e.target();
+    if (s.empty() || t.empty()) return;
+    const sId = s.id();
+    const tId = t.id();
+    const sN = normByNodeId.get(sId) ?? 0;
+    const tN = normByNodeId.get(tId) ?? 0;
+    if (sN >= GRAPH_COSE_HUB_CENTRALITY_THRESHOLD) counts.set(tId, (counts.get(tId) ?? 0) + 1);
+    if (tN >= GRAPH_COSE_HUB_CENTRALITY_THRESHOLD) counts.set(sId, (counts.get(sId) ?? 0) + 1);
+  });
+  return counts;
+}
+
+type GraphCoseSegment = {
+  sourceId: string;
+  targetId: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+};
+
+function graphCoseBuildVisibleSegments(cy: Core): GraphCoseSegment[] {
+  const segs: GraphCoseSegment[] = [];
+  cy.edges().forEach((e) => {
+    const s = e.source();
+    const t = e.target();
+    if (s.empty() || t.empty()) return;
+    if (s.id() === t.id()) return;
+    if (s.style('display') === 'none' || t.style('display') === 'none' || e.style('display') === 'none') return;
+    const sp = s.position();
+    const tp = t.position();
+    segs.push({
+      sourceId: s.id(),
+      targetId: t.id(),
+      x1: sp.x,
+      y1: sp.y,
+      x2: tp.x,
+      y2: tp.y
+    });
+  });
+  return segs;
+}
+
+function graphCoseSegmentsShareEndpoint(a: GraphCoseSegment, b: GraphCoseSegment): boolean {
+  return (
+    a.sourceId === b.sourceId ||
+    a.sourceId === b.targetId ||
+    a.targetId === b.sourceId ||
+    a.targetId === b.targetId
+  );
+}
+
+function graphCoseOrientation(
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  cx: number,
+  cyy: number
+): number {
+  return (bx - ax) * (cyy - ay) - (by - ay) * (cx - ax);
+}
+
+function graphCoseSegmentsCross(a: GraphCoseSegment, b: GraphCoseSegment): boolean {
+  const eps = 1e-7;
+  const o1 = graphCoseOrientation(a.x1, a.y1, a.x2, a.y2, b.x1, b.y1);
+  const o2 = graphCoseOrientation(a.x1, a.y1, a.x2, a.y2, b.x2, b.y2);
+  const o3 = graphCoseOrientation(b.x1, b.y1, b.x2, b.y2, a.x1, a.y1);
+  const o4 = graphCoseOrientation(b.x1, b.y1, b.x2, b.y2, a.x2, a.y2);
+  if (Math.abs(o1) < eps || Math.abs(o2) < eps || Math.abs(o3) < eps || Math.abs(o4) < eps) return false;
+  return (o1 > 0) !== (o2 > 0) && (o3 > 0) !== (o4 > 0);
+}
+
+function graphCoseCountCrossingsFromSegments(segs: GraphCoseSegment[]): number {
+  let count = 0;
+  for (let i = 0; i < segs.length; i += 1) {
+    const a = segs[i];
+    for (let j = i + 1; j < segs.length; j += 1) {
+      const b = segs[j];
+      if (graphCoseSegmentsShareEndpoint(a, b)) continue;
+      if (graphCoseSegmentsCross(a, b)) count += 1;
+    }
+  }
+  return count;
+}
+
+function runGraphCoseCrossingPostProcess(cy: Core): void {
+  const edgeCount = cy.edges().length;
+  if (edgeCount < 4 || edgeCount > GRAPH_COSE_CROSSING_OPT_MAX_EDGES) return;
+
+  const allNodes = cy
+    .nodes()
+    .filter((n) => n.style('display') !== 'none' && !n.hasClass('frame-cluster-label') && !n.hasClass('frame-cluster-halo'));
+  if (allNodes.length < 3) return;
+
+  const nodes = allNodes
+    .toArray()
+    .filter((n): n is NodeSingular => n.isNode())
+    .sort((a, b) => b.connectedEdges().length - a.connectedEdges().length)
+    .slice(0, Math.min(28, allNodes.length));
+
+  const viewport = Math.max(120, Math.min(cy.width(), cy.height()));
+  const step = Math.max(10, Math.min(34, viewport * 0.02));
+  const offsets = [
+    { x: 0, y: 0 },
+    { x: step, y: 0 },
+    { x: -step, y: 0 },
+    { x: 0, y: step },
+    { x: 0, y: -step },
+    { x: step, y: step },
+    { x: step, y: -step },
+    { x: -step, y: step },
+    { x: -step, y: -step }
+  ];
+
+  for (let pass = 0; pass < 2; pass += 1) {
+    let improved = false;
+    for (const node of nodes) {
+      const base = node.position();
+      let bestX = base.x;
+      let bestY = base.y;
+      let bestCross = graphCoseCountCrossingsFromSegments(graphCoseBuildVisibleSegments(cy));
+      for (const off of offsets) {
+        const nx = base.x + off.x;
+        const ny = base.y + off.y;
+        node.position({ x: nx, y: ny });
+        const c = graphCoseCountCrossingsFromSegments(graphCoseBuildVisibleSegments(cy));
+        if (c < bestCross) {
+          bestCross = c;
+          bestX = nx;
+          bestY = ny;
+        }
+      }
+      node.position({ x: bestX, y: bestY });
+      if (bestX !== base.x || bestY !== base.y) improved = true;
+    }
+    if (!improved) break;
+  }
+}
+
+function runGraphCoseLeftFlowPostProcess(cy: Core): void {
+  const edges = cy.edges();
+  if (edges.length < 2 || edges.length > GRAPH_COSE_FLOW_BIAS_MAX_EDGES) return;
+
+  const nodes = cy
+    .nodes()
+    .filter((n) => n.style('display') !== 'none' && !n.hasClass('frame-cluster-label') && !n.hasClass('frame-cluster-halo'));
+  if (nodes.length < 2) return;
+
+  const nodeIds = nodes.map((n) => n.id());
+  const nodeSet = new Set(nodeIds);
+  const outAdj = new Map<string, Array<{ to: string; w: number }>>();
+  const inAdj = new Map<string, Array<{ from: string; w: number }>>();
+  nodeIds.forEach((id) => {
+    outAdj.set(id, []);
+    inAdj.set(id, []);
+  });
+
+  const normW = (raw: unknown) => {
+    const v = Number(raw);
+    const safe = Number.isFinite(v) ? Math.max(0.1, Math.min(4.5, v)) : 0.3;
+    return 0.45 + ((safe - 0.1) / (4.5 - 0.1)) * 0.55;
+  };
+
+  const pushDirEdge = (from: string, to: string, w: number) => {
+    if (!nodeSet.has(from) || !nodeSet.has(to) || from === to) return;
+    outAdj.get(from)!.push({ to, w });
+    inAdj.get(to)!.push({ from, w });
+  };
+
+  edges.forEach((e) => {
+    const dir = String(e.data('direction') ?? 'none');
+    const s = e.source().id();
+    const t = e.target().id();
+    const w = normW(e.data('edgeWeight'));
+    if (dir === 'forward') {
+      pushDirEdge(s, t, w);
+      return;
+    }
+    if (dir === 'backward') {
+      pushDirEdge(t, s, w);
+      return;
+    }
+    if (dir === 'both') {
+      pushDirEdge(s, t, w);
+      pushDirEdge(t, s, w);
+    }
+  });
+
+  // 完整链路累加：不是只看一步 out-in，而是沿有向图多步传播（带衰减）估计“源头性”。
+  const ITER = 12;
+  const DECAY = 0.72;
+  let downstream = new Map<string, number>();
+  let upstream = new Map<string, number>();
+  nodeIds.forEach((id) => {
+    downstream.set(id, 1);
+    upstream.set(id, 1);
+  });
+
+  for (let i = 0; i < ITER; i += 1) {
+    const nextDown = new Map<string, number>();
+    const nextUp = new Map<string, number>();
+    nodeIds.forEach((id) => {
+      let downVal = 1;
+      let upVal = 1;
+      const outs = outAdj.get(id) ?? [];
+      const ins = inAdj.get(id) ?? [];
+      for (const e of outs) {
+        downVal += DECAY * e.w * (downstream.get(e.to) ?? 1);
+      }
+      for (const e of ins) {
+        upVal += DECAY * e.w * (upstream.get(e.from) ?? 1);
+      }
+      nextDown.set(id, downVal);
+      nextUp.set(id, upVal);
+    });
+    downstream = nextDown;
+    upstream = nextUp;
+  }
+
+  const scoreByNodeId = new Map<string, number>();
+  nodeIds.forEach((id) => {
+    const s = (downstream.get(id) ?? 1) - (upstream.get(id) ?? 1);
+    scoreByNodeId.set(id, s);
+  });
+
+  let minScore = Infinity;
+  let maxScore = -Infinity;
+  scoreByNodeId.forEach((v) => {
+    if (v < minScore) minScore = v;
+    if (v > maxScore) maxScore = v;
+  });
+  if (!Number.isFinite(minScore) || !Number.isFinite(maxScore)) return;
+
+  const width = cy.width();
+  const left = width * 0.08;
+  const right = width * 0.92;
+  const range = Math.max(1e-6, maxScore - minScore);
+  const strength = 0.6; // 提升约束强度，让“源头靠左”更明显
+
+  // 非线性放大两端差异，避免中段节点都堆在中间带。
+  const remapNorm = (u: number) => 0.5 + Math.sign(u - 0.5) * Math.pow(Math.abs(u - 0.5) * 2, 0.72) * 0.5;
+
+  for (let pass = 0; pass < 2; pass += 1) {
+    nodes.forEach((n) => {
+      const s = scoreByNodeId.get(n.id()) ?? 0;
+      const norm = remapNorm(Math.max(0, Math.min(1, (s - minScore) / range)));
+      // 分数越高（更像源头）越靠左
+      const xTarget = right - norm * (right - left);
+      const p = n.position();
+      n.position({ x: p.x + (xTarget - p.x) * strength, y: p.y });
+    });
+  }
+}
+
+type GraphCosePostProcessOptions = {
+  enableCrossingPostProcess?: boolean;
+  enableLeftFlowPostProcess?: boolean;
+};
+
+function graphCoseIdealEdgeLengthFromWeight(edgeWeightRaw: number): number {
+  const w = Number.isFinite(edgeWeightRaw) ? edgeWeightRaw : 0.3;
+  const clamped = Math.max(GRAPH_COSE_EDGE_WEIGHT_MIN, Math.min(GRAPH_COSE_EDGE_WEIGHT_MAX, w));
+  const tLinear =
+    (clamped - GRAPH_COSE_EDGE_WEIGHT_MIN) / (GRAPH_COSE_EDGE_WEIGHT_MAX - GRAPH_COSE_EDGE_WEIGHT_MIN);
+  // 非线性放大低-中区间差异，让 tag 赋权对边长的影响更明显。
+  const t = Math.pow(Math.max(0, Math.min(1, tLinear)), 0.58);
+  return GRAPH_COSE_EDGE_LENGTH_MIN + t * (GRAPH_COSE_EDGE_LENGTH_MAX - GRAPH_COSE_EDGE_LENGTH_MIN);
+}
+
+/**
+ * 力导布局参数：让 edgeWeight 越大的边有更长的理想长度，帮助降低中心拥挤与交叉。
+ * 可通过 overrides 覆盖默认项（如 animate/numIter 等）。
+ */
+export function buildGraphCoseLayoutOptions(
+  cy: Core,
+  overrides?: Record<string, unknown>,
+  postProcessOptions?: GraphCosePostProcessOptions
+): Record<string, unknown> {
+  const centrality = graphCoseBuildWeightedDegreeCentrality(cy);
+  const hubNeighborCountByNodeId = graphCoseBuildHubNeighborCounts(cy, centrality.normByNodeId);
+  const enableCrossingPostProcess = postProcessOptions?.enableCrossingPostProcess !== false;
+  const enableLeftFlowPostProcess = postProcessOptions?.enableLeftFlowPostProcess !== false;
+  const userStop = typeof overrides?.stop === 'function' ? (overrides.stop as () => void) : undefined;
+  const safeOverrides = { ...(overrides ?? {}) };
+  if ('stop' in safeOverrides) delete safeOverrides.stop;
+  return {
+    name: 'cose-bilkent',
+    animate: true,
+    padding: 40,
+    idealEdgeLength: (edge: any) => {
+      const sNode = edge?.source?.();
+      const tNode = edge?.target?.();
+      if (!sNode || !tNode || sNode.empty?.() || tNode.empty?.()) {
+        return graphCoseIdealEdgeLengthFromWeight(Number(edge?.data?.('edgeWeight')));
+      }
+      const sId = String(sNode.id());
+      const tId = String(tNode.id());
+      const cS = centrality.normByNodeId.get(sId) ?? 0;
+      const cT = centrality.normByNodeId.get(tId) ?? 0;
+      const cAvg = (cS + cT) / 2;
+
+      const base = graphCoseIdealEdgeLengthFromWeight(Number(edge?.data?.('edgeWeight')));
+      // 整体：边两端加权度越高，理想边稍短（核心簇收紧）
+      let len = base * (1 - cAvg * 0.26);
+
+      // 节点图层面板 tag 权重：在 edgeWeight 之外再拉高/压低理想长度（权重越大 → 边越长）
+      const tagS = Number(sNode.data?.('tagLayerNorm'));
+      const tagT = Number(tNode.data?.('tagLayerNorm'));
+      const tagAvg =
+        Number.isFinite(tagS) && Number.isFinite(tagT) ? (tagS + tagT) / 2 : 0.5;
+      len *= 1 + (tagAvg - 0.5) * 0.82;
+
+      // 一侧为 hub、一侧明显更弱：辐条略短；若弱侧同时连接多个 hub，则拉长该辐条，避免多个高中心簇被同一节点拽得太近
+      const cLow = Math.min(cS, cT);
+      const cHigh = Math.max(cS, cT);
+      const lowId = cS <= cT ? sId : tId;
+      const hubTh = GRAPH_COSE_HUB_CENTRALITY_THRESHOLD;
+      if (cHigh >= hubTh && cLow < cHigh - 0.07) {
+        len *= 0.92 + (1 - cHigh) * 0.08;
+        const kHub = hubNeighborCountByNodeId.get(lowId) ?? 0;
+        if (kHub >= 2) {
+          const competition = kHub - 1;
+          len *= 1 + 0.26 * competition * (0.4 + 0.6 * (1 - cLow));
+        }
+      }
+
+      return Math.max(46, Math.min(320, len));
+    },
+    nodeRepulsion: (node: any) => {
+      const c = centrality.normByNodeId.get(String(node?.id?.() ?? '')) ?? 0;
+      // 中心节点排斥略低、外围节点排斥略高：通常可减少外围挤压和连线缠绕。
+      return Math.round(GRAPH_COSE_REPULSION_MIN + (1 - c) * (GRAPH_COSE_REPULSION_MAX - GRAPH_COSE_REPULSION_MIN));
+    },
+    stop: () => {
+      if (enableCrossingPostProcess || enableLeftFlowPostProcess) {
+        requestAnimationFrame(() => {
+          if (!isCyActive(cy)) return;
+          if (enableLeftFlowPostProcess) runGraphCoseLeftFlowPostProcess(cy);
+          if (enableCrossingPostProcess) runGraphCoseCrossingPostProcess(cy);
+          requestAnimationFrame(() => {
+            if (!isCyActive(cy)) return;
+            cy.resize();
+          });
+        });
+      }
+      userStop?.();
+    },
+    ...safeOverrides
+  };
+}
+
 export function runGraphCoseLayout(cy: Core): void {
-  cy.layout({ name: 'cose-bilkent', animate: true, padding: 40 } as any).run();
+  try {
+    cy.layout(buildGraphCoseLayoutOptions(cy) as any).run();
+  } catch {
+    // 防御：若第三方布局在某些数据组合下拒绝函数型 idealEdgeLength，回退到稳定默认值。
+    cy.layout({ name: 'cose-bilkent', animate: true, padding: 40 } as any).run();
+  }
 }
 
 /**
  * 圆环布局。
- * 传入合并后的 `graphLayers` 时：按标签组权重分配半径（越大离圆心越远），不再接 cose（避免破坏环形）。
+ * 传入合并后的 `graphLayers` 时：按标签组权重分配半径（越大越靠近圆心），不再接 cose（避免破坏环形）。
  * 未传时：使用 cytoscape 内置圆环，并可选用短时 cose-bilkent 微调。
  */
 export function applyGraphCircleLayout(
@@ -372,16 +812,14 @@ export function applyGraphCircleLayout(
     return;
   }
   circleLayout.one('layoutstop', () => {
-    cy.layout({
-      name: 'cose-bilkent',
+    cy.layout(buildGraphCoseLayoutOptions(cy, {
       randomize: false,
       animate: true,
-      padding: 40,
       fit: true,
       quality: 'draft',
       numIter: 600,
       nodeDimensionsIncludeLabels: true
-    } as any).run();
+    }) as any).run();
   });
   circleLayout.run();
 }
@@ -397,11 +835,11 @@ export function applyGraphLayout(
     applyGraphCircleLayout(cy, circleRefineWithForce, graphLayers, standard);
     return;
   }
-  cy.layout({
-    name,
-    animate: true,
-    padding: 40
-  } as any).run();
+  try {
+    cy.layout(buildGraphCoseLayoutOptions(cy, { name }) as any).run();
+  } catch {
+    cy.layout({ name, animate: true, padding: 40 } as any).run();
+  }
 }
 
 /**
@@ -477,6 +915,7 @@ export function applyGraphTagGridLayout(cy: Core, layers: GraphLayerState | null
   }).run();
 
   requestAnimationFrame(() => {
+    if (!isCyActive(cy)) return;
     cy.resize();
     cy.fit(undefined, 48);
   });

@@ -119,3 +119,13 @@ export const TAG_COLORS = [
   '#e879f9', // fuchsia-400
   '#fb7185', // rose-400
 ];
+
+/** 打开项目全屏遮罩淡入（秒），与左侧栏背后遮罩一致（duration: 0.2） */
+export const PROJECT_OPEN_OVERLAY_FADE_S = 0.2;
+
+/** 整屏左滑与左侧栏抽屉同节奏，见 App 内 ProjectManager 外层 MotionDiv */
+export const PROJECT_OPEN_SLIDE_DURATION_S = 0.3;
+export const PROJECT_OPEN_SLIDE_EASE: [number, number, number, number] = [0.4, 0, 0.2, 1];
+
+/** 毫秒版，供 setTimeout 兜底 */
+export const PROJECT_OPEN_OVERLAY_FADE_MS = Math.round(PROJECT_OPEN_OVERLAY_FADE_S * 1000);

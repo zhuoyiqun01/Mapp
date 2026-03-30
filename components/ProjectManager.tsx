@@ -298,6 +298,8 @@ interface ProjectManagerProps {
   onUpdateProject?: (project: Project) => void;
   onDuplicateProject?: (project: Project) => void;
   isSidebar?: boolean;
+  /** 侧栏向右展成全宽过渡为「主页」布局：列表同主页（居中、项项带框） */
+  expandToHomeLayout?: boolean;
   onCloseSidebar?: () => void;
   onBackToHome?: () => void;
   viewMode?: 'map' | 'board' | 'table' | 'graph';
@@ -326,6 +328,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   onDuplicateProject,
   syncStatus,
   isSidebar = false,
+  expandToHomeLayout = false,
   onCloseSidebar,
   onBackToHome,
   viewMode = 'map',
@@ -1040,20 +1043,24 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     }
   };
 
-  const containerClass = isSidebar
-    ? "h-full w-full shadow-2xl flex flex-col border-r overflow-hidden"
-    : "w-full h-[100dvh] min-h-0 overflow-y-auto theme-surface-scrollbar flex flex-col items-center justify-start pt-40 pb-0 p-4 relative"; 
+  const homeLikeList = !isSidebar || expandToHomeLayout;
 
-  const titleClass = isSidebar
-    ? "hidden" // Hide title in sidebar
+  const containerClass = expandToHomeLayout
+    ? "h-full w-full overflow-y-auto theme-surface-scrollbar flex flex-col items-center justify-start pt-24 pb-0 p-4 relative"
+    : isSidebar
+      ? "h-full w-full shadow-2xl flex flex-col border-r overflow-hidden"
+      : "w-full h-[100dvh] min-h-0 overflow-y-auto theme-surface-scrollbar flex flex-col items-center justify-start pt-40 pb-0 p-4 relative";
+
+  const titleClass = isSidebar && !expandToHomeLayout
+    ? "hidden"
     : "text-6xl md:text-8xl font-black text-theme-chrome-fg tracking-tighter mb-12 text-center drop-shadow-sm leading-[0.9] flex flex-col";
 
   return (
     <div 
       className={`${containerClass} ${isDragging ? 'ring-4 ring-offset-2' : ''}`}
-      style={{ 
+      style={{
         backgroundColor: themeColor,
-        borderColor: isSidebar ? themeColor : undefined,
+        borderColor: isSidebar && !expandToHomeLayout ? themeColor : undefined,
         boxShadow: isDragging ? `0 0 0 4px ${themeColor}` : undefined
       }}
       onDragEnter={handleDragEnter}
@@ -1078,8 +1085,11 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           </div>
         </div>
       )}
-      {/* 主页：设置按钮，呼出与地图侧一致的「界面外观」面板 */}
-      {!isSidebar && onThemeColorChange && onMapUiChromeOpacityChange && onMapUiChromeBlurPxChange && (
+      {/* 主页 / 全宽「启动」层：设置；侧栏仅在展开且无打开项目时显示（与独立主页同款） */}
+      {(!isSidebar || (expandToHomeLayout && !activeProject)) &&
+        onThemeColorChange &&
+        onMapUiChromeOpacityChange &&
+        onMapUiChromeBlurPxChange && (
         <>
           <button
             type="button"
@@ -1146,16 +1156,11 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         </>
       )}
 
-      {isSidebar && (
+      {isSidebar && !expandToHomeLayout && (
         <>
-          <button 
+          <button
             onClick={() => {
-              if (onBackToHome) {
-                onBackToHome();
-              }
-              if (onCloseSidebar) {
-                onCloseSidebar();
-              }
+              if (onBackToHome) onBackToHome();
             }} 
             className="absolute top-4 left-4 p-2 rounded-xl text-theme-chrome-fg transition-colors z-[2010]"
             style={{ backgroundColor: themeColor }}
@@ -1201,8 +1206,15 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         </>
       )}
 
-      <div className={isSidebar ? "p-6 pt-28 border-b flex-shrink-0" : "flex flex-col items-center"} style={isSidebar ? { borderColor: `${themeColor}33` } : undefined}>
-        {!isSidebar && (
+      <div
+        className={
+          isSidebar && !expandToHomeLayout
+            ? 'p-6 pt-28 border-b flex-shrink-0'
+            : 'flex flex-col items-center'
+        }
+        style={isSidebar && !expandToHomeLayout ? { borderColor: `${themeColor}33` } : undefined}
+      >
+        {homeLikeList && (
           <>
           <h1 className={titleClass}>
             <span>START</span>
@@ -1230,84 +1242,60 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
 
       <div
         className={
-          isSidebar
-            ? "flex-1 overflow-y-auto theme-surface-scrollbar w-full p-4"
-            : "w-full max-w-md mt-8 bg-transparent p-4 pb-8"
+          isSidebar && !expandToHomeLayout
+            ? 'flex-1 overflow-y-auto theme-surface-scrollbar w-full p-4'
+            : 'w-full max-w-md mt-8 bg-transparent p-4 pb-8'
         }
-        style={isSidebar ? { 
-          touchAction: 'pan-y',
-          overscrollBehavior: 'contain',
-          WebkitOverflowScrolling: 'touch'
-        } : {}}
+        style={
+          isSidebar && !expandToHomeLayout
+            ? {
+                touchAction: 'pan-y',
+                overscrollBehavior: 'contain',
+                WebkitOverflowScrolling: 'touch'
+              }
+            : {}
+        }
         onTouchStart={(e) => {
-          if (isSidebar) {
+          if (isSidebar && !expandToHomeLayout) {
             e.stopPropagation();
           }
         }}
         onTouchMove={(e) => {
-          if (isSidebar) {
+          if (isSidebar && !expandToHomeLayout) {
             e.stopPropagation();
           }
         }}
         onWheel={(e) => {
-          if (isSidebar) {
+          if (isSidebar && !expandToHomeLayout) {
             e.stopPropagation();
           }
         }}
         onScroll={(e) => {
-          if (isSidebar) {
+          if (isSidebar && !expandToHomeLayout) {
             e.stopPropagation();
           }
         }}
       >
         <div className="flex flex-col gap-3">
           {projects.map(p => (
-            <div 
-              key={p.id} 
-              className={`group relative flex items-center justify-between p-4 rounded-2xl transition-all ${
-                p.id === currentProjectId
-                  ? isSidebar
-                    ? 'bg-white shadow-lg ring-2 text-black'
-                    : 'shadow-lg border border-white/50 text-black'
-                  : isSidebar
-                    ? 'border'
-                    : 'shadow-lg border border-white/50 text-gray-800'
+            <div
+              key={p.id}
+              className={`group relative flex items-center justify-between p-4 rounded-2xl transition-all shadow-lg border border-white/50 ${
+                p.id === currentProjectId ? 'text-black' : 'text-gray-800'
               }`}
-              style={
-                isSidebar
-                  ? p.id === currentProjectId
-                    ? { boxShadow: `0 0 0 2px ${themeColor}` }
-                    : { backgroundColor: `${themeColor}E6`, borderColor: `${themeColor}33` }
-                  : {
-                      ...mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx),
-                      ...(p.id === currentProjectId
-                        ? {
-                            backgroundColor: `rgba(255,255,255,${Math.min(1, mapUiChromeOpacity + 0.1)})`,
-                            boxShadow: `0 0 0 2px ${themeColor}`
-                          }
-                        : homeCardHoverId === p.id
-                          ? { backgroundColor: mapChromeHoverBackground(mapUiChromeOpacity) }
-                          : {})
+              style={{
+                ...mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx),
+                ...(p.id === currentProjectId
+                  ? {
+                      backgroundColor: `rgba(255,255,255,${Math.min(1, mapUiChromeOpacity + 0.1)})`,
+                      boxShadow: `0 0 0 2px ${themeColor}`
                     }
-              }
-              onMouseEnter={(e) => {
-                if (!isSidebar) {
-                  setHomeCardHoverId(p.id);
-                  return;
-                }
-                if (p.id !== currentProjectId) {
-                  e.currentTarget.style.backgroundColor = themeColor;
-                }
+                  : homeCardHoverId === p.id
+                    ? { backgroundColor: mapChromeHoverBackground(mapUiChromeOpacity) }
+                    : {})
               }}
-              onMouseLeave={(e) => {
-                if (!isSidebar) {
-                  setHomeCardHoverId((id) => (id === p.id ? null : id));
-                  return;
-                }
-                if (p.id !== currentProjectId) {
-                  e.currentTarget.style.backgroundColor = `${themeColor}E6`;
-                }
-              }}
+              onMouseEnter={() => setHomeCardHoverId(p.id)}
+              onMouseLeave={() => setHomeCardHoverId((id) => (id === p.id ? null : id))}
             >
               <div 
                 className="flex-1 cursor-pointer" 
@@ -1362,7 +1350,9 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                   <>
                     <div
                       className="font-bold text-lg leading-tight"
-                      style={{ color: p.id === currentProjectId ? '#000' : (isSidebar ? 'rgba(0,0,0,0.4)' : undefined) }}
+                      style={{
+                        color: p.id === currentProjectId ? '#000' : undefined
+                      }}
                     >
                       {p.name}
                     </div>
@@ -1403,7 +1393,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                 {openMenuId === p.id && (
                   <>
                     <div className="fixed inset-0 z-[2020] bg-black/20 pointer-events-auto" onClick={() => setOpenMenuId(null)} />
-                    {isSidebar ? (
+                    {!homeLikeList ? (
                       <MenuDropdown
                         project={p}
                         onRename={handleRename}
@@ -1476,7 +1466,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
             </div>
           ))}
           
-          {projects.length === 0 && !isSidebar && (
+          {projects.length === 0 && homeLikeList && (
              <div className="text-center py-8 italic opacity-60 text-theme-chrome-fg">No projects yet. Start one!</div>
           )}
         </div>

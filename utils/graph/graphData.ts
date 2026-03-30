@@ -21,6 +21,66 @@ export function connectionToGraphDirection(c: Connection): GraphEdgeDirection {
   return 'none';
 }
 
+/**
+ * 「箭头仅在开端 / source 端、末端无箭头」（backward）时，交换两端便签与锚边及箭头字段，
+ * 使语义变为「末端（target）指向开端」即 Cytoscape forward。
+ */
+export function reverseConnectionEndpoints(c: Connection): Connection {
+  const next: Connection = {
+    ...c,
+    fromNoteId: c.toNoteId,
+    toNoteId: c.fromNoteId,
+    fromSide: c.toSide,
+    toSide: c.fromSide,
+    fromArrow: c.toArrow,
+    toArrow: c.fromArrow
+  };
+  if (next.fromArrow != null || next.toArrow != null) {
+    delete next.arrow;
+  } else {
+    if (c.arrow === 'reverse') next.arrow = 'forward';
+    else if (c.arrow === 'forward') next.arrow = 'reverse';
+  }
+  return next;
+}
+
+/**
+ * 打开项目时整理连线：删除端点便签已不存在的边；将仅开端带箭头的边规范为交换端点后的 forward。
+ */
+export function normalizeProjectConnections(project: Project): { project: Project; mutated: boolean } {
+  const noteIds = new Set(project.notes.map((n) => n.id));
+  const raw = project.connections ?? [];
+  let mutated = false;
+  const next: Connection[] = [];
+
+  for (const c of raw) {
+    if (!noteIds.has(c.fromNoteId) || !noteIds.has(c.toNoteId)) {
+      mutated = true;
+      continue;
+    }
+    let row: Connection = c;
+    if (
+      c.labelAnchorNoteId != null &&
+      c.labelAnchorNoteId !== c.fromNoteId &&
+      c.labelAnchorNoteId !== c.toNoteId
+    ) {
+      row = { ...row };
+      delete row.labelAnchorNoteId;
+      mutated = true;
+    }
+    if (connectionToGraphDirection(row) === 'backward') {
+      row = reverseConnectionEndpoints(row);
+      mutated = true;
+    }
+    next.push(row);
+  }
+
+  if (!mutated) {
+    return { project, mutated: false };
+  }
+  return { project: { ...project, connections: next }, mutated: true };
+}
+
 function noteNodeColor(note: Note, fallback: string): string {
   if (note.tags?.length) {
     const t = note.tags[0];
@@ -74,7 +134,8 @@ export function buildGraphElements(
   notes: Note[],
   connections: Connection[],
   themeColor: string,
-  edgeWeightBase?: number
+  edgeWeightBase?: number,
+  tagLayerWeights?: Record<string, number>
 ): ElementDefinition[] {
   const noteById = new Map<string, Note>();
   notes.forEach((n) => noteById.set(n.id, n));
@@ -154,9 +215,25 @@ export function buildGraphElements(
     linkedIds.add(c.toNoteId);
   }
 
+  const stackOrder = [...notes].sort((a, b) => {
+    const oa = a.layerStackOrder ?? a.createdAt;
+    const ob = b.layerStackOrder ?? b.createdAt;
+    if (oa !== ob) return oa - ob;
+    return a.id.localeCompare(b.id);
+  });
+  const stackZById = new Map<string, number>();
+  stackOrder.forEach((n, i) => stackZById.set(n.id, 2 + i));
+
   const nodes: ElementDefinition[] = notes.map((note) => {
       const rawTag = note.tags?.[0]?.label?.trim() ?? '';
       const tagGroup = rawTag !== '' ? rawTag : GRAPH_UNTAGGED_TAG_GROUP;
+      const rawTagLayerW = Number(tagLayerWeights?.[tagGroup] ?? 0.5);
+      const tagLayerW = Math.min(
+        1,
+        Math.max(0.1, Number.isFinite(rawTagLayerW) ? rawTagLayerW : 0.5)
+      );
+      /** 0～1，与图层面板半径权重一致；力导 idealEdgeLength 单独引用，增强 tag 对边长的影响 */
+      const tagLayerNorm = (tagLayerW - 0.1) / 0.9;
       const main = noteLabel(note);
       const yl = yearLabel(note);
       /** 单行：时间在主标题右侧（用 em 空格拉开，避免框过窄过高） */
@@ -169,6 +246,8 @@ export function buildGraphElements(
           year: yl,
           timeSort: note.startYear != null ? note.startYear : undefined,
           color: noteNodeColor(note, themeColor),
+          layerItemHidden: Boolean(note.layerItemHidden),
+          stackZ: stackZById.get(note.id) ?? 2,
           /** 图谱「按标签分组网格」用：无首个标签时归入 GRAPH_UNTAGGED_TAG_GROUP，避免被样式表隐藏 */
           tagGroup,
           /**
@@ -193,6 +272,7 @@ export function buildGraphElements(
             note.groupIds?.[0] ?? note.groupId ?? note.groupNames?.[0] ?? note.groupName ?? ''
           ).trim(),
           tagHint: note.tags?.map((t) => t.label).join(' · ') || '',
+          tagLayerNorm,
           favorite: note.isFavorite ? 'yes' : 'no',
           graphLinked: linkedIds.has(note.id) ? 'yes' : 'no'
         }
@@ -209,7 +289,15 @@ export function buildGraphElements(
     const fromFav = Boolean(noteById.get(c.fromNoteId)?.isFavorite);
     const toFav = Boolean(noteById.get(c.toNoteId)?.isFavorite);
     const favEndpointCount = (fromFav ? 1 : 0) + (toFav ? 1 : 0);
-    const edgeWeight = baseEdgeWeight + favEndpointCount * 0.5;
+    const fromTag = noteById.get(c.fromNoteId)?.tags?.[0]?.label?.trim() ?? '';
+    const toTag = noteById.get(c.toNoteId)?.tags?.[0]?.label?.trim() ?? '';
+    const fromTagWeight = fromTag ? Number(tagLayerWeights?.[fromTag] ?? 0.5) : 0.5;
+    const toTagWeight = toTag ? Number(tagLayerWeights?.[toTag] ?? 0.5) : 0.5;
+    const tagAvgWeight = (fromTagWeight + toTagWeight) / 2;
+    const tagNorm = (Math.max(0.1, Math.min(1, tagAvgWeight)) - 0.1) / 0.9;
+    // tag 权重越高，连线越粗；以 0.5 作为中位基准，不改 edge label 字号逻辑。
+    const tagBoost = Math.max(0, tagNorm - 0.5) * 1.2;
+    const edgeWeight = baseEdgeWeight + favEndpointCount * 0.5 + tagBoost;
     const { edgeLine, edgeLineFocus, edgeLineHi } = edgeWeightToLines(edgeWeight);
 
     // 分普通/收藏加粗/收藏高亮态：minEdgeWidth 由 edgeWeightToLines 的 clamp 决定。
@@ -405,7 +493,6 @@ export function getGraphStylesheet(
         height: z.ns,
         'border-width': z.borderBase,
         'border-color': '#ffffff',
-        cursor: 'pointer',
         'text-background-opacity': 0,
         'text-border-width': 0,
         /** 显式压低默认节点，便于高亮连线画在邻居节点之上 */
@@ -776,8 +863,8 @@ export function getGraphStylesheet(
       // frameCluster 簇标题：默认 text-events=no 时点在字上会穿透到下层面；设 yes 才用 label 包围盒拾取
       selector: 'node.frame-cluster-label',
       style: {
-        width: 108,
-        height: 30,
+        width: 84,
+        height: 24,
         shape: 'roundrectangle',
         'background-opacity': 0,
         'border-width': 0,
@@ -795,11 +882,8 @@ export function getGraphStylesheet(
         'text-outline-color': '#ffffff',
         'text-outline-opacity': 1,
         'text-events': 'yes',
-        // 只允许文字本身接收事件：避免 108x30 的 label 包围盒挡住下层 hover/selected
-        events: 'no',
         'z-index': 22000,
-        'z-index-compare': 'manual',
-        cursor: 'pointer'
+        'z-index-compare': 'manual'
       }
     },
     /** 簇标题选中：不显主题底/边（避免盖住通用 node:selected 的绿色描边） */
@@ -835,9 +919,15 @@ export function getGraphStylesheet(
       }
     },
     {
-      selector: 'node.graph-frame-peek-dim:not(.frame-cluster-halo):not(.frame-cluster-label)',
+      selector: 'node.graph-frame-peek-dim',
       style: {
         opacity: 0.32
+      }
+    },
+    {
+      selector: 'node.frame-cluster-halo.graph-frame-peek-dim, node.frame-cluster-label.graph-frame-peek-dim',
+      style: {
+        opacity: 1
       }
     },
     {

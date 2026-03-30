@@ -1,73 +1,50 @@
 import { useCallback } from 'react';
 import type { Note, Project } from '../../types';
-import { generateId } from '../../utils';
-
-function isDuplicateNote(note1: Note, note2: Note): boolean {
-  if (!note1.coords || !note2.coords) return false;
-  const latDiff = Math.abs(note1.coords.lat - note2.coords.lat);
-  const lngDiff = Math.abs(note1.coords.lng - note2.coords.lng);
-  const textMatch = (note1.text || '').trim() === (note2.text || '').trim();
-  return latDiff < 0.0001 && lngDiff < 0.0001 && textMatch;
-}
+import {
+  buildNewNotesFromProjectJsonRaws,
+  parseProjectJsonNotesPayload
+} from '../../utils/import/projectDataImport';
 
 interface UseDataImportProps {
   project: Project;
-  onUpdateProject?: (project: Project) => void;
+  onUpdateProject?: (project: Project) => void | Promise<void>;
 }
 
 export function useDataImport({ project, onUpdateProject }: UseDataImportProps) {
   const handleDataImport = useCallback(
     async (file: File) => {
+      if (!project?.id) {
+        alert('请先打开一个项目再导入数据');
+        return;
+      }
       try {
         const text = await file.text();
-        const data = JSON.parse(text);
-
-        if (!data.project || !data.project.notes) {
-          alert('Invalid project file format');
-          return;
-        }
-
-        const importedNotes = (data.project.notes || []).filter(
-          (note: Note) => note.coords && note.coords.lat && note.coords.lng
-        );
-
-        if (importedNotes.length === 0) {
-          alert('No notes with location data found in the imported file');
+        const parsed = parseProjectJsonNotesPayload(text);
+        if (!parsed) {
+          alert('无效的项目 JSON：需要包含 project.notes 数组');
           return;
         }
 
         const existingNotes = project.notes || [];
-        const uniqueImportedNotes = importedNotes.filter(
-          (importedNote: Note) =>
-            !existingNotes.some((existingNote: Note) =>
-              isDuplicateNote(importedNote, existingNote)
-            )
-        );
+        const newNotes = buildNewNotesFromProjectJsonRaws(parsed.rawNotes, existingNotes);
 
-        const newNotes = uniqueImportedNotes.map((note: Note) => ({
-          ...note,
-          isFavorite: note.isFavorite ?? false,
-          id: generateId(),
-          createdAt: Date.now() + Math.random()
-        }));
-
-        const mergedNotes = [...existingNotes, ...newNotes];
-
-        if (onUpdateProject) {
-          onUpdateProject({ ...project, notes: mergedNotes });
+        if (newNotes.length === 0) {
+          alert('没有可导入的新便签（可能全部重复或文件为空）');
+          return;
         }
 
-        const duplicateCount = importedNotes.length - uniqueImportedNotes.length;
-        if (duplicateCount > 0) {
-          alert(
-            `Successfully imported ${uniqueImportedNotes.length} new notes. ${duplicateCount} duplicate(s) were skipped.`
-          );
+        const mergedNotes = [...existingNotes, ...newNotes];
+        await onUpdateProject?.({ ...project, notes: mergedNotes });
+
+        const skipped = parsed.rawNotes.length - newNotes.length;
+        if (skipped > 0) {
+          alert(`已导入 ${newNotes.length} 条便签；跳过 ${skipped} 条（与已有数据重复等）。`);
         } else {
-          alert(`Successfully imported ${uniqueImportedNotes.length} note(s).`);
+          alert(`已成功导入 ${newNotes.length} 条便签。`);
         }
       } catch (error) {
         console.error('Failed to import data:', error);
-        alert('Failed to import data. Please check the file format.');
+        alert('导入失败，请检查文件格式。');
       }
     },
     [project, onUpdateProject]

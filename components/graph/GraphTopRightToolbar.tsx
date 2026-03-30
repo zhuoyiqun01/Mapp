@@ -40,6 +40,8 @@ type Props = {
   onLocateNote: (noteId: string) => void;
   /** cy 重建时用于重新挂载 viewport 监听 */
   graphCyKey: string;
+  /** 与右侧属性面板错开 */
+  reserveRightForInspector?: boolean;
 };
 
 export const GraphTopRightToolbar: React.FC<Props> = ({
@@ -53,7 +55,8 @@ export const GraphTopRightToolbar: React.FC<Props> = ({
   notes,
   cyRef,
   onLocateNote,
-  graphCyKey
+  graphCyKey,
+  reserveRightForInspector = false
 }) => {
   const [searchOpen, setSearchOpen] = useState(false);
   const [q, setQ] = useState('');
@@ -242,7 +245,11 @@ export const GraphTopRightToolbar: React.FC<Props> = ({
     return (
       <div
         data-allow-context-menu
-        className="fixed top-2 sm:top-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 items-end pointer-events-none"
+        className={`fixed top-2 sm:top-4 z-[500] flex flex-col gap-2 items-end pointer-events-none ${
+          reserveRightForInspector
+            ? 'right-2 sm:right-4 lg:right-[calc(20rem+0.75rem)]'
+            : 'right-2 sm:right-4'
+        }`}
       >
         <div
           className="flex h-10 sm:h-12 items-center gap-1.5 sm:gap-2 pointer-events-auto"
@@ -302,7 +309,11 @@ export const GraphTopRightToolbar: React.FC<Props> = ({
   return (
     <div
       data-allow-context-menu
-      className="fixed top-2 sm:top-4 right-2 sm:right-4 z-[500] pointer-events-auto flex h-10 sm:h-12 items-center gap-1.5"
+      className={`fixed top-2 sm:top-4 z-[500] pointer-events-auto flex h-10 sm:h-12 items-center gap-1.5 ${
+        reserveRightForInspector
+            ? 'right-2 sm:right-4 lg:right-[calc(20rem+0.75rem)]'
+            : 'right-2 sm:right-4'
+      }`}
       onPointerDown={(e) => e.stopPropagation()}
     >
       {!searchOpen ? (

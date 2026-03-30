@@ -91,9 +91,10 @@ export function MapShiftBoxSelect({
       box.style.height = `${Math.abs(y2 - y1)}px`;
     };
 
+    const doc = document as unknown as HTMLElement;
     const cleanupListeners = () => {
-      L.DomEvent.off(document, 'mousemove', onMove);
-      L.DomEvent.off(document, 'mouseup', onUp);
+      L.DomEvent.off(doc, 'mousemove', onMove);
+      L.DomEvent.off(doc, 'mouseup', onUp);
     };
 
     const onUp = (e: MouseEvent) => {
@@ -149,8 +150,8 @@ export function MapShiftBoxSelect({
       startRef.x = e.clientX;
       startRef.y = e.clientY;
       map.dragging.disable();
-      L.DomEvent.on(document, 'mousemove', onMove);
-      L.DomEvent.on(document, 'mouseup', onUp);
+      L.DomEvent.on(doc, 'mousemove', onMove);
+      L.DomEvent.on(doc, 'mouseup', onUp);
       L.DomEvent.preventDefault(e);
       L.DomEvent.stopPropagation(e);
     };

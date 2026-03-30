@@ -1,10 +1,11 @@
 import { useCallback } from 'react';
+import type { Map as LeafletMap } from 'leaflet';
 import type { Note } from '../../types';
 import { fileToBase64 } from '../../utils';
 
 interface UseCameraImportProps {
   getCurrentBrowserLocation: () => Promise<{ lat: number; lng: number } | null>;
-  mapInstance: L.Map | null;
+  mapInstance: LeafletMap | null;
   onAddNote: (note: Note) => void;
 }
 

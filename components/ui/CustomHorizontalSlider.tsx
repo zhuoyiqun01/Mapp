@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import type L from 'leaflet';
+import type { Map as LeafletMap } from 'leaflet';
 
 export type CustomHorizontalSliderWidth = number | 'stretch';
 
@@ -15,7 +15,7 @@ interface CustomHorizontalSliderProps {
   /** 固定像素宽度，或 `stretch` 占满父级（用于设置面板等自适应布局） */
   width: CustomHorizontalSliderWidth;
   formatValue: (value: number) => string;
-  mapInstance: L.Map | null;
+  mapInstance: LeafletMap | null;
 }
 
 export const CustomHorizontalSlider: React.FC<CustomHorizontalSliderProps> = ({

@@ -1,8 +1,10 @@
 import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
-import { Note, Frame, Connection, type Project } from '../types';
-import { motion } from 'framer-motion';
+import { Note, Frame, Connection, type GraphLayerState, type Project } from '../types';
+import { mergeGraphLayerState, type GraphLayerGroupStandard } from '../utils/graph/graphRuntimeCore';
+import { isNoteVisibleInUnifiedLayer } from '../utils/layer/unifiedNoteLayer';
+import { ProjectNotesLayerPanel } from './layer/ProjectNotesLayerPanel';
 import { NoteEditor } from './NoteEditor';
-import { Square, X, Check, Minus, Move, Hash, Plus, FileJson, Locate, Layers, Settings } from 'lucide-react';
+import { Square, X, Check, Minus, Move, Hash, Plus, FileJson, Locate, Settings } from 'lucide-react';
 import exifr from 'exifr';
 import { generateId, fileToBase64, parseNoteContent } from '../utils';
 import { calculateImageFingerprint, calculateFingerprintFromBase64 } from '../utils/media/imageProcessing';
@@ -25,16 +27,22 @@ import {
 import { TagAddPanel } from './ui/TagAddPanel';
 import { SettingsPanel } from './SettingsPanel';
 import { BoardImportPreviewDialog } from './board/BoardImportPreviewDialog';
+import { useCsvImport } from '@/components/hooks/useCsvImport';
+import { buildNewNotesFromProjectJsonRaws, parseProjectJsonNotesPayload } from '../utils/import/projectDataImport';
 import { BoardImageLightbox } from './board/BoardImageLightbox';
 import { BoardBrowseTagFilterPanel } from './board/BoardBrowseTagFilterPanel';
 import { BoardBrowseTimeFilterPanel } from './board/BoardBrowseTimeFilterPanel';
 import { BoardBatchTimePanel } from './board/BoardBatchTimePanel';
 import { BoardMultiSelectToolbar } from './board/BoardMultiSelectToolbar';
-import { BoardLayerPanel } from './board/BoardLayerPanel';
 import { BoardConnectionQuickEditBar } from './board/BoardConnectionQuickEditBar';
 import { BoardTopRightEditToggle } from './board/BoardTopRightEditToggle';
+import { type EditInspectorPanelProps, type InspectorGroupContext } from './map/overlays/MapEditInspectorPanel';
+import { useRegisterEditInspector } from './editInspector/EditInspectorProvider';
+import { GraphConnectionPanel } from './graph/GraphConnectionPanel';
+import { useSimpleConnectionPanel } from './hooks/useSimpleConnectionPanel';
 import { BoardTopCenterEditToolbar } from './board/BoardTopCenterEditToolbar';
 import { ChromeIconButton } from './ui/ChromeIconButton';
+import { LayerToolbarIcon } from './ui/LayerToolbarIcon';
 import { ChromeLabeledSlider } from './ui/ChromeLabeledSlider';
 import { CustomHorizontalSlider } from './ui/CustomHorizontalSlider';
 import ReactMarkdown from 'react-markdown';
@@ -196,13 +204,17 @@ interface BoardViewProps {
   onAddNote?: (note: Note) => void; 
   onDeleteNote?: (noteId: string) => void;
   onDeleteNotesBatch?: (noteIds: string[]) => void;
-  onEditModeChange?: (isEdit: boolean) => void;
+  workspaceEditMode: boolean;
+  onWorkspaceEditModeChange: (isEdit: boolean) => void;
   connections?: Connection[];
   onUpdateConnections?: (connections: Connection[]) => void;
   frames?: Frame[];
   onUpdateFrames?: (frames: Frame[]) => void;
-  project?: { notes: Note[]; standardSizeScale?: number };
-  onUpdateProject?: (project: { notes: Note[]; standardSizeScale?: number }) => void;
+  project?: Project;
+  onUpdateProject?: (
+    projectOrId: Project | string,
+    updates?: Partial<Project>
+  ) => void | Promise<void>;
   onSwitchToMapView?: (coords?: { lat: number; lng: number }) => void;
   onSwitchToBoardView?: (coords?: { x: number; y: number }) => void;
   navigateToCoords?: { x: number; y: number } | null;
@@ -232,7 +244,8 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
   onAddNote,
   onDeleteNote,
   onDeleteNotesBatch,
-  onEditModeChange,
+  workspaceEditMode,
+  onWorkspaceEditModeChange,
   connections = [],
   onUpdateConnections,
   frames = [],
@@ -264,6 +277,14 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
     () => ch ?? mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx),
     [ch, mapUiChromeOpacity, mapUiChromeBlurPx]
   );
+  const { handleCsvImport: handleCsvDataImport } = useCsvImport({
+    project: project ?? ({} as Project),
+    onUpdateProject: onUpdateProject
+      ? async (p) => {
+          await onUpdateProject(p);
+        }
+      : undefined
+  });
   const containerRef = useRef<HTMLDivElement>(null);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
   
@@ -329,16 +350,13 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
   });
   const [isPanning, setIsPanning] = useState(false);
   
-  // Edit Mode State
-  const [isEditMode, setIsEditMode] = useState(false);
-  
   // Note position selection state
   const [isSelectingNotePosition, setIsSelectingNotePosition] = useState(false);
   const [notePositionPreview, setNotePositionPreview] = useState<{ x: number; y: number } | null>(null);
   
   // 当编辑模式切换时，清除过滤状态和绘制状态
   useEffect(() => {
-    if (isEditMode) {
+    if (workspaceEditMode) {
       setFilterFrameIds(new Set());
     } else {
       // 退出编辑模式时，也退出位置选择模式和绘制模式
@@ -348,7 +366,7 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
       setDrawingFrameStart(null);
       setDrawingFrameEnd(null);
     }
-  }, [isEditMode]);
+  }, [workspaceEditMode]);
   
   // 当退出位置选择模式时，清除预览
   useEffect(() => {
@@ -365,6 +383,71 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
   });
   const [showLayerPanel, setShowLayerPanel] = useState(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
+
+  const projectFull = project as Project | undefined;
+  const effectiveConnections = useMemo(
+    () => projectFull?.connections ?? connections,
+    [projectFull?.connections, connections]
+  );
+  const graphLayerGroupStandard = useMemo(
+    () => (projectFull?.graphLayerStandard ?? 'tag') as GraphLayerGroupStandard,
+    [projectFull?.graphLayerStandard]
+  );
+  const mergedTagBoardLayers = useMemo(
+    () => mergeGraphLayerState(notes, projectFull?.graphLayers ?? null, 'tag'),
+    [notes, projectFull?.graphLayers]
+  );
+  const mergedFrameBoardLayers = useMemo(
+    () => mergeGraphLayerState(notes, projectFull?.graphFrameLayers ?? null, 'frame'),
+    [notes, projectFull?.graphFrameLayers]
+  );
+  const mergedProjectBoardLayers =
+    graphLayerGroupStandard === 'frame' ? mergedFrameBoardLayers : mergedTagBoardLayers;
+
+  const handleBoardGraphLayersChange = useCallback(
+    (next: GraphLayerState) => {
+      if (!onUpdateProject || !projectFull) return;
+      if (graphLayerGroupStandard === 'frame') {
+        onUpdateProject({ ...projectFull, graphFrameLayers: next });
+      } else {
+        onUpdateProject({ ...projectFull, graphLayers: next });
+      }
+    },
+    [onUpdateProject, projectFull, graphLayerGroupStandard]
+  );
+
+  const handleBoardLayerStandardChange = useCallback(
+    (standard: GraphLayerGroupStandard) => {
+      if (!onUpdateProject || !projectFull) return;
+      onUpdateProject({ ...projectFull, graphLayerStandard: standard });
+    },
+    [onUpdateProject, projectFull]
+  );
+
+  const handleBoardBatchNotes = useCallback(
+    async (nextNotes: Note[]) => {
+      if (!onUpdateProject || !projectFull) return;
+      await onUpdateProject({ ...projectFull, notes: nextNotes });
+    },
+    [onUpdateProject, projectFull]
+  );
+
+  const panBoardToNoteCenter = useCallback(
+    (note: Note) => {
+      const { width, height } = boardNoteDimensions(note);
+      const cx = note.boardX + width / 2;
+      const cy = note.boardY + height / 2;
+      const el = containerRef.current;
+      if (!el) return;
+      const { width: vw, height: vh } = el.getBoundingClientRect();
+      setTransform((prev) => ({
+        ...prev,
+        x: vw / 2 - cx * prev.scale,
+        y: vh / 2 - cy * prev.scale
+      }));
+    },
+    [setTransform]
+  );
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   
   // Layout state: global standard size scale is stored in project.standardSizeScale
@@ -438,12 +521,90 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
       setBrowseTimeFilterPanelOpen(false);
     }
   }, [selectedNoteIds.size]);
-  
+
+  const boardInspectorNoteId = useMemo(() => {
+    if (selectedNoteIds.size > 1) return null;
+    if (selectedNoteId) return selectedNoteId;
+    if (selectedNoteIds.size === 1) return Array.from(selectedNoteIds)[0];
+    return null;
+  }, [selectedNoteId, selectedNoteIds]);
+  const boardInspectorNote = useMemo(
+    () => (boardInspectorNoteId ? notes.find((n) => n.id === boardInspectorNoteId) ?? null : null),
+    [boardInspectorNoteId, notes]
+  );
+
+  const boardInspectorGroupContext = useMemo((): InspectorGroupContext | null => {
+    if (selectedNoteIds.size <= 1) return null;
+    const members = notes.filter((n) => selectedNoteIds.has(n.id));
+    if (members.length === 0) return null;
+    let x = 0;
+    let y = 0;
+    members.forEach((n) => {
+      x += n.boardX ?? 0;
+      y += n.boardY ?? 0;
+    });
+    const centroidBoard = { x: x / members.length, y: y / members.length };
+    const firstG = members[0]?.noteGroupId;
+    const isObjectGroup =
+      !!firstG && members.every((m) => m.noteGroupId === firstG);
+    return {
+      kind: 'multi',
+      title: isObjectGroup ? `对象组 · ${members.length} 个` : `多选 · ${members.length} 个`,
+      members,
+      centroidBoard
+    };
+  }, [selectedNoteIds, notes]);
+
+  const {
+    showConnectionPanel: showBoardInsConnPanel,
+    setShowConnectionPanel: setShowBoardInsConnPanel,
+    panelEditingKey: boardInsConnEditingKey,
+    connectionDraft: boardInsConnDraft,
+    setConnectionDraft: setBoardInsConnDraft,
+    pickTarget: boardInsConnPick,
+    setPickTarget: setBoardInsConnPick,
+    commitConnectionDraft: commitBoardInsConnDraft,
+    deleteConnectionByPanel: handleDeleteBoardInsConn,
+    resetNewConnectionDraft: handleBoardInsNewEmpty,
+    openNewFromInspectorAnchor: handleNewConnectionFromBoardInspector,
+    openEditConnection: handleEditBoardInsConn,
+    clearPanelDraft: clearBoardInsConnDraft,
+    clearFromOnly: clearBoardInsFromOnly,
+    clearToOnly: clearBoardInsToOnly
+  } = useSimpleConnectionPanel({
+    connections: effectiveConnections,
+    onUpdateConnections,
+    projectDefaults: projectFull,
+    anchorNoteIdForNew: boardInspectorNoteId
+  });
+
   // Frame state
   const [isDrawingFrame, setIsDrawingFrame] = useState(false);
   const [drawingFrameStart, setDrawingFrameStart] = useState<{ x: number; y: number } | null>(null);
   const [drawingFrameEnd, setDrawingFrameEnd] = useState<{ x: number; y: number } | null>(null);
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
+
+  const boardInspectorFrame = useMemo(() => {
+    if (boardInspectorNote) return null;
+    if (boardInspectorGroupContext) return null;
+    if (!selectedFrameId) return null;
+    return frames.find((f) => f.id === selectedFrameId) ?? null;
+  }, [boardInspectorNote, boardInspectorGroupContext, selectedFrameId, frames]);
+
+  const boardInspectorConnection = useMemo(() => {
+    if (boardInspectorNote) return null;
+    if (boardInspectorGroupContext) return null;
+    if (boardInspectorFrame) return null;
+    if (!selectedConnectionId) return null;
+    return effectiveConnections.find((c) => c.id === selectedConnectionId) ?? null;
+  }, [
+    boardInspectorNote,
+    boardInspectorGroupContext,
+    boardInspectorFrame,
+    selectedConnectionId,
+    effectiveConnections
+  ]);
+
   const [resizingImage, setResizingImage] = useState<{
     id: string;
     corner: 'tl' | 'tr' | 'bl' | 'br';
@@ -608,7 +769,7 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
     () =>
       JSON.stringify({
         open: browseTagFilterPanelOpen,
-        edit: isEditMode,
+        edit: workspaceEditMode,
         ids: [...selectedNoteIds].sort(),
         tx: transform.x,
         ty: transform.y,
@@ -619,7 +780,7 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
       }),
     [
       browseTagFilterPanelOpen,
-      isEditMode,
+      workspaceEditMode,
       selectedNoteIds,
       transform.x,
       transform.y,
@@ -634,7 +795,7 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
     () =>
       JSON.stringify({
         open: browseTimeFilterPanelOpen,
-        edit: isEditMode,
+        edit: workspaceEditMode,
         ids: [...selectedNoteIds].sort(),
         tx: transform.x,
         ty: transform.y,
@@ -645,7 +806,7 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
       }),
     [
       browseTimeFilterPanelOpen,
-      isEditMode,
+      workspaceEditMode,
       selectedNoteIds,
       transform.x,
       transform.y,
@@ -752,7 +913,7 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [isEditMode, showImportDialog]);
+  }, [workspaceEditMode, showImportDialog]);
 
   // Keyboard shortcuts for note grouping: Cmd/Ctrl+G (group) and Cmd/Ctrl+Shift+G (ungroup)
   useEffect(() => {
@@ -794,12 +955,8 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
   }, [notes, project, selectedNoteIds, onUpdateProject]);
 
   useEffect(() => {
-    onEditModeChange?.(isEditMode);
-    
-    // Layout scale is now managed globally via project.standardSizeScale
-    
     // 退出编辑模式时清除所有连接相关状态和长按状态
-    if (!isEditMode) {
+    if (!workspaceEditMode) {
       setConnectingFrom(null);
       setConnectingTo(null);
       setHoveringConnectionPoint(null);
@@ -816,7 +973,7 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
       currentNotePressIdRef.current = null;
       notePressStartPosRef.current = null;
     }
-  }, [isEditMode, onEditModeChange]);
+  }, [workspaceEditMode]);
 
   // 计算Note的中心点是否在Frame内
   const isNoteInFrame = (note: Note, frame: Frame): boolean => {
@@ -1257,7 +1414,7 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
 
   // 使用 useMemo 缓存连接线路径计算
   const connectionPaths = useMemo(() => {
-    return connections.map(conn => {
+    return effectiveConnections.map(conn => {
       const fromNote = notes.find(n => n.id === conn.fromNoteId);
       const toNote = notes.find(n => n.id === conn.toNoteId);
       if (!fromNote || !toNote) return null;
@@ -1277,7 +1434,7 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
         midY
       };
     }).filter((p): p is NonNullable<typeof p> => p !== null);
-  }, [connections, notes, draggingNoteId, dragOffset]);
+  }, [effectiveConnections, notes, draggingNoteId, dragOffset]);
 
   // Apply initial transform when project changes or container is ready
   const lastProjectIdRef = useRef<string | null>(null);
@@ -1304,7 +1461,7 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
 
   // Zoom to Fit on Enter Edit Mode with animation
   useEffect(() => {
-    if (isEditMode && notes.length > 0 && containerRef.current) {
+    if (workspaceEditMode && notes.length > 0 && containerRef.current) {
         // Wait for DOM to render and measure text notes
         const calculateBounds = () => {
             let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -1368,7 +1525,7 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
         });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditMode]);
+  }, [workspaceEditMode]);
 
   // Track transform changes for restoration detection only (position saving moved to pointer up)
   const isRestoringRef = useRef(false);
@@ -1640,42 +1797,23 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
     }
   };
 
-  // Handle data import (JSON)
+  // Handle data import (JSON)：与地图/表格等一致，合并全部便签；无坐标用 0,0（地图不绘制）
   const handleDataImport = async (file: File) => {
     try {
       const text = await file.text();
-      const data = JSON.parse(text);
-      
-      if (!data.project || !data.project.notes) {
-        alert('Invalid project file format');
+      const parsed = parseProjectJsonNotesPayload(text);
+      if (!parsed) {
+        alert('无效的项目 JSON：需要包含 project.notes 数组');
         return;
       }
 
-      const importedNotes = (data.project.notes || []).filter((note: Note) => 
-        note.boardX !== undefined && note.boardY !== undefined
-      );
-
-      if (importedNotes.length === 0) {
-        alert('No notes with board position data found in the imported file');
-        return;
-      }
-
-      // Check for duplicates and merge
       const existingNotes = notes || [];
-      const isDuplicateNote = (note1: Note, note2: Note): boolean => {
-        if (note1.boardX === undefined || note2.boardX === undefined) return false;
-        if (note1.boardY === undefined || note2.boardY === undefined) return false;
-        const xDiff = Math.abs(note1.boardX - note2.boardX);
-        const yDiff = Math.abs(note1.boardY - note2.boardY);
-        const textMatch = (note1.text || '').trim() === (note2.text || '').trim();
-        return xDiff < 5 && yDiff < 5 && textMatch;
-      };
+      const uniqueImportedNotes = buildNewNotesFromProjectJsonRaws(parsed.rawNotes, existingNotes);
 
-      const uniqueImportedNotes = importedNotes.filter((importedNote: Note) => {
-        return !existingNotes.some((existingNote: Note) => 
-          isDuplicateNote(importedNote, existingNote)
-        );
-      });
+      if (uniqueImportedNotes.length === 0) {
+        alert('没有可导入的新便签（可能全部重复或文件为空）');
+        return;
+      }
 
       const boardNotes = existingNotes.filter((n) => n.boardX !== undefined && n.boardY !== undefined);
       const boardBounds = computeBoardBounds(boardNotes);
@@ -1688,39 +1826,23 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
       const anchorX = boardBounds ? boardBounds.maxX + PLACEMENT_GAP : PLACEMENT_PADDING;
       const anchorY = boardBounds ? boardBounds.minY : PLACEMENT_PADDING;
 
-      // 批量导入时自动成组
       const importBatchGroupId = uniqueImportedNotes.length > 1 ? generateId() : undefined;
 
-      // Generate new IDs and offset positions for imported notes
-      // Also handle image separation for imported notes
-      const newNotes = await Promise.all(uniqueImportedNotes.map(async (note: Note) => {
-        // 不要根据内容自动判断 variant，保持原始 variant 或默认为 standard
-        const raw = (note as Note & { variant?: string }).variant || 'standard';
-        const variant: 'standard' | 'image' =
-          raw === 'image' ? 'image' : 'standard';
-        
-        const processedNote: Note = {
-          ...note,
-          id: generateId(),
-          createdAt: Date.now() + Math.random(),
-          variant: variant
-        };
+      const newNotes = await Promise.all(
+        uniqueImportedNotes.map(async (note) => {
+        const processedNote: Note = { ...note };
 
-        // Process images: convert Base64 to image IDs if needed
         if (note.images && note.images.length > 0) {
           const processedImages: string[] = [];
           for (const imageData of note.images) {
             if (imageData.startsWith('img-')) {
-              // Already an image ID, keep it
               processedImages.push(imageData);
             } else {
-              // Base64 data, save it and get image ID
               try {
                 const imageId = await saveImage(imageData);
                 processedImages.push(imageId);
               } catch (error) {
                 console.error('Failed to save imported image:', error);
-                // Keep original Base64 as fallback
                 processedImages.push(imageData);
               }
             }
@@ -1728,25 +1850,20 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
           processedNote.images = processedImages;
         }
 
-        // Process sketch: convert Base64 to sketch ID if needed
         if (note.sketch) {
           if (note.sketch.startsWith('img-')) {
-            // Already a sketch ID, keep it
             processedNote.sketch = note.sketch;
           } else {
-            // Base64 data, save it and get sketch ID
             try {
               const sketchId = await saveSketch(note.sketch);
               processedNote.sketch = sketchId;
             } catch (error) {
               console.error('Failed to save imported sketch:', error);
-              // Keep original Base64 as fallback
               processedNote.sketch = note.sketch;
             }
           }
         }
 
-        // Ensure image note dimensions are always reliable.
         if ((processedNote.images && processedNote.images.length > 0) || processedNote.variant === 'image') {
           processedNote.variant = 'image';
           const hasValidDims =
@@ -1769,20 +1886,20 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
         if (importBatchGroupId) processedNote.noteGroupId = importBatchGroupId;
 
         return processedNote;
-      }));
+      })
+      );
 
-      // Add all new notes
-      newNotes.forEach(note => onAddNote?.(note));
+      newNotes.forEach((note) => onAddNote?.(note));
 
-      const duplicateCount = importedNotes.length - uniqueImportedNotes.length;
+      const duplicateCount = parsed.rawNotes.length - uniqueImportedNotes.length;
       if (duplicateCount > 0) {
-        alert(`Successfully imported ${uniqueImportedNotes.length} new notes. ${duplicateCount} duplicate(s) were skipped.`);
+        alert(`已导入 ${uniqueImportedNotes.length} 条便签，跳过 ${duplicateCount} 条（重复等）。`);
       } else {
-        alert(`Successfully imported ${uniqueImportedNotes.length} note(s).`);
+        alert(`已成功导入 ${uniqueImportedNotes.length} 条便签。`);
       }
     } catch (error) {
       console.error('Failed to import data:', error);
-      alert('Failed to import data. Please check the file format.');
+      alert('导入失败，请检查文件格式。');
     }
   };
 
@@ -1857,10 +1974,13 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
       const jsonFiles: File[] = Array.from(files as FileList).filter((file: File) => 
         file.type === 'application/json' || file.name.endsWith('.json')
       );
+      const csvFiles: File[] = Array.from(files as FileList).filter(
+        (file: File) => file.type === 'text/csv' || file.name.toLowerCase().endsWith('.csv')
+      );
 
       if (imageFiles.length > 0) {
         // 编辑模式下（且未打开便签编辑器）拖入图片：新增图片对象
-        if (isEditMode && !editingNote) {
+        if (workspaceEditMode && !editingNote) {
           try {
             for (const file of imageFiles) {
               const { base64, width, height } = await compressImageToBase64(file, 512);
@@ -1903,8 +2023,9 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
           handleImageImport(dataTransfer.files, true);
         }
       } else if (jsonFiles.length > 0 && jsonFiles[0]) {
-        // For JSON, import directly
         handleDataImport(jsonFiles[0] as File);
+      } else if (csvFiles.length > 0 && csvFiles[0]) {
+        void handleCsvDataImport(csvFiles[0] as File);
       }
     }
   };
@@ -2270,7 +2391,7 @@ const createNoteAtCenter = () => {
       dragRectRef.current = containerRef.current?.getBoundingClientRect() || null;
       
       // 如果在Frame绘制模式 (必须在编辑模式下才有效)
-      if (isDrawingFrame && isEditMode) {
+      if (isDrawingFrame && workspaceEditMode) {
           const rect = dragRectRef.current;
           if (!rect) return;
           // 坐标转换：从屏幕坐标转换为世界坐标
@@ -2281,7 +2402,7 @@ const createNoteAtCenter = () => {
           setDrawingFrameEnd({ x: worldX, y: worldY });
           (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
           return;
-      } else if (isDrawingFrame && !isEditMode) {
+      } else if (isDrawingFrame && !workspaceEditMode) {
           // 如果不在编辑模式但处于绘制状态，自动退出绘制模式
           setIsDrawingFrame(false);
       }
@@ -2305,7 +2426,7 @@ const createNoteAtCenter = () => {
       
       // 框选：编辑模式下「框选」按钮，或任意模式下按住 Shift
       const shiftOrBoxSelect =
-        (isEditMode && isBoxSelecting) || isShiftPressed || e.shiftKey;
+        (workspaceEditMode && isBoxSelecting) || isShiftPressed || e.shiftKey;
       if (
         e.button === 0 &&
         shiftOrBoxSelect &&
@@ -2752,7 +2873,7 @@ const createNoteAtCenter = () => {
           
           // 3. 非编辑模式下，点击空白处清除过滤（图层 / 标签 / 时间）
           if (
-            !isEditMode &&
+            !workspaceEditMode &&
             (filterFrameIds.size > 0 ||
               boardFilterTagLabels.size > 0 ||
               boardFilterIncludeUntagged ||
@@ -2788,8 +2909,8 @@ const createNoteAtCenter = () => {
     setSelectedNoteId(null);
     setSelectedNoteIds(new Set());
     setSelectedConnectionId(null);
-    if (isEditMode) {
-      setIsEditMode(false);
+    if (workspaceEditMode) {
+      onWorkspaceEditModeChange(false);
       setIsBoxSelecting(false);
       setBoxSelectStart(null);
       setBoxSelectEnd(null);
@@ -2819,7 +2940,7 @@ const createNoteAtCenter = () => {
       }
       
       // 如果不在编辑模式，只记录位置信息用于单击检测，不启动长按计时器
-      if (!isEditMode) {
+      if (!workspaceEditMode) {
           // 阻止默认的长按菜单和事件冒泡，确保note的点击事件被正确处理
           e.preventDefault();
       e.stopPropagation();
@@ -2854,7 +2975,7 @@ const createNoteAtCenter = () => {
       if (isZooming) return;
       
       // 非编辑模式下，检查移动距离，如果移动太多则清空单击检测状态
-      if (!isEditMode) {
+      if (!workspaceEditMode) {
           if (lastMousePos.current && notePressStartPosRef.current) {
               const dx = e.clientX - notePressStartPosRef.current.x;
               const dy = e.clientY - notePressStartPosRef.current.y;
@@ -2903,7 +3024,7 @@ const createNoteAtCenter = () => {
 
   const handleNotePointerUp = (e: React.PointerEvent, note: Note) => {
       // Handle multi-select drag end
-      if (isMultiSelectDragging && !isZooming && isEditMode) {
+      if (isMultiSelectDragging && !isZooming && workspaceEditMode) {
         e.stopPropagation();
         (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
         
@@ -2989,7 +3110,7 @@ const createNoteAtCenter = () => {
       const movedTooMuch = movedDistance > 10; // 10px阈值，用于判断短按
       
       // 如果正在拖动（编辑模式下），处理拖动结束
-      if (draggingNoteId === note.id && !isZooming && isEditMode) {
+      if (draggingNoteId === note.id && !isZooming && workspaceEditMode) {
           // 如果确实发生了拖动，处理拖动结束
           if (hasMoved || hasMovedEnough) {
           e.stopPropagation();
@@ -3056,7 +3177,7 @@ const createNoteAtCenter = () => {
       }
       
       // 如果不在编辑模式，且是短按，打开编辑器
-      if (!isEditMode) {
+      if (!workspaceEditMode) {
           // 图片对象不应该打开编辑器
           if (note.variant === 'image') {
               currentNotePressIdRef.current = null;
@@ -3123,7 +3244,7 @@ const createNoteAtCenter = () => {
       }
       
       // 图片对象在非编辑模式下点击后放大预览 - 优先显示照片而不是涂鸦（Shift+点击多选）
-      if (note.variant === 'image' && !isEditMode) {
+      if (note.variant === 'image' && !workspaceEditMode) {
         if (isShiftPressed || e.shiftKey) {
           setSelectedNoteIds((prev) => {
             const newSet = new Set(prev);
@@ -3150,7 +3271,7 @@ const createNoteAtCenter = () => {
       }
       
       // 图片对象在编辑模式下，单击选中（延迟执行，等待可能的双击）
-      if (note.variant === 'image' && isEditMode) {
+      if (note.variant === 'image' && workspaceEditMode) {
         const now = Date.now();
         const timeSinceLastClick = now - lastClickTimeRef.current;
         const isSameNote = lastClickNoteIdRef.current === note.id;
@@ -3193,7 +3314,7 @@ const createNoteAtCenter = () => {
         return;
       }
       
-      if (!isEditMode) {
+      if (!workspaceEditMode) {
         if (isShiftPressed || e.shiftKey) {
           setSelectedNoteIds((prev) => {
             const newSet = new Set(prev);
@@ -3256,6 +3377,11 @@ const createNoteAtCenter = () => {
             // Single select mode: clear multi-select and select only this note
             setSelectedNoteId(note.id);
             setSelectedNoteIds(new Set([note.id]));
+            setSelectedConnectionId(null);
+            setSelectedFrameId(null);
+          }
+          if (wasShiftPressed) {
+            setSelectedConnectionId(null);
           }
           setConnectingFrom(null);
           setConnectingTo(null);
@@ -3298,7 +3424,7 @@ const createNoteAtCenter = () => {
       }
       
       // 在编辑模式下，双击打开编辑器
-      if (isEditMode) {
+      if (workspaceEditMode) {
         // 使用最新的便签数据
         const latestNote = notes.find(n => n.id === note.id) || note;
         ensureNoteImagesLoaded(latestNote).then(loadedNote => {
@@ -3384,7 +3510,7 @@ const createNoteAtCenter = () => {
         arrow: 'forward' as const // 默认正向箭头
       };
       
-      const updatedConnections = [...connections, newConnection];
+      const updatedConnections = [...effectiveConnections, newConnection];
       onUpdateConnections?.(updatedConnections);
     }
     
@@ -3440,12 +3566,71 @@ const createNoteAtCenter = () => {
   const gridSize = 40 * transform.scale;
   const dotSize = 3 * transform.scale;
 
+  const openInspectorNoteEditor = useCallback(
+    (noteId: string) => {
+      const n = notes.find((x) => x.id === noteId);
+      if (!n) return;
+      void ensureNoteImagesLoaded(n).then((loadedNote) => {
+        setEditingNote(loadedNote);
+        onToggleEditor(true);
+      });
+    },
+    [notes, onToggleEditor]
+  );
+
+  const boardEditInspectorPanelProps = useMemo(
+    (): EditInspectorPanelProps => ({
+      note: boardInspectorNote,
+      groupContext: boardInspectorNote ? null : boardInspectorGroupContext,
+      inspectorFrame: boardInspectorFrame,
+      onUpdateFrame: onUpdateFrames
+        ? (f) => onUpdateFrames(frames.map((x) => (x.id === f.id ? f : x)))
+        : undefined,
+      inspectorConnection: boardInspectorConnection,
+      coordMode: 'board',
+      themeColor,
+      panelChromeStyle: panelChromeStyle,
+      frames: frames ?? [],
+      connections: effectiveConnections,
+      notes,
+      hasConnectionWrite: !!onUpdateConnections,
+      onUpdateNote,
+      onEditConnection: handleEditBoardInsConn,
+      onNewConnection: handleNewConnectionFromBoardInspector,
+      onOpenFullNoteEditor: openInspectorNoteEditor,
+      onFocusPeerInView: (noteId) => {
+        const n = notes.find((x) => x.id === noteId);
+        if (n) panBoardToNoteCenter(n);
+      }
+    }),
+    [
+      boardInspectorNote,
+      boardInspectorGroupContext,
+      boardInspectorFrame,
+      boardInspectorConnection,
+      onUpdateFrames,
+      frames,
+      themeColor,
+      panelChromeStyle,
+      effectiveConnections,
+      notes,
+      onUpdateConnections,
+      onUpdateNote,
+      handleEditBoardInsConn,
+      handleNewConnectionFromBoardInspector,
+      openInspectorNoteEditor,
+      panBoardToNoteCenter
+    ]
+  );
+
+  useRegisterEditInspector(isUIVisible && workspaceEditMode, boardEditInspectorPanelProps);
+
   return (
-    <motion.div 
+    <div
         id="board-view-container"
         className={`w-full h-full relative overflow-hidden`}
         style={{
-            boxShadow: isEditMode 
+            boxShadow: workspaceEditMode 
                 ? `inset 0 0 0 8px ${themeColor}, inset 0 0 0 12px ${themeColor}4D, inset 0 0 80px ${themeColor}26` 
                 : 'none'
         }}
@@ -3528,7 +3713,7 @@ const createNoteAtCenter = () => {
                     <path d="M8 11V5M5 8l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                   </svg>
                 </div>
-                <p className="text-2xl font-bold text-gray-800">Drop images or JSON files here to import</p>
+                <p className="text-2xl font-bold text-gray-800">拖入图片、JSON 或 CSV 以导入</p>
               </div>
             </div>
           </div>
@@ -3690,15 +3875,16 @@ const createNoteAtCenter = () => {
                 }}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (isZooming || !isEditMode) return;
+                  if (isZooming || !workspaceEditMode) return;
                   setSelectedFrameId(frame.id);
                   setSelectedNoteId(null);
+                  setSelectedConnectionId(null);
                   resetBlankClickCount();
                 }}
                   onPointerDown={(e) => {
                     e.stopPropagation();
                     stopAnimations();
-                    if (!isEditMode || isZooming) return;
+                    if (!workspaceEditMode || isZooming) return;
                     const rect = containerRef.current?.getBoundingClientRect();
                     if (!rect) return;
                     dragRectRef.current = rect;
@@ -3709,6 +3895,7 @@ const createNoteAtCenter = () => {
                     setDraggingFrameOffset({ x: worldX - frame.x, y: worldY - frame.y });
                     setSelectedFrameId(frame.id);
                     setSelectedNoteId(null);
+                    setSelectedConnectionId(null);
                     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
                   }}
                   onPointerUp={(e) => {
@@ -3733,15 +3920,16 @@ const createNoteAtCenter = () => {
                 }}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (isZooming || !isEditMode) return;
+                  if (isZooming || !workspaceEditMode) return;
                   setSelectedFrameId(frame.id);
                   setSelectedNoteId(null);
+                  setSelectedConnectionId(null);
                   resetBlankClickCount();
                 }}
                   onPointerDown={(e) => {
                     e.stopPropagation();
                     stopAnimations();
-                    if (!isEditMode || isZooming) return;
+                    if (!workspaceEditMode || isZooming) return;
                     const rect = containerRef.current?.getBoundingClientRect();
                     if (!rect) return;
                     dragRectRef.current = rect;
@@ -3752,6 +3940,7 @@ const createNoteAtCenter = () => {
                     setDraggingFrameOffset({ x: worldX - frame.x, y: worldY - frame.y });
                     setSelectedFrameId(frame.id);
                     setSelectedNoteId(null);
+                    setSelectedConnectionId(null);
                     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
                   }}
                   onPointerUp={(e) => {
@@ -3776,15 +3965,16 @@ const createNoteAtCenter = () => {
                 }}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (isZooming || !isEditMode) return;
+                  if (isZooming || !workspaceEditMode) return;
                   setSelectedFrameId(frame.id);
                   setSelectedNoteId(null);
+                  setSelectedConnectionId(null);
                   resetBlankClickCount();
                 }}
                   onPointerDown={(e) => {
                     e.stopPropagation();
                     stopAnimations();
-                    if (!isEditMode || isZooming) return;
+                    if (!workspaceEditMode || isZooming) return;
                     const rect = containerRef.current?.getBoundingClientRect();
                     if (!rect) return;
                     dragRectRef.current = rect;
@@ -3795,6 +3985,7 @@ const createNoteAtCenter = () => {
                     setDraggingFrameOffset({ x: worldX - frame.x, y: worldY - frame.y });
                     setSelectedFrameId(frame.id);
                     setSelectedNoteId(null);
+                    setSelectedConnectionId(null);
                     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
                   }}
                   onPointerUp={(e) => {
@@ -3819,15 +4010,16 @@ const createNoteAtCenter = () => {
                 }}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (isZooming || !isEditMode) return;
+                  if (isZooming || !workspaceEditMode) return;
                   setSelectedFrameId(frame.id);
                   setSelectedNoteId(null);
+                  setSelectedConnectionId(null);
                   resetBlankClickCount();
                 }}
                   onPointerDown={(e) => {
                     e.stopPropagation();
                     stopAnimations();
-                    if (!isEditMode || isZooming) return;
+                    if (!workspaceEditMode || isZooming) return;
                     const rect = containerRef.current?.getBoundingClientRect();
                     if (!rect) return;
                     dragRectRef.current = rect;
@@ -3838,6 +4030,7 @@ const createNoteAtCenter = () => {
                     setDraggingFrameOffset({ x: worldX - frame.x, y: worldY - frame.y });
                     setSelectedFrameId(frame.id);
                     setSelectedNoteId(null);
+                    setSelectedConnectionId(null);
                     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
                   }}
                   onPointerUp={(e) => {
@@ -3852,7 +4045,7 @@ const createNoteAtCenter = () => {
               />
               
               {/* Resize Handles - 只在编辑模式且选中时显示 */}
-              {isEditMode && selectedFrameId === frame.id && (
+              {workspaceEditMode && selectedFrameId === frame.id && (
                 <>
                   {/* Top Left */}
                   <div
@@ -4075,9 +4268,10 @@ const createNoteAtCenter = () => {
               onClick={(e) => {
                 e.stopPropagation();
                 if (isZooming) return;
-                if (isEditMode) {
+                if (workspaceEditMode) {
                   setSelectedFrameId(frame.id);
                   setSelectedNoteId(null);
+                  setSelectedConnectionId(null);
                   resetBlankClickCount();
                 } else {
                   // 非编辑模式下，点击frame标题进行过滤（支持shift多选）
@@ -4106,7 +4300,7 @@ const createNoteAtCenter = () => {
               onPointerDown={(e) => {
                 e.stopPropagation();
                 stopAnimations();
-                if (!isEditMode || editingFrameId === frame.id || isZooming) return;
+                if (!workspaceEditMode || editingFrameId === frame.id || isZooming) return;
                 const rect = dragRectRef.current || containerRef.current?.getBoundingClientRect();
                 if (!rect) return;
                 dragRectRef.current = rect;
@@ -4116,6 +4310,7 @@ const createNoteAtCenter = () => {
                 setDraggingFrameOffset({ x: worldX - frame.x, y: worldY - frame.y });
                 setSelectedFrameId(frame.id);
                 setSelectedNoteId(null);
+                setSelectedConnectionId(null);
                 (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
               }}
               onPointerUp={(e) => {
@@ -4214,7 +4409,7 @@ const createNoteAtCenter = () => {
               ) : (
                 <span className="whitespace-nowrap" style={{ wordBreak: 'keep-all' }}>{frame.title}</span>
               )}
-              {isEditMode && selectedFrameId === frame.id && editingFrameId !== frame.id && (
+              {workspaceEditMode && selectedFrameId === frame.id && editingFrameId !== frame.id && (
                 <button
                   onPointerDown={(e) => e.stopPropagation()}
                   onPointerUp={(e) => e.stopPropagation()}
@@ -4235,11 +4430,57 @@ const createNoteAtCenter = () => {
                 </div>
             </div>
             </React.Fragment>
-          )})}
+          )          })}
 
+          {workspaceEditMode && connectionPaths.length > 0 ? (
+            <svg
+              className="absolute top-0 left-0 z-[180] overflow-visible pointer-events-auto"
+              style={{ width: '100%', height: '100%' }}
+              aria-hidden
+            >
+              {connectionPaths.map((cp) => {
+                const selected = selectedConnectionId === cp.id;
+                return (
+                  <path
+                    key={cp.id}
+                    d={cp.pathD}
+                    fill="none"
+                    stroke={selected ? themeColor : 'rgba(100, 116, 139, 0.42)'}
+                    strokeWidth={selected ? 7 : 5}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="cursor-pointer"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedConnectionId(cp.id);
+                      setSelectedNoteId(null);
+                      setSelectedNoteIds(new Set());
+                      setSelectedFrameId(null);
+                      const c = effectiveConnections.find((x) => x.id === cp.id);
+                      if (c) {
+                        setEditingConnectionLabel(c.label || '');
+                        editingConnectionLabelRef.current = c.label || '';
+                      }
+                    }}
+                  />
+                );
+              })}
+            </svg>
+          ) : null}
 
-
-          {notes.filter((note) => notePassesBoardVisibilityFilters(note)).map((note) => {
+          {notes
+            .filter((note) => notePassesBoardVisibilityFilters(note))
+            .filter((note) =>
+              isNoteVisibleInUnifiedLayer(note, mergedProjectBoardLayers, graphLayerGroupStandard)
+            )
+            .sort((a, b) => {
+              const oa = a.layerStackOrder ?? a.createdAt;
+              const ob = b.layerStackOrder ?? b.createdAt;
+              if (oa !== ob) return oa - ob;
+              return a.id.localeCompare(b.id);
+            })
+            .map((note) => {
               // Check layer visibility based on note variant
               const isImage = note.variant === 'image';
               
@@ -4274,9 +4515,8 @@ const createNoteAtCenter = () => {
               if (isImage) {
                 const standardSizeScale = project?.standardSizeScale || 1;
               return (
-                <motion.div
+                <div
                   key={note.id}
-                  initial={false}
                     data-is-note="true"
                   style={{ 
                       position: 'absolute', 
@@ -4290,7 +4530,7 @@ const createNoteAtCenter = () => {
                         transform: `scale(${standardSizeScale})`,
                         transformOrigin: 'center',
                   }}
-                  className={`pointer-events-auto group ${isEditMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer hover:scale-105 transition-transform'}`}
+                  className={`pointer-events-auto group ${workspaceEditMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer hover:scale-105 transition-transform'}`}
                     onPointerDown={(e) => {
                         lastMousePos.current = { x: e.clientX, y: e.clientY };
                         handleNotePointerDown(e, note.id, note);
@@ -4299,7 +4539,7 @@ const createNoteAtCenter = () => {
                   onPointerUp={(e) => handleNotePointerUp(e, note)}
                   onClick={(e) => handleNoteClick(e, note)}
                 >
-                  {isEditMode && (
+                  {workspaceEditMode && (
                       <>
                       <button 
                         onClick={(e) => handleDeleteClick(e, note.id)}
@@ -4392,14 +4632,13 @@ const createNoteAtCenter = () => {
                           )}
                         </div>
                     </div>
-                  </motion.div>
+                  </div>
                 );
               }
 
               return (
-                <motion.div
+                <div
                   key={note.id}
-                  initial={false}
                   data-is-note="true"
                   style={{ 
                       position: 'absolute', 
@@ -4415,7 +4654,7 @@ const createNoteAtCenter = () => {
                       transform: `scale(${standardSizeScale})`,
                       transformOrigin: 'center',
                   }}
-                  className={`pointer-events-auto group ${isEditMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer hover:scale-105 transition-transform'}`}
+                  className={`pointer-events-auto group ${workspaceEditMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer hover:scale-105 transition-transform'}`}
                   onPointerDown={(e) => {
                       lastMousePos.current = { x: e.clientX, y: e.clientY };
                       handleNotePointerDown(e, note.id, note);
@@ -4425,7 +4664,7 @@ const createNoteAtCenter = () => {
                   onClick={(e) => handleNoteClick(e, note)}
                   onDoubleClick={(e) => handleNoteDoubleClick(e, note)}
                 >
-                  {isEditMode && (
+                  {workspaceEditMode && (
                       <>
                       <button 
                         onClick={(e) => handleDeleteClick(e, note.id)}
@@ -4528,7 +4767,7 @@ const createNoteAtCenter = () => {
                               </div>
                           </div>
                       </div>
-                </motion.div>
+                </div>
               );
           })}
 
@@ -4648,8 +4887,8 @@ const createNoteAtCenter = () => {
               setMultiBatchPanel('none');
             };
 
-            const canGroup = isEditMode && selectedNoteIds.size >= 2;
-            const canUngroup = isEditMode && notes.some(n => selectedNoteIds.has(n.id) && n.noteGroupId);
+            const canGroup = workspaceEditMode && selectedNoteIds.size >= 2;
+            const canUngroup = workspaceEditMode && notes.some(n => selectedNoteIds.has(n.id) && n.noteGroupId);
 
             const runGroupSelected = () => {
               if (!canGroup || !project) return;
@@ -4711,7 +4950,7 @@ const createNoteAtCenter = () => {
                   themeColor={themeColor}
                   panelChromeStyle={panelChromeStyle}
                   inverseCanvasScale={1 / transform.scale}
-                  isEditMode={isEditMode}
+                  isEditMode={workspaceEditMode}
                   multiBatchPanel={multiBatchPanel}
                   onExitMultiSelectToolbar={exitMultiSelectToolbar}
                   onToggleBatchTagPanel={() =>
@@ -4732,7 +4971,7 @@ const createNoteAtCenter = () => {
                   onEnterEditModeFromBrowse={() => {
                     setBrowseTagFilterPanelOpen(false);
                     setBrowseTimeFilterPanelOpen(false);
-                    setIsEditMode(true);
+                    onWorkspaceEditModeChange(true);
                     resetBlankClickCount();
                   }}
                   onOpenBrowseTagFilterPanel={() => {
@@ -4779,7 +5018,7 @@ const createNoteAtCenter = () => {
                   onStopToolbarEvent={stopToolbarEvent}
                   editPanelNode={
                     <>
-                      {isEditMode && multiBatchPanel === 'tag' && (
+                      {workspaceEditMode && multiBatchPanel === 'tag' && (
                         <TagAddPanel
                           themeColor={themeColor}
                           panelChromeStyle={panelChromeStyle}
@@ -4797,7 +5036,7 @@ const createNoteAtCenter = () => {
                         />
                       )}
 
-                      {isEditMode && multiBatchPanel === 'time' && (
+                      {workspaceEditMode && multiBatchPanel === 'time' && (
                         <BoardBatchTimePanel
                           themeColor={themeColor}
                           panelChromeStyle={panelChromeStyle}
@@ -4836,7 +5075,7 @@ const createNoteAtCenter = () => {
                 >
                   <Settings size={18} className="sm:w-5 sm:h-5" />
                 </ChromeIconButton>
-                {!isEditMode && (
+                {!workspaceEditMode && (
                 <div className="relative">
                     <ChromeIconButton
                         themeColor={themeColor}
@@ -4849,20 +5088,41 @@ const createNoteAtCenter = () => {
                             setShowLayerPanel(!showLayerPanel);
                             setShowSettingsPanel(false);
                         }}
-                        title="图层"
+                        title={
+                          graphLayerGroupStandard === 'tag'
+                            ? '图层（标签组顺序、显隐、半径权重）'
+                            : '图层（帧组顺序、显隐、半径权重）'
+                        }
                     >
-                        <Layers size={18} className="sm:w-5 sm:h-5" />
+                        <LayerToolbarIcon layerGroupStandard={graphLayerGroupStandard} />
                     </ChromeIconButton>
-                    {showLayerPanel && (
-                        <BoardLayerPanel
-                            themeColor={themeColor}
-                            layerVisibility={layerVisibility}
-                            onLayerVisibilityChange={setLayerVisibility}
+                    {showLayerPanel && projectFull ? (
+                        <ProjectNotesLayerPanel
+                            themeColor={themeColor ?? DEFAULT_THEME_COLOR}
+                            panelChromeStyle={panelChromeStyle}
+                            variant="dock"
+                            dockAlign="start"
+                            projectId={projectId ?? ''}
+                            merged={mergedProjectBoardLayers}
+                            layerGroupStandard={graphLayerGroupStandard}
+                            onLayerGroupStandardChange={handleBoardLayerStandardChange}
+                            onStateChange={handleBoardGraphLayersChange}
+                            notes={notes}
+                            onUpdateNote={onUpdateNote}
+                            onBatchUpdateNotes={handleBoardBatchNotes}
+                            frames={frames ?? []}
+                            boardVariantToggles={{
+                              primary: layerVisibility.primary,
+                              image: layerVisibility.image,
+                              onChange: (next) =>
+                                setLayerVisibility((prev) => ({ ...prev, ...next }))
+                            }}
+                            onActivateNote={panBoardToNoteCenter}
                         />
-                    )}
+                    ) : null}
                 </div>
                 )}
-                {isEditMode && (
+                {workspaceEditMode && (
                   <div
                     className="flex flex-wrap gap-1.5 sm:gap-2 pointer-events-auto"
                     onPointerDown={(e) => {
@@ -4909,17 +5169,18 @@ const createNoteAtCenter = () => {
         {isUIVisible && (
           <BoardTopRightEditToggle
             isUIVisible={isUIVisible}
-            isEditMode={isEditMode}
+            isEditMode={workspaceEditMode}
             themeColor={themeColor}
             chromeSurfaceStyle={panelChromeStyle}
             chromeHoverBackground={chHover}
+            reserveRightForInspector={workspaceEditMode}
             onEnterEditMode={() => {
               if (isSelectingNotePosition) setIsSelectingNotePosition(false);
-              setIsEditMode(true);
+              onWorkspaceEditModeChange(true);
             }}
             onExitEditMode={() => {
               if (isSelectingNotePosition) setIsSelectingNotePosition(false);
-              setIsEditMode(false);
+              onWorkspaceEditModeChange(false);
               setIsBoxSelecting(false);
               setBoxSelectStart(null);
               setBoxSelectEnd(null);
@@ -4927,17 +5188,18 @@ const createNoteAtCenter = () => {
               setDrawingFrameStart(null);
               setDrawingFrameEnd(null);
               setSelectedFrameId(null);
-              setFrameResizeState(null);
-              setCurrentFrameNameInput('');
-              setEditingFrameNameId(null);
+              setResizingFrame(null);
+              resizingFrameRef.current = null;
+              setEditingFrameTitle('');
+              setEditingFrameId(null);
             }}
           />
         )}
 
         {/* Edit Toolbar: 编辑模式下居中（L+ / L- / 工具） */}
-        {isEditMode && (
+        {workspaceEditMode && (
           <BoardTopCenterEditToolbar
-            isEditMode={isEditMode}
+            isEditMode={workspaceEditMode}
             isSelectingNotePosition={isSelectingNotePosition}
             isDrawingFrame={isDrawingFrame}
             isBoxSelecting={isBoxSelecting}
@@ -5000,11 +5262,16 @@ const createNoteAtCenter = () => {
         <input
             ref={dataImportInputRef}
             type="file"
-            accept=".json"
+            accept=".json,application/json,.csv,text/csv"
             style={{ display: 'none' }}
             onChange={(e) => {
-                if (e.target.files && e.target.files[0]) {
-                    handleDataImport(e.target.files[0]);
+                const f = e.target.files?.[0];
+                if (!f) return;
+                const name = f.name.toLowerCase();
+                if (name.endsWith('.csv') || f.type === 'text/csv') {
+                  void handleCsvDataImport(f);
+                } else {
+                  void handleDataImport(f);
                 }
             }}
         />
@@ -5073,7 +5340,7 @@ const createNoteAtCenter = () => {
 
       <BoardBrowseTagFilterPanel
         open={browseTagFilterPanelOpen}
-        isEditMode={isEditMode}
+        isEditMode={workspaceEditMode}
         selectedCount={selectedNoteIds.size}
         anchorRef={boardBrowseTagFilterButtonRef}
         layoutRevision={browseTagFilterLayoutRevision}
@@ -5094,7 +5361,7 @@ const createNoteAtCenter = () => {
 
       <BoardBrowseTimeFilterPanel
         open={browseTimeFilterPanelOpen}
-        isEditMode={isEditMode}
+        isEditMode={workspaceEditMode}
         selectedCount={selectedNoteIds.size}
         anchorRef={boardBrowseTimeFilterButtonRef}
         layoutRevision={browseTimeFilterLayoutRevision}
@@ -5110,6 +5377,36 @@ const createNoteAtCenter = () => {
         onCancel={() => setBrowseTimeFilterPanelOpen(false)}
         onApply={applyBrowseTimeFilterFromPanel}
       />
+
+      {showBoardInsConnPanel && onUpdateConnections && isUIVisible && (
+        <GraphConnectionPanel
+          isOpen
+          themeColor={themeColor}
+          panelChromeStyle={panelChromeStyle}
+          notes={notes}
+          draft={boardInsConnDraft}
+          onDraftChange={(patch) => setBoardInsConnDraft((d) => ({ ...d, ...patch }))}
+          panelEditingKey={boardInsConnEditingKey}
+          pickTarget={boardInsConnPick}
+          onPickTargetChange={setBoardInsConnPick}
+          onCommit={commitBoardInsConnDraft}
+          onDelete={handleDeleteBoardInsConn}
+          onNewConnection={handleBoardInsNewEmpty}
+          onBeginEndpointEdit={handleBoardInsNewEmpty}
+          disableGraphPick
+          graphPickDisabledHint="请用检索或列表选择起终点便签"
+          onClearGraphAndDraftSelection={clearBoardInsConnDraft}
+          onClearFromSelection={clearBoardInsFromOnly}
+          onClearToSelection={clearBoardInsToOnly}
+          showClearSelection={
+            !!boardInsConnPick || !!boardInsConnDraft.fromNoteId || !!boardInsConnDraft.toNoteId
+          }
+          onClose={() => {
+            setShowBoardInsConnPanel(false);
+            setBoardInsConnPick(null);
+          }}
+        />
+      )}
 
       <SettingsPanel
         isOpen={showSettingsPanel}
@@ -5136,11 +5433,11 @@ const createNoteAtCenter = () => {
                   void onUpdateProject({
                     ...project,
                     ...patch
-                  } as { notes: Note[]; standardSizeScale?: number })
+                  } as Project)
             : undefined
         }
       />
-    </motion.div>
+    </div>
   );
 };
 

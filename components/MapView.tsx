@@ -3,7 +3,14 @@ import { MapContainer, TileLayer, Marker, GeoJSON, useMap, useMapEvents } from '
 import L from 'leaflet';
 import { set } from 'idb-keyval';
 
-import { Note, Coordinates, Project, Frame } from '../types';
+import { Note, Coordinates, Project, Frame, Connection, type GraphLayerState } from '../types';
+import { mergeGraphLayerState, type GraphLayerGroupStandard } from '../utils/graph/graphRuntimeCore';
+import {
+  isNoteVisibleInUnifiedLayer,
+  noteHasRenderableMapPosition,
+  sortNotesByLayerStack
+} from '../utils/layer/unifiedNoteLayer';
+import { ProjectNotesLayerPanel } from './layer/ProjectNotesLayerPanel';
 import { MAP_TILE_URL, MAP_TILE_URL_FALLBACK, MAP_SATELLITE_URL, MAP_ATTRIBUTION, THEME_COLOR, THEME_COLOR_DARK, MAP_STYLE_OPTIONS } from '../constants';
 import { useMapPosition } from '@/components/hooks/useMapPosition';
 import { useGeolocation } from '@/components/hooks/useGeolocation';
@@ -32,6 +39,10 @@ import { MapImportMenuModal } from './map/overlays/MapImportMenuModal';
 import { MapTopRightEditToggle } from './map/overlays/MapTopRightEditToggle';
 import { MapToolbarSliders } from './map/overlays/MapToolbarSliders';
 import { MapPreviewTopRightToolbar } from './map/overlays/MapPreviewTopRightToolbar';
+import { type EditInspectorPanelProps, type InspectorGroupContext } from './map/overlays/MapEditInspectorPanel';
+import { useRegisterEditInspector } from './editInspector/EditInspectorProvider';
+import { GraphConnectionPanel } from './graph/GraphConnectionPanel';
+import { useSimpleConnectionPanel } from './hooks/useSimpleConnectionPanel';
 import { ClusterMarkerLayer } from './map/layers/ClusterMarkerLayer';
 import { MapClickHandler } from './map/MapClickHandler';
 import { MapShiftBoxSelect } from './map/MapShiftBoxSelect';
@@ -86,6 +97,9 @@ interface MapViewProps {
   setBorderGeoJSON?: (data: any | null) => void;
   onMapClick?: () => void;
   isUIVisible?: boolean;
+  /** 与 Board / Graph 共用的视图编辑模式（由 App 持有，切换视图时保持） */
+  workspaceEditMode: boolean;
+  onWorkspaceEditModeChange: (edit: boolean) => void;
   fileInputRef?: React.RefObject<HTMLInputElement | null>;
   onThemeColorChange?: (color: string) => void;
   mapUiChromeOpacity?: number;
@@ -98,16 +112,21 @@ interface MapViewProps {
   setWaypoints?: (w: Note[]) => void;
   /** 与 App 中「界面外观」一致的面板玻璃样式（设置、编辑器等） */
   panelChromeStyle?: React.CSSProperties;
+  /** 编辑地图关联边（大屏属性面板） */
+  onUpdateConnections?: (connections: Connection[]) => void | Promise<void>;
 }
 
 export const MapView: React.FC<MapViewProps> = ({
   project,
+  workspaceEditMode,
+  onWorkspaceEditModeChange,
   onAddNote,
   onUpdateNote,
   onDeleteNote,
   onToggleEditor,
   onImportDialogChange,
   onUpdateProject,
+  onUpdateConnections,
   fileInputRef: externalFileInputRef,
   navigateToCoords,
   projectId,
@@ -160,6 +179,84 @@ export const MapView: React.FC<MapViewProps> = ({
     () => (selectedNoteId ? notes.find((n) => n.id === selectedNoteId) : null),
     [selectedNoteId, notes]
   );
+  const inspectorNoteId = useMemo(() => {
+    if (selectedNoteIds.size > 1) return null;
+    if (selectedNoteId) return selectedNoteId;
+    if (selectedNoteIds.size === 1) return Array.from(selectedNoteIds)[0];
+    return null;
+  }, [selectedNoteId, selectedNoteIds]);
+
+  const inspectorNote = useMemo(
+    () => (inspectorNoteId ? notes.find((n) => n.id === inspectorNoteId) ?? null : null),
+    [inspectorNoteId, notes]
+  );
+
+  const {
+    showConnectionPanel: showMapConnectionPanel,
+    setShowConnectionPanel: setShowMapConnectionPanel,
+    panelEditingKey: mapConnPanelEditingKey,
+    connectionDraft: mapConnectionDraft,
+    setConnectionDraft: setMapConnectionDraft,
+    pickTarget: mapConnPickTarget,
+    setPickTarget: setMapConnPickTarget,
+    commitConnectionDraft: commitMapConnectionDraft,
+    deleteConnectionByPanel: handleDeleteMapConnectionByPanel,
+    resetNewConnectionDraft: handleNewMapConnectionEmpty,
+    openNewFromInspectorAnchor: handleNewConnectionFromInspector,
+    openEditConnection: handleEditMapConnection,
+    clearPanelDraft: clearMapConnectionPanelDraft,
+    clearFromOnly: clearMapConnectionFromOnly,
+    clearToOnly: clearMapConnectionToOnly
+  } = useSimpleConnectionPanel({
+    connections,
+    onUpdateConnections,
+    projectDefaults: project,
+    anchorNoteIdForNew: inspectorNoteId
+  });
+
+  const inspectorGroupContext = useMemo((): InspectorGroupContext | null => {
+    if (preSelectedNotes && preSelectedNotes.length > 0) {
+      const members = preSelectedNotes;
+      const geo = members.filter((n) => noteHasRenderableMapPosition(n));
+      let lat = 0;
+      let lng = 0;
+      geo.forEach((n) => {
+        lat += n.coords.lat;
+        lng += n.coords.lng;
+      });
+      const centroidMap =
+        geo.length > 0 ? { lat: lat / geo.length, lng: lng / geo.length } : undefined;
+      return {
+        kind: 'cluster',
+        title: `簇 · ${members.length} 点`,
+        members,
+        centroidMap
+      };
+    }
+    if (selectedNoteIds.size > 1) {
+      const members = notes.filter((n) => selectedNoteIds.has(n.id));
+      const firstG = members[0]?.noteGroupId;
+      const isObjectGroup =
+        !!firstG && members.length > 0 && members.every((m) => m.noteGroupId === firstG);
+      const geo = members.filter((n) => noteHasRenderableMapPosition(n));
+      let lat = 0;
+      let lng = 0;
+      geo.forEach((n) => {
+        lat += n.coords.lat;
+        lng += n.coords.lng;
+      });
+      const centroidMap =
+        geo.length > 0 ? { lat: lat / geo.length, lng: lng / geo.length } : undefined;
+      return {
+        kind: 'multi',
+        title: isObjectGroup ? `对象组 · ${members.length} 个` : `多选 · ${members.length} 个`,
+        members,
+        centroidMap
+      };
+    }
+    return null;
+  }, [preSelectedNotes, selectedNoteIds, notes]);
+
   const hoveredNote = useMemo(
     () => (hoveredNoteId ? notes.find((n) => n.id === hoveredNoteId) ?? null : null),
     [hoveredNoteId, notes]
@@ -234,12 +331,12 @@ export const MapView: React.FC<MapViewProps> = ({
   /** 仅用于检测全局 label 是否从「开」变为「关」，避免选中态变化时误清簇展开列表 */
   const prevShowTextLabelsRef = useRef(showTextLabels);
 
-  /** 地图顶栏「编辑」：展开 Pin/Label/Cluster 滑块，交互与 Board 顶栏 Done 一致 */
-  const [isMapToolbarEditMode, setIsMapToolbarEditMode] = useState(false);
+  /** 地图顶栏「编辑」与 Board/Graph 共用 App 级状态 */
+  const isMapToolbarEditMode = workspaceEditMode;
 
   useEffect(() => {
-    if (!isUIVisible) setIsMapToolbarEditMode(false);
-  }, [isUIVisible]);
+    if (!isUIVisible) onWorkspaceEditModeChange(false);
+  }, [isUIVisible, onWorkspaceEditModeChange]);
 
   // Shortcut key T to toggle text labels
   useEffect(() => {
@@ -325,17 +422,8 @@ export const MapView: React.FC<MapViewProps> = ({
   // Current marker index being viewed
 
   const defaultCenter: [number, number] = [28.1847, 112.9467];
-  const mapNotes = useMemo(() => 
-    notes.filter(n => 
-      n.variant === 'standard' && 
-      n.coords && 
-      typeof n.coords.lat === 'number' && 
-      typeof n.coords.lng === 'number' &&
-      !isNaN(n.coords.lat) && 
-      !isNaN(n.coords.lng)
-    ),
-    [notes]
-  );
+  /** 有有效地理坐标的便签（不含 0,0 占位），用于地图定位与空状态 */
+  const mapGeoNotes = useMemo(() => notes.filter((n) => noteHasRenderableMapPosition(n)), [notes]);
 
   // Geolocation management hook
   const {
@@ -442,7 +530,7 @@ export const MapView: React.FC<MapViewProps> = ({
     isMapMode: true,
     projectId,
     navigateToCoords,
-    mapNotes,
+    mapNotes: mapGeoNotes,
     currentLocation,
     defaultCenter
   });
@@ -466,7 +554,7 @@ export const MapView: React.FC<MapViewProps> = ({
   });
 
   const { handleDataImport } = useDataImport({ project, onUpdateProject });
-  const { handleCsvImport } = useCsvImport({ project, onUpdateProject, mapInstance });
+  const { handleCsvImport } = useCsvImport({ project, onUpdateProject });
   const { computeBoardPosition } = useNotePositioning(notes);
   const { isDragging, rootProps, dismissDropZone } = useFileDrop({
     isEditorOpen,
@@ -491,9 +579,70 @@ export const MapView: React.FC<MapViewProps> = ({
     projectFrames: project.frames
   });
 
+  const graphLayerStandard = (project.graphLayerStandard ?? 'tag') as GraphLayerGroupStandard;
+  const mergedTagMapLayers = useMemo(
+    () => mergeGraphLayerState(notes, project.graphLayers ?? null, 'tag'),
+    [notes, project.graphLayers]
+  );
+  const mergedFrameMapLayers = useMemo(
+    () => mergeGraphLayerState(notes, project.graphFrameLayers ?? null, 'frame'),
+    [notes, project.graphFrameLayers]
+  );
+  const mergedMapProjectLayers =
+    graphLayerStandard === 'frame' ? mergedFrameMapLayers : mergedTagMapLayers;
+
+  const mapCanvasNotes = useMemo(
+    () =>
+      getFilteredNotes.filter((n) =>
+        isNoteVisibleInUnifiedLayer(n, mergedMapProjectLayers, graphLayerStandard)
+      ),
+    [getFilteredNotes, mergedMapProjectLayers, graphLayerStandard]
+  );
+
+  /** 图层过滤后仍仅渲染有坐标的点 */
+  const mapRenderedNotes = useMemo(
+    () => mapCanvasNotes.filter((n) => noteHasRenderableMapPosition(n)),
+    [mapCanvasNotes]
+  );
+
+  const mapNoteStackRank = useMemo(() => {
+    const sorted = sortNotesByLayerStack(mapRenderedNotes);
+    const m = new Map<string, number>();
+    sorted.forEach((n, i) => m.set(n.id, i));
+    return m;
+  }, [mapRenderedNotes]);
+
+  const handleMapGraphLayersChange = useCallback(
+    (next: GraphLayerState) => {
+      if (!onUpdateProject) return;
+      if (graphLayerStandard === 'frame') {
+        void onUpdateProject({ ...project, graphFrameLayers: next });
+      } else {
+        void onUpdateProject({ ...project, graphLayers: next });
+      }
+    },
+    [onUpdateProject, project, graphLayerStandard]
+  );
+
+  const handleMapLayerStandardChange = useCallback(
+    (standard: GraphLayerGroupStandard) => {
+      if (!onUpdateProject) return;
+      void onUpdateProject({ ...project, graphLayerStandard: standard });
+    },
+    [onUpdateProject, project]
+  );
+
+  const handleMapBatchNotes = useCallback(
+    async (nextNotes: Note[]) => {
+      if (!onUpdateProject) return;
+      await onUpdateProject({ ...project, notes: nextNotes });
+    },
+    [onUpdateProject, project]
+  );
+
   const { clusteredMarkers, sortNotes } = useMapClustering({
     mapInstance,
-    getFilteredNotes: () => getFilteredNotes,
+    getFilteredNotes: () => mapRenderedNotes,
     clusterThreshold,
     forceSingleNoteIds
   });
@@ -724,7 +873,7 @@ export const MapView: React.FC<MapViewProps> = ({
       onToggleEditor(false);
   };
 
-  // 非 tab 模式：点击“已选中 label”右侧编辑按钮打开编辑器
+  // 侧栏「编辑」按钮或地图 label 双击：打开完整便签编辑器
   const handleEditNoteFromLabel = useCallback((noteId: string) => {
     if (!isUIVisible) return;
     const note = notes.find(n => n.id === noteId);
@@ -778,7 +927,6 @@ export const MapView: React.FC<MapViewProps> = ({
     if (
       target?.closest?.('.pre-selected-labels-container') ||
       target?.closest?.('.pre-selected-label-item') ||
-      target?.closest?.('.custom-text-label-edit-btn') ||
       // Clicking a pin should not clear selection (otherwise label may show but edit button won't).
       target?.closest?.('.custom-icon') ||
       target?.closest?.('.leaflet-marker-icon') ||
@@ -824,6 +972,59 @@ export const MapView: React.FC<MapViewProps> = ({
       onMapClick();
     }
   }, [pendingPlaceNote, onMapClick, isUIVisible]);
+
+  const clearInspectorCoordOverride = useCallback((noteId: string) => {
+    setNoteCoordOverrides((prev) => {
+      const next = { ...prev };
+      delete next[noteId];
+      return next;
+    });
+  }, []);
+
+  const mapEditInspectorPanelProps = useMemo(
+    (): EditInspectorPanelProps => ({
+      note: inspectorNote,
+      groupContext: inspectorNote ? null : inspectorGroupContext,
+      coordMode: 'map',
+      themeColor,
+      panelChromeStyle: mapChromeSurface,
+      frames: project.frames ?? [],
+      connections,
+      notes,
+      hasConnectionWrite: !!onUpdateConnections,
+      onUpdateNote,
+      onEditConnection: handleEditMapConnection,
+      onNewConnection: handleNewConnectionFromInspector,
+      mapInstance,
+      noteCoordOverrides,
+      onClearCoordOverride: clearInspectorCoordOverride,
+      onOpenFullNoteEditor: handleEditNoteFromLabel,
+      onFocusPeerOnMap: (noteId: string) => {
+        const n = notes.find((x) => x.id === noteId);
+        if (!n?.coords || !mapInstance) return;
+        mapInstance.flyTo([n.coords.lat, n.coords.lng], Math.max(mapInstance.getZoom(), 15), { duration: 0.75 });
+      }
+    }),
+    [
+      inspectorNote,
+      inspectorGroupContext,
+      themeColor,
+      mapChromeSurface,
+      project.frames,
+      connections,
+      notes,
+      onUpdateConnections,
+      onUpdateNote,
+      handleEditMapConnection,
+      handleNewConnectionFromInspector,
+      handleEditNoteFromLabel,
+      mapInstance,
+      noteCoordOverrides,
+      clearInspectorCoordOverride
+    ]
+  );
+
+  useRegisterEditInspector(isUIVisible && isMapToolbarEditMode, mapEditInspectorPanelProps);
 
   const exportStandaloneMapTab = useCallback(async () => {
     if (!mapInstance || isUIVisible) return;
@@ -926,7 +1127,7 @@ export const MapView: React.FC<MapViewProps> = ({
         {isUIVisible && (
           <MapShiftBoxSelect
             enabled={isUIVisible}
-            notes={getFilteredNotes}
+            notes={mapRenderedNotes}
             noteCoordOverrides={noteCoordOverrides}
             onBoxCommit={handleMapBoxSelectCommit}
             onInteractionClaimed={handleMapShiftBoxSelectClaimed}
@@ -1014,7 +1215,7 @@ export const MapView: React.FC<MapViewProps> = ({
         />
         
         <TextLabelsLayer
-          notes={getFilteredNotes}
+          notes={mapRenderedNotes}
           showTextLabels={showTextLabels}
           pinSize={pinSize}
           labelSize={labelSize}
@@ -1027,7 +1228,9 @@ export const MapView: React.FC<MapViewProps> = ({
           connectionHighlightNoteIds={connectionHighlightNoteIds}
           hoveredNoteId={hoveredNoteId}
           noteCoordOverrides={noteCoordOverrides}
-          onEditNote={handleEditNoteFromLabel}
+          onLabelDoubleClickEdit={
+            isUIVisible && isMapToolbarEditMode ? handleEditNoteFromLabel : undefined
+          }
           onSelectNote={(noteId) => {
             setSelectedNoteIds(new Set([noteId]));
             setSelectedNoteId(noteId);
@@ -1115,7 +1318,8 @@ export const MapView: React.FC<MapViewProps> = ({
         
         <ClusterMarkerLayer
           clusteredMarkers={clusteredMarkers}
-          fallbackNotes={getFilteredNotes}
+          fallbackNotes={mapRenderedNotes}
+          noteStackRank={mapNoteStackRank}
           showTextLabels={showTextLabels}
           pinSize={pinSize}
           themeColor={themeColor}
@@ -1178,10 +1382,18 @@ export const MapView: React.FC<MapViewProps> = ({
         {isUIVisible && (
           <div
             data-allow-context-menu
-            className="fixed top-2 sm:top-4 left-2 sm:left-4 right-2 sm:right-4 z-[500] flex flex-col gap-2 pointer-events-none"
+            className={`fixed top-2 sm:top-4 left-2 sm:left-4 z-[500] flex flex-col gap-2 pointer-events-none ${
+              isMapToolbarEditMode
+                ? 'right-2 sm:right-4 lg:right-[calc(20rem+0.75rem)]'
+                : 'right-2 sm:right-4'
+            }`}
           >
               <div className="flex justify-between items-center w-full pointer-events-none gap-2">
-                <div className="flex flex-row flex-wrap gap-1.5 sm:gap-2 pointer-events-auto items-center min-h-10 sm:min-h-12">
+                <div
+                  className="flex flex-row flex-wrap gap-1.5 sm:gap-2 pointer-events-auto items-center min-h-10 sm:min-h-12"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
+                >
                   <MapLayerControl
                     showPanel={showFrameLayerPanel}
                     onTogglePanel={() => setShowFrameLayerPanel(!showFrameLayerPanel)}
@@ -1194,11 +1406,38 @@ export const MapView: React.FC<MapViewProps> = ({
                     showAllFrames={showAllFrames}
                     setShowAllFrames={setShowAllFrames}
                     frameLayerRef={frameLayerRef}
+                    layerGroupStandard={graphLayerStandard}
+                    dropdownAlign="start"
+                    unifiedNotesLayerSlot={
+                      onUpdateProject ? (
+                        <ProjectNotesLayerPanel
+                          themeColor={themeColor}
+                          panelChromeStyle={mapChromeSurface}
+                          variant="dock"
+                          dockAlign="start"
+                          projectId={projectId ?? ''}
+                          merged={mergedMapProjectLayers}
+                          layerGroupStandard={graphLayerStandard}
+                          onLayerGroupStandardChange={handleMapLayerStandardChange}
+                          onStateChange={handleMapGraphLayersChange}
+                          notes={notes}
+                          onUpdateNote={onUpdateNote}
+                          onBatchUpdateNotes={handleMapBatchNotes}
+                          frames={project.frames ?? []}
+                          onActivateNote={(note) => {
+                            if (!mapInstance || !noteHasRenderableMapPosition(note)) return;
+                            mapInstance.flyTo([note.coords.lat, note.coords.lng], Math.max(mapInstance.getZoom(), 15), {
+                              duration: 0.85
+                            });
+                          }}
+                        />
+                      ) : null
+                    }
                   />
                   <MapControls
                     onLocateCurrentPosition={handleLocateCurrentPosition}
                     isLocating={isLocating}
-                    mapNotes={getFilteredNotes}
+                    mapNotes={mapRenderedNotes}
                     themeColor={themeColor}
                     chromeSurfaceStyle={mapChromeSurface}
                     chromeHoverBackground={mapChromeHoverBg}
@@ -1210,6 +1449,7 @@ export const MapView: React.FC<MapViewProps> = ({
                 <div
                   className="flex h-10 sm:h-12 gap-3 pointer-events-auto items-center shrink-0"
                   onPointerDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
                   onClick={(e) => e.stopPropagation()}
                 >
                   <MapSearchPanel
@@ -1228,11 +1468,11 @@ export const MapView: React.FC<MapViewProps> = ({
                     themeColor={themeColor}
                     chromeSurfaceStyle={mapChromeSurface}
                     chromeHoverBackground={mapChromeHoverBg}
-                    onEnterEdit={() => setIsMapToolbarEditMode(true)}
+                    onEnterEdit={() => onWorkspaceEditModeChange(true)}
                     onExitEdit={(e) => {
                       e.stopPropagation();
                       e.preventDefault();
-                      setIsMapToolbarEditMode(false);
+                      onWorkspaceEditModeChange(false);
                     }}
                   />
                 </div>
@@ -1254,7 +1494,7 @@ export const MapView: React.FC<MapViewProps> = ({
           </div>
         )}
 
-        {mapNotes.length === 0 && (
+        {mapGeoNotes.length === 0 && (
           <div className="absolute top-24 left-0 right-0 z-[400] pointer-events-none flex justify-center">
              <div className="relative">
                 <div
@@ -1268,6 +1508,36 @@ export const MapView: React.FC<MapViewProps> = ({
         )}
 
       </MapContainer>
+
+      {showMapConnectionPanel && onUpdateConnections && isUIVisible && (
+        <GraphConnectionPanel
+          isOpen
+          themeColor={themeColor}
+          panelChromeStyle={mapChromeSurface}
+          notes={notes}
+          draft={mapConnectionDraft}
+          onDraftChange={(patch) => setMapConnectionDraft((d) => ({ ...d, ...patch }))}
+          panelEditingKey={mapConnPanelEditingKey}
+          pickTarget={mapConnPickTarget}
+          onPickTargetChange={setMapConnPickTarget}
+          onCommit={commitMapConnectionDraft}
+          onDelete={handleDeleteMapConnectionByPanel}
+          onNewConnection={handleNewMapConnectionEmpty}
+          onBeginEndpointEdit={handleNewMapConnectionEmpty}
+          disableGraphPick
+          graphPickDisabledHint="请用检索或列表选择起终点便签"
+          onClearGraphAndDraftSelection={clearMapConnectionPanelDraft}
+          onClearFromSelection={clearMapConnectionFromOnly}
+          onClearToSelection={clearMapConnectionToOnly}
+          showClearSelection={
+            !!mapConnPickTarget || !!mapConnectionDraft.fromNoteId || !!mapConnectionDraft.toNoteId
+          }
+          onClose={() => {
+            setShowMapConnectionPanel(false);
+            setMapConnPickTarget(null);
+          }}
+        />
+      )}
 
       {/* 预览模式：顶栏仅保留搜索、图层与导出（与正常模式顶栏分离） */}
       {!isUIVisible && (
@@ -1290,6 +1560,7 @@ export const MapView: React.FC<MapViewProps> = ({
           setShowAllFrames={setShowAllFrames}
           frameLayerRef={frameLayerRef}
           onExportStandaloneTab={() => void exportStandaloneMapTab()}
+          layerGroupStandard={graphLayerStandard}
         />
       )}
       

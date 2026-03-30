@@ -103,7 +103,7 @@ export const PortalTooltip: React.FC<PortalTooltipProps> = ({
     onBlur?: React.FocusEventHandler;
   };
 
-  const trigger = React.cloneElement(children, {
+  const trigger = React.cloneElement(children as React.ReactElement<Record<string, unknown>>, {
     onFocus: (e: React.FocusEvent) => {
       show();
       childProps.onFocus?.(e);

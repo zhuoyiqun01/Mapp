@@ -1,5 +1,6 @@
 import React from 'react';
 import L from 'leaflet';
+import type { Map as LeafletMap } from 'leaflet';
 import { ChromeLabeledSlider } from '../../ui/ChromeLabeledSlider';
 import { CustomHorizontalSlider } from '../../ui/CustomHorizontalSlider';
 
@@ -12,7 +13,7 @@ interface MapToolbarSlidersProps {
   setClusterThreshold: (value: number) => void;
   themeColor: string;
   chromeSurfaceStyle: React.CSSProperties;
-  mapInstance: L.Map | null;
+  mapInstance: LeafletMap | null;
 }
 
 export function MapToolbarSliders({
@@ -30,6 +31,11 @@ export function MapToolbarSliders({
     <div
       className="flex flex-wrap gap-1.5 sm:gap-2 pointer-events-auto"
       onPointerDown={(e) => {
+        const target = e.target as Element;
+        if (target.closest('.custom-horizontal-slider')) return;
+        e.stopPropagation();
+      }}
+      onTouchStart={(e) => {
         const target = e.target as Element;
         if (target.closest('.custom-horizontal-slider')) return;
         e.stopPropagation();

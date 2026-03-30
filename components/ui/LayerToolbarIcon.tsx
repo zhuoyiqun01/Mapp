@@ -1,7 +1,15 @@
 import React from 'react';
-import { Tag } from 'lucide-react';
+import { Frame as FrameIcon, Tag as TagIcon } from 'lucide-react';
+import type { GraphLayerGroupStandard } from '../../utils/graph/graphRuntimeCore';
 
-/** 各视图「图层」工具栏按钮共用的 lucide「标签」图标尺寸与类名 */
-export function LayerToolbarIcon() {
-  return <Tag size={18} className="sm:w-5 sm:h-5" aria-hidden />;
+/** 各视图「图层」工具栏按钮：按当前分组标准显示标签 / 帧图标（不随视图变化） */
+export function LayerToolbarIcon({
+  layerGroupStandard
+}: {
+  layerGroupStandard: GraphLayerGroupStandard;
+}) {
+  if (layerGroupStandard === 'frame') {
+    return <FrameIcon size={18} className="sm:w-5 sm:h-5" aria-hidden />;
+  }
+  return <TagIcon size={18} className="sm:w-5 sm:h-5" aria-hidden />;
 }

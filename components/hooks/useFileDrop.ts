@@ -6,6 +6,8 @@ interface UseFileDropProps {
   handleImageImport: (files: FileList | null, showLimitMessage?: boolean) => void;
   handleDataImport: (file: File) => void;
   handleCsvImport: (file: File) => void;
+  /** 为 true 时仅处理 JSON/CSV（不触发图片导入） */
+  dataOnly?: boolean;
 }
 
 export function useFileDrop({
@@ -13,7 +15,8 @@ export function useFileDrop({
   themeColor,
   handleImageImport,
   handleDataImport,
-  handleCsvImport
+  handleCsvImport,
+  dataOnly = false
 }: UseFileDropProps) {
   const [isDragging, setIsDragging] = useState(false);
 
@@ -82,6 +85,15 @@ export function useFileDrop({
           file.type === 'text/csv' || file.name.toLowerCase().endsWith('.csv')
       );
 
+      if (dataOnly) {
+        if (jsonFiles.length > 0 && jsonFiles[0]) {
+          handleDataImport(jsonFiles[0] as File);
+        } else if (csvFiles.length > 0 && csvFiles[0]) {
+          handleCsvImport(csvFiles[0] as File);
+        }
+        return;
+      }
+
       if (imageFiles.length > 0) {
         const dataTransfer = new DataTransfer();
         imageFiles.forEach((file) => dataTransfer.items.add(file as File));
@@ -92,7 +104,7 @@ export function useFileDrop({
         handleCsvImport(csvFiles[0] as File);
       }
     },
-    [isEditorOpen, handleImageImport, handleDataImport, handleCsvImport]
+    [isEditorOpen, handleImageImport, handleDataImport, handleCsvImport, dataOnly]
   );
 
   const rootProps = {

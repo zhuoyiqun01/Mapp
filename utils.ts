@@ -481,7 +481,7 @@ export const exportToJpegCentered = async (
         });
         const connections = node.querySelector('svg');
         if (connections) {
-          const el = connections as HTMLElement;
+          const el = connections as unknown as HTMLElement;
           if (!originalStyles.has(el)) originalStyles.set(el, { display: el.style.display, background: el.style.background, backgroundColor: el.style.backgroundColor });
           el.style.display = 'none';
         }

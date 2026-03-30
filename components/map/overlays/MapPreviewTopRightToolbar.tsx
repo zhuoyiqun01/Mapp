@@ -1,7 +1,8 @@
 import React from 'react';
 import { Download } from 'lucide-react';
-import { Frame } from '../../../types';
-import { MapSearchPanel } from '../controls/MapSearchPanel';
+import type { Frame } from '../../../types';
+import type { GraphLayerGroupStandard } from '../../../utils/graph/graphRuntimeCore';
+import { MapSearchPanel, type BorderSearchState } from '../controls/MapSearchPanel';
 import { MapLayerControl } from '../controls/MapLayerControl';
 import { ChromeIconButton } from '../../ui/ChromeIconButton';
 
@@ -11,8 +12,8 @@ interface MapPreviewTopRightToolbarProps {
   themeColor: string;
   chromeSurfaceStyle: React.CSSProperties;
   chromeHoverBackground: string;
-  borderSearch: unknown;
-  borderGeoJSON: unknown;
+  borderSearch: BorderSearchState;
+  borderGeoJSON: any;
   onClearBorder: () => void;
   onCloseBorderPanel: () => void;
   showFrameLayerPanel: boolean;
@@ -24,6 +25,7 @@ interface MapPreviewTopRightToolbarProps {
   setShowAllFrames: React.Dispatch<React.SetStateAction<boolean>>;
   frameLayerRef: React.RefObject<HTMLDivElement | null>;
   onExportStandaloneTab: () => void;
+  layerGroupStandard: GraphLayerGroupStandard;
 }
 
 export function MapPreviewTopRightToolbar({
@@ -44,7 +46,8 @@ export function MapPreviewTopRightToolbar({
   showAllFrames,
   setShowAllFrames,
   frameLayerRef,
-  onExportStandaloneTab
+  onExportStandaloneTab,
+  layerGroupStandard
 }: MapPreviewTopRightToolbarProps) {
   return (
     <div
@@ -75,6 +78,7 @@ export function MapPreviewTopRightToolbar({
         showAllFrames={showAllFrames}
         setShowAllFrames={setShowAllFrames}
         frameLayerRef={frameLayerRef}
+        layerGroupStandard={layerGroupStandard}
       />
       <ChromeIconButton
         title="导出 Tab 预览独立网页"

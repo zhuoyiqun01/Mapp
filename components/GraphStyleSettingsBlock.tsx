@@ -20,6 +20,7 @@ export const GraphStyleSettingsBlock: React.FC<GraphStyleSettingsBlockProps> = (
   const edgeW = project.graphEdgeWeight ?? DEFAULT_GRAPH_STYLESHEET_SIZING.edgeWeight;
   const timeBias = project.graphTimeAxisWeightBias ?? 0;
   const circleRefineOn = project.graphCircleRefineOrderWithForce !== false;
+  const coseDragRealtime = project.graphCoseDragRealtime !== false;
 
   return (
     <div className="grid grid-cols-1 gap-x-3 gap-y-3 sm:grid-cols-2">
@@ -96,6 +97,41 @@ export const GraphStyleSettingsBlock: React.FC<GraphStyleSettingsBlockProps> = (
             aria-hidden
           >
             {circleRefineOn ? (
+              <svg viewBox="0 0 12 12" className="h-3 w-3 text-theme-chrome-fg" aria-hidden>
+                <path
+                  d="M2.5 6l2.5 2.5L9.5 3"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            ) : null}
+          </span>
+        </span>
+      </label>
+
+      <label className="flex min-w-0 cursor-pointer items-center justify-between gap-3 sm:col-span-2">
+        <span className="text-xs font-medium text-gray-600">力传导布局 · 拖动实时重算</span>
+        <span
+          className="inline-flex shrink-0 rounded outline-none focus-within:outline focus-within:outline-2 focus-within:outline-offset-2"
+          style={{ outlineColor: `${themeColor}66` }}
+        >
+          <input
+            type="checkbox"
+            className="sr-only"
+            checked={coseDragRealtime}
+            onChange={(e) => onPatch({ graphCoseDragRealtime: e.target.checked })}
+          />
+          <span
+            className={`flex h-4 w-4 items-center justify-center rounded transition-colors ${
+              coseDragRealtime ? '' : 'border border-gray-200/90 bg-white'
+            }`}
+            style={coseDragRealtime ? { backgroundColor: themeColor } : undefined}
+            aria-hidden
+          >
+            {coseDragRealtime ? (
               <svg viewBox="0 0 12 12" className="h-3 w-3 text-theme-chrome-fg" aria-hidden>
                 <path
                   d="M2.5 6l2.5 2.5L9.5 3"

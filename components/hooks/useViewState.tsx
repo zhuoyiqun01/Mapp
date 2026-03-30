@@ -17,7 +17,8 @@ interface UseViewStateReturn {
   // View state
   viewMode: ViewMode;
   isEditorOpen: boolean;
-  isBoardEditMode: boolean;
+  /** Map / Board / Graph 共用的「视图编辑模式」，切换视图时保持，由各视图清空本地选中 */
+  mappingWorkspaceEditMode: boolean;
 
   // Navigation state
   navigateToMapCoords: NavigationCoords | null;
@@ -26,7 +27,7 @@ interface UseViewStateReturn {
   // Actions
   setViewMode: (mode: ViewMode) => void;
   setIsEditorOpen: (open: boolean) => void;
-  setIsBoardEditMode: (edit: boolean) => void;
+  setMappingWorkspaceEditMode: (edit: boolean) => void;
 
   // Navigation actions
   navigateToMap: (coords?: NavigationCoords) => void;
@@ -42,7 +43,7 @@ interface UseViewStateReturn {
 export const useViewState = (): UseViewStateReturn => {
   const [viewMode, setViewMode] = useState<ViewMode>('map');
   const [isEditorOpen, setIsEditorOpen] = useState(false);
-  const [isBoardEditMode, setIsBoardEditMode] = useState(false);
+  const [mappingWorkspaceEditMode, setMappingWorkspaceEditMode] = useState(false);
 
   const [navigateToMapCoords, setNavigateToMapCoords] = useState<NavigationCoords | null>(null);
   const [navigateToBoardCoords, setNavigateToBoardCoords] = useState<BoardCoords | null>(null);
@@ -89,12 +90,12 @@ export const useViewState = (): UseViewStateReturn => {
   return {
     viewMode,
     isEditorOpen,
-    isBoardEditMode,
+    mappingWorkspaceEditMode,
     navigateToMapCoords,
     navigateToBoardCoords,
     setViewMode,
     setIsEditorOpen,
-    setIsBoardEditMode,
+    setMappingWorkspaceEditMode,
     navigateToMap,
     navigateToBoard,
     clearMapNavigation,

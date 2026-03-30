@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { Marker } from 'react-leaflet';
 import L from 'leaflet';
+import type { Map as LeafletMap, LeafletMouseEvent, DivIcon } from 'leaflet';
 import { Note } from '../../types';
 import { THEME_COLOR } from '../../constants';
 
@@ -12,12 +13,12 @@ interface ClusteredMarker {
 interface MapMarkersProps {
   mapNotes: Note[];
   clusteredMarkers: ClusteredMarker[];
-  mapInstance: L.Map | null;
+  mapInstance: LeafletMap | null;
   showTextLabels: boolean;
   pinSize: number;
-  onMarkerClick: (note: Note, e?: L.LeafletMouseEvent) => void;
-  onClusterClick: (clusterNotes: Note[], e?: L.LeafletMouseEvent) => void;
-  createCustomIcon: (note: Note, clusterCount?: number, showTextLabels?: boolean, pinSize?: number) => L.DivIcon;
+  onMarkerClick: (note: Note, e?: LeafletMouseEvent) => void;
+  onClusterClick: (clusterNotes: Note[], e?: LeafletMouseEvent) => void;
+  createCustomIcon: (note: Note, clusterCount?: number, showTextLabels?: boolean, pinSize?: number) => DivIcon;
 }
 
 export const MapMarkers: React.FC<MapMarkersProps> = ({

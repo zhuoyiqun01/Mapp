@@ -30354,7 +30354,7 @@
     visibleGroups.forEach((groupNodes, tagKey) => {
       const wgt = layers.weights?.[tagKey] ?? 0.5;
       const norm = graphLayerWeightNorm(wgt);
-      const r = rInner + norm * (rOuter - rInner);
+      const r = rInner + (1 - norm) * (rOuter - rInner);
       const n = groupNodes.length;
       const phase = stableAngleSeed(tagKey || "__untagged__") * 2 * Math.PI - Math.PI / 2;
       for (let i = 0; i < n; i += 1) {
@@ -30380,6 +30380,14 @@
   function getCyRenderer(cy) {
     const r = cy.renderer?.();
     return r && typeof r.projectIntoViewport === "function" ? r : null;
+  }
+  function isCyActive(cy) {
+    if (!cy) return false;
+    try {
+      return !cy.destroyed?.();
+    } catch {
+      return false;
+    }
   }
   function attachBoardlikeWheelZoom(cy) {
     const container2 = cy.container();
@@ -30425,7 +30433,10 @@
   }
   function attachGraphResizeObserver(cy, el) {
     const ro = new ResizeObserver(() => {
-      requestAnimationFrame(() => cy.resize());
+      requestAnimationFrame(() => {
+        if (!isCyActive(cy)) return;
+        cy.resize();
+      });
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -30433,13 +30444,334 @@
   function scheduleGraphResizeAndFit(cy) {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
+        if (!isCyActive(cy)) return;
         cy.resize();
         cy.fit(void 0, 40);
       });
     });
   }
+  var GRAPH_COSE_EDGE_LENGTH_MIN = 64;
+  var GRAPH_COSE_EDGE_LENGTH_MAX = 276;
+  var GRAPH_COSE_EDGE_WEIGHT_MIN = 0.1;
+  var GRAPH_COSE_EDGE_WEIGHT_MAX = 3.2;
+  var GRAPH_COSE_REPULSION_MIN = 3200;
+  var GRAPH_COSE_REPULSION_MAX = 9200;
+  var GRAPH_COSE_CROSSING_OPT_MAX_EDGES = 220;
+  var GRAPH_COSE_FLOW_BIAS_MAX_EDGES = 500;
+  function graphCoseBuildWeightedDegreeCentrality(cy) {
+    const degreeByNodeId = /* @__PURE__ */ new Map();
+    cy.nodes().forEach((n) => {
+      degreeByNodeId.set(n.id(), 0);
+    });
+    cy.edges().forEach((e) => {
+      const raw = Number(e.data("edgeWeight"));
+      const edgeW = Number.isFinite(raw) ? Math.max(GRAPH_COSE_EDGE_WEIGHT_MIN, raw) : 0.3;
+      const s = e.source().id();
+      const t = e.target().id();
+      degreeByNodeId.set(s, (degreeByNodeId.get(s) ?? 0) + edgeW);
+      degreeByNodeId.set(t, (degreeByNodeId.get(t) ?? 0) + edgeW);
+    });
+    let maxDeg = 0;
+    degreeByNodeId.forEach((v) => {
+      if (v > maxDeg) maxDeg = v;
+    });
+    const denom = maxDeg > 0 ? maxDeg : 1;
+    const normByNodeId = /* @__PURE__ */ new Map();
+    degreeByNodeId.forEach((v, k) => {
+      normByNodeId.set(k, Math.max(0, Math.min(1, v / denom)));
+    });
+    const avgNormByEdgeId = /* @__PURE__ */ new Map();
+    cy.edges().forEach((e) => {
+      const sNorm = normByNodeId.get(e.source().id()) ?? 0;
+      const tNorm = normByNodeId.get(e.target().id()) ?? 0;
+      avgNormByEdgeId.set(e.id(), (sNorm + tNorm) / 2);
+    });
+    return { normByNodeId, avgNormByEdgeId };
+  }
+  var GRAPH_COSE_HUB_CENTRALITY_THRESHOLD = 0.52;
+  function graphCoseBuildHubNeighborCounts(cy, normByNodeId) {
+    const counts = /* @__PURE__ */ new Map();
+    cy.nodes().forEach((n) => {
+      counts.set(n.id(), 0);
+    });
+    cy.edges().forEach((e) => {
+      const s = e.source();
+      const t = e.target();
+      if (s.empty() || t.empty()) return;
+      const sId = s.id();
+      const tId = t.id();
+      const sN = normByNodeId.get(sId) ?? 0;
+      const tN = normByNodeId.get(tId) ?? 0;
+      if (sN >= GRAPH_COSE_HUB_CENTRALITY_THRESHOLD) counts.set(tId, (counts.get(tId) ?? 0) + 1);
+      if (tN >= GRAPH_COSE_HUB_CENTRALITY_THRESHOLD) counts.set(sId, (counts.get(sId) ?? 0) + 1);
+    });
+    return counts;
+  }
+  function graphCoseBuildVisibleSegments(cy) {
+    const segs = [];
+    cy.edges().forEach((e) => {
+      const s = e.source();
+      const t = e.target();
+      if (s.empty() || t.empty()) return;
+      if (s.id() === t.id()) return;
+      if (s.style("display") === "none" || t.style("display") === "none" || e.style("display") === "none") return;
+      const sp = s.position();
+      const tp = t.position();
+      segs.push({
+        sourceId: s.id(),
+        targetId: t.id(),
+        x1: sp.x,
+        y1: sp.y,
+        x2: tp.x,
+        y2: tp.y
+      });
+    });
+    return segs;
+  }
+  function graphCoseSegmentsShareEndpoint(a, b) {
+    return a.sourceId === b.sourceId || a.sourceId === b.targetId || a.targetId === b.sourceId || a.targetId === b.targetId;
+  }
+  function graphCoseOrientation(ax, ay, bx, by, cx, cyy) {
+    return (bx - ax) * (cyy - ay) - (by - ay) * (cx - ax);
+  }
+  function graphCoseSegmentsCross(a, b) {
+    const eps = 1e-7;
+    const o1 = graphCoseOrientation(a.x1, a.y1, a.x2, a.y2, b.x1, b.y1);
+    const o2 = graphCoseOrientation(a.x1, a.y1, a.x2, a.y2, b.x2, b.y2);
+    const o3 = graphCoseOrientation(b.x1, b.y1, b.x2, b.y2, a.x1, a.y1);
+    const o4 = graphCoseOrientation(b.x1, b.y1, b.x2, b.y2, a.x2, a.y2);
+    if (Math.abs(o1) < eps || Math.abs(o2) < eps || Math.abs(o3) < eps || Math.abs(o4) < eps) return false;
+    return o1 > 0 !== o2 > 0 && o3 > 0 !== o4 > 0;
+  }
+  function graphCoseCountCrossingsFromSegments(segs) {
+    let count = 0;
+    for (let i = 0; i < segs.length; i += 1) {
+      const a = segs[i];
+      for (let j = i + 1; j < segs.length; j += 1) {
+        const b = segs[j];
+        if (graphCoseSegmentsShareEndpoint(a, b)) continue;
+        if (graphCoseSegmentsCross(a, b)) count += 1;
+      }
+    }
+    return count;
+  }
+  function runGraphCoseCrossingPostProcess(cy) {
+    const edgeCount = cy.edges().length;
+    if (edgeCount < 4 || edgeCount > GRAPH_COSE_CROSSING_OPT_MAX_EDGES) return;
+    const allNodes = cy.nodes().filter((n) => n.style("display") !== "none" && !n.hasClass("frame-cluster-label") && !n.hasClass("frame-cluster-halo"));
+    if (allNodes.length < 3) return;
+    const nodes3 = allNodes.toArray().filter((n) => n.isNode()).sort((a, b) => b.connectedEdges().length - a.connectedEdges().length).slice(0, Math.min(28, allNodes.length));
+    const viewport2 = Math.max(120, Math.min(cy.width(), cy.height()));
+    const step3 = Math.max(10, Math.min(34, viewport2 * 0.02));
+    const offsets = [
+      { x: 0, y: 0 },
+      { x: step3, y: 0 },
+      { x: -step3, y: 0 },
+      { x: 0, y: step3 },
+      { x: 0, y: -step3 },
+      { x: step3, y: step3 },
+      { x: step3, y: -step3 },
+      { x: -step3, y: step3 },
+      { x: -step3, y: -step3 }
+    ];
+    for (let pass = 0; pass < 2; pass += 1) {
+      let improved = false;
+      for (const node of nodes3) {
+        const base = node.position();
+        let bestX = base.x;
+        let bestY = base.y;
+        let bestCross = graphCoseCountCrossingsFromSegments(graphCoseBuildVisibleSegments(cy));
+        for (const off of offsets) {
+          const nx = base.x + off.x;
+          const ny = base.y + off.y;
+          node.position({ x: nx, y: ny });
+          const c = graphCoseCountCrossingsFromSegments(graphCoseBuildVisibleSegments(cy));
+          if (c < bestCross) {
+            bestCross = c;
+            bestX = nx;
+            bestY = ny;
+          }
+        }
+        node.position({ x: bestX, y: bestY });
+        if (bestX !== base.x || bestY !== base.y) improved = true;
+      }
+      if (!improved) break;
+    }
+  }
+  function runGraphCoseLeftFlowPostProcess(cy) {
+    const edges3 = cy.edges();
+    if (edges3.length < 2 || edges3.length > GRAPH_COSE_FLOW_BIAS_MAX_EDGES) return;
+    const nodes3 = cy.nodes().filter((n) => n.style("display") !== "none" && !n.hasClass("frame-cluster-label") && !n.hasClass("frame-cluster-halo"));
+    if (nodes3.length < 2) return;
+    const nodeIds = nodes3.map((n) => n.id());
+    const nodeSet = new Set(nodeIds);
+    const outAdj = /* @__PURE__ */ new Map();
+    const inAdj = /* @__PURE__ */ new Map();
+    nodeIds.forEach((id2) => {
+      outAdj.set(id2, []);
+      inAdj.set(id2, []);
+    });
+    const normW = (raw) => {
+      const v = Number(raw);
+      const safe = Number.isFinite(v) ? Math.max(0.1, Math.min(4.5, v)) : 0.3;
+      return 0.45 + (safe - 0.1) / (4.5 - 0.1) * 0.55;
+    };
+    const pushDirEdge = (from, to, w) => {
+      if (!nodeSet.has(from) || !nodeSet.has(to) || from === to) return;
+      outAdj.get(from).push({ to, w });
+      inAdj.get(to).push({ from, w });
+    };
+    edges3.forEach((e) => {
+      const dir = String(e.data("direction") ?? "none");
+      const s = e.source().id();
+      const t = e.target().id();
+      const w = normW(e.data("edgeWeight"));
+      if (dir === "forward") {
+        pushDirEdge(s, t, w);
+        return;
+      }
+      if (dir === "backward") {
+        pushDirEdge(t, s, w);
+        return;
+      }
+      if (dir === "both") {
+        pushDirEdge(s, t, w);
+        pushDirEdge(t, s, w);
+      }
+    });
+    const ITER = 12;
+    const DECAY = 0.72;
+    let downstream = /* @__PURE__ */ new Map();
+    let upstream = /* @__PURE__ */ new Map();
+    nodeIds.forEach((id2) => {
+      downstream.set(id2, 1);
+      upstream.set(id2, 1);
+    });
+    for (let i = 0; i < ITER; i += 1) {
+      const nextDown = /* @__PURE__ */ new Map();
+      const nextUp = /* @__PURE__ */ new Map();
+      nodeIds.forEach((id2) => {
+        let downVal = 1;
+        let upVal = 1;
+        const outs = outAdj.get(id2) ?? [];
+        const ins = inAdj.get(id2) ?? [];
+        for (const e of outs) {
+          downVal += DECAY * e.w * (downstream.get(e.to) ?? 1);
+        }
+        for (const e of ins) {
+          upVal += DECAY * e.w * (upstream.get(e.from) ?? 1);
+        }
+        nextDown.set(id2, downVal);
+        nextUp.set(id2, upVal);
+      });
+      downstream = nextDown;
+      upstream = nextUp;
+    }
+    const scoreByNodeId = /* @__PURE__ */ new Map();
+    nodeIds.forEach((id2) => {
+      const s = (downstream.get(id2) ?? 1) - (upstream.get(id2) ?? 1);
+      scoreByNodeId.set(id2, s);
+    });
+    let minScore = Infinity;
+    let maxScore = -Infinity;
+    scoreByNodeId.forEach((v) => {
+      if (v < minScore) minScore = v;
+      if (v > maxScore) maxScore = v;
+    });
+    if (!Number.isFinite(minScore) || !Number.isFinite(maxScore)) return;
+    const width2 = cy.width();
+    const left = width2 * 0.08;
+    const right = width2 * 0.92;
+    const range = Math.max(1e-6, maxScore - minScore);
+    const strength = 0.6;
+    const remapNorm = (u) => 0.5 + Math.sign(u - 0.5) * Math.pow(Math.abs(u - 0.5) * 2, 0.72) * 0.5;
+    for (let pass = 0; pass < 2; pass += 1) {
+      nodes3.forEach((n) => {
+        const s = scoreByNodeId.get(n.id()) ?? 0;
+        const norm = remapNorm(Math.max(0, Math.min(1, (s - minScore) / range)));
+        const xTarget = right - norm * (right - left);
+        const p2 = n.position();
+        n.position({ x: p2.x + (xTarget - p2.x) * strength, y: p2.y });
+      });
+    }
+  }
+  function graphCoseIdealEdgeLengthFromWeight(edgeWeightRaw) {
+    const w = Number.isFinite(edgeWeightRaw) ? edgeWeightRaw : 0.3;
+    const clamped = Math.max(GRAPH_COSE_EDGE_WEIGHT_MIN, Math.min(GRAPH_COSE_EDGE_WEIGHT_MAX, w));
+    const tLinear = (clamped - GRAPH_COSE_EDGE_WEIGHT_MIN) / (GRAPH_COSE_EDGE_WEIGHT_MAX - GRAPH_COSE_EDGE_WEIGHT_MIN);
+    const t = Math.pow(Math.max(0, Math.min(1, tLinear)), 0.58);
+    return GRAPH_COSE_EDGE_LENGTH_MIN + t * (GRAPH_COSE_EDGE_LENGTH_MAX - GRAPH_COSE_EDGE_LENGTH_MIN);
+  }
+  function buildGraphCoseLayoutOptions(cy, overrides, postProcessOptions) {
+    const centrality = graphCoseBuildWeightedDegreeCentrality(cy);
+    const hubNeighborCountByNodeId = graphCoseBuildHubNeighborCounts(cy, centrality.normByNodeId);
+    const enableCrossingPostProcess = postProcessOptions?.enableCrossingPostProcess !== false;
+    const enableLeftFlowPostProcess = postProcessOptions?.enableLeftFlowPostProcess !== false;
+    const userStop = typeof overrides?.stop === "function" ? overrides.stop : void 0;
+    const safeOverrides = { ...overrides ?? {} };
+    if ("stop" in safeOverrides) delete safeOverrides.stop;
+    return {
+      name: "cose-bilkent",
+      animate: true,
+      padding: 40,
+      idealEdgeLength: (edge) => {
+        const sNode = edge?.source?.();
+        const tNode = edge?.target?.();
+        if (!sNode || !tNode || sNode.empty?.() || tNode.empty?.()) {
+          return graphCoseIdealEdgeLengthFromWeight(Number(edge?.data?.("edgeWeight")));
+        }
+        const sId = String(sNode.id());
+        const tId = String(tNode.id());
+        const cS = centrality.normByNodeId.get(sId) ?? 0;
+        const cT = centrality.normByNodeId.get(tId) ?? 0;
+        const cAvg = (cS + cT) / 2;
+        const base = graphCoseIdealEdgeLengthFromWeight(Number(edge?.data?.("edgeWeight")));
+        let len = base * (1 - cAvg * 0.26);
+        const tagS = Number(sNode.data?.("tagLayerNorm"));
+        const tagT = Number(tNode.data?.("tagLayerNorm"));
+        const tagAvg = Number.isFinite(tagS) && Number.isFinite(tagT) ? (tagS + tagT) / 2 : 0.5;
+        len *= 1 + (tagAvg - 0.5) * 0.82;
+        const cLow = Math.min(cS, cT);
+        const cHigh = Math.max(cS, cT);
+        const lowId = cS <= cT ? sId : tId;
+        const hubTh = GRAPH_COSE_HUB_CENTRALITY_THRESHOLD;
+        if (cHigh >= hubTh && cLow < cHigh - 0.07) {
+          len *= 0.92 + (1 - cHigh) * 0.08;
+          const kHub = hubNeighborCountByNodeId.get(lowId) ?? 0;
+          if (kHub >= 2) {
+            const competition = kHub - 1;
+            len *= 1 + 0.26 * competition * (0.4 + 0.6 * (1 - cLow));
+          }
+        }
+        return Math.max(46, Math.min(320, len));
+      },
+      nodeRepulsion: (node) => {
+        const c = centrality.normByNodeId.get(String(node?.id?.() ?? "")) ?? 0;
+        return Math.round(GRAPH_COSE_REPULSION_MIN + (1 - c) * (GRAPH_COSE_REPULSION_MAX - GRAPH_COSE_REPULSION_MIN));
+      },
+      stop: () => {
+        if (enableCrossingPostProcess || enableLeftFlowPostProcess) {
+          requestAnimationFrame(() => {
+            if (!isCyActive(cy)) return;
+            if (enableLeftFlowPostProcess) runGraphCoseLeftFlowPostProcess(cy);
+            if (enableCrossingPostProcess) runGraphCoseCrossingPostProcess(cy);
+            requestAnimationFrame(() => {
+              if (!isCyActive(cy)) return;
+              cy.resize();
+            });
+          });
+        }
+        userStop?.();
+      },
+      ...safeOverrides
+    };
+  }
   function runGraphCoseLayout(cy) {
-    cy.layout({ name: "cose-bilkent", animate: true, padding: 40 }).run();
+    try {
+      cy.layout(buildGraphCoseLayoutOptions(cy)).run();
+    } catch {
+      cy.layout({ name: "cose-bilkent", animate: true, padding: 40 }).run();
+    }
   }
   function applyGraphCircleLayout(cy, refineWithForce = true, layers = null, standard = "tag") {
     if (layers != null) {
@@ -30452,16 +30784,14 @@
       return;
     }
     circleLayout.one("layoutstop", () => {
-      cy.layout({
-        name: "cose-bilkent",
+      cy.layout(buildGraphCoseLayoutOptions(cy, {
         randomize: false,
         animate: true,
-        padding: 40,
         fit: true,
         quality: "draft",
         numIter: 600,
         nodeDimensionsIncludeLabels: true
-      }).run();
+      })).run();
     });
     circleLayout.run();
   }
@@ -30470,11 +30800,11 @@
       applyGraphCircleLayout(cy, circleRefineWithForce, graphLayers, standard);
       return;
     }
-    cy.layout({
-      name,
-      animate: true,
-      padding: 40
-    }).run();
+    try {
+      cy.layout(buildGraphCoseLayoutOptions(cy, { name })).run();
+    } catch {
+      cy.layout({ name, animate: true, padding: 40 }).run();
+    }
   }
   function applyGraphTagGridLayout(cy, layers = null) {
     const nodes3 = cy.nodes();
@@ -30535,6 +30865,7 @@
       transform: (node) => pos.get(node.id()) ?? { x: w / 2, y: cy.height() / 2 }
     }).run();
     requestAnimationFrame(() => {
+      if (!isCyActive(cy)) return;
       cy.resize();
       cy.fit(void 0, 48);
     });

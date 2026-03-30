@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, Link2, Minus, MousePointer2, Plus, X } from 'lucide-react';
-import type { Note } from '../../types';
+import type { Connection, Note } from '../../types';
 
 export interface ConnectionDraft {
   fromNoteId: string;
@@ -8,6 +8,21 @@ export interface ConnectionDraft {
   label: string;
   fromArrow: 'arrow' | 'none';
   toArrow: 'arrow' | 'none';
+}
+
+/** 与 `connectionToGraphDirection` 一致：从存储的 Connection 还原面板上的起终点箭头选项 */
+export function connectionToPanelDraft(c: Connection): ConnectionDraft {
+  const fromArrow: 'arrow' | 'none' =
+    c.fromArrow != null ? c.fromArrow : c.arrow === 'reverse' ? 'arrow' : 'none';
+  const toArrow: 'arrow' | 'none' =
+    c.toArrow != null ? c.toArrow : c.arrow === 'forward' ? 'arrow' : 'none';
+  return {
+    fromNoteId: c.fromNoteId,
+    toNoteId: c.toNoteId,
+    label: c.label || '',
+    fromArrow,
+    toArrow
+  };
 }
 
 function noteSearchText(note: Note): string {
@@ -268,7 +283,7 @@ export const GraphConnectionPanel: React.FC<GraphConnectionPanelProps> = ({
     <div
       ref={panelRootRef}
       data-allow-context-menu
-      className={`fixed top-14 sm:top-16 left-2 sm:left-4 z-[520] w-[min(100%-1rem,22rem)] max-h-[calc(100dvh-3.5rem-1rem-env(safe-area-inset-bottom,0px))] sm:max-h-[calc(100dvh-4rem-1rem-env(safe-area-inset-bottom,0px))] overflow-y-auto rounded-2xl border shadow-xl p-4 text-sm ${
+      className={`fixed top-[calc(3rem+0.75rem)] sm:top-[calc(4rem+0.75rem)] left-2 sm:left-4 z-[520] w-[min(100%-1rem,22rem)] max-h-[calc(100dvh-3.75rem-1rem-env(safe-area-inset-bottom,0px))] sm:max-h-[calc(100dvh-4.75rem-1rem-env(safe-area-inset-bottom,0px))] overflow-y-auto rounded-2xl border shadow-xl p-4 text-sm ${
         ch ? 'border-gray-200/80' : 'border-white/50 map-chrome-surface-fallback'
       }`}
       style={ch}
@@ -336,7 +351,7 @@ export const GraphConnectionPanel: React.FC<GraphConnectionPanelProps> = ({
           <div className="flex gap-1.5 items-stretch">
             <div
               onPointerDown={!fromNote ? onFromInputPointerDown : undefined}
-              className={`flex min-h-[2.75rem] min-w-0 flex-1 items-center gap-2 rounded-xl bg-white px-3 transition-[box-shadow,border-color] ${
+              className={`flex h-9 min-w-0 flex-1 items-center gap-2 rounded-xl bg-white px-3 transition-[box-shadow,border-color] ${
                 fromNote ? 'border-2 shadow-sm' : 'border border-gray-200/80'
               }`}
               style={
@@ -349,7 +364,7 @@ export const GraphConnectionPanel: React.FC<GraphConnectionPanelProps> = ({
                 <button
                   type="button"
                   onClick={() => onFocusNoteOnGraph?.(fromNote.id)}
-                  className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-gray-900 py-2 rounded-lg hover:bg-gray-50/80 transition-colors -mx-1 px-1"
+                  className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-gray-900 h-full min-h-0 py-0 rounded-lg hover:bg-gray-50/80 transition-colors -mx-1 px-1 flex items-center"
                   title="在图中定位"
                 >
                   {noteSearchText(fromNote)}
@@ -361,7 +376,7 @@ export const GraphConnectionPanel: React.FC<GraphConnectionPanelProps> = ({
                   onChange={(e) => setQFrom(e.target.value)}
                   onFocus={onFromInputFocus}
                   placeholder={pickTarget === 'from' ? '在图中点击节点作为起点' : '搜索'}
-                  className="min-w-0 flex-1 border-0 bg-transparent py-2 text-sm outline-none focus:ring-2 focus:ring-inset focus:ring-offset-0 placeholder:text-gray-400"
+                  className="min-w-0 flex-1 h-full border-0 bg-transparent py-0 text-sm leading-normal outline-none focus:ring-2 focus:ring-inset focus:ring-offset-0 placeholder:text-gray-400"
                   style={{ ['--tw-ring-color' as string]: themeColor }}
                 />
               )}
@@ -431,7 +446,7 @@ export const GraphConnectionPanel: React.FC<GraphConnectionPanelProps> = ({
           <div className="flex gap-1.5 items-stretch">
             <div
               onPointerDown={!toNote ? onToInputPointerDown : undefined}
-              className={`flex min-h-[2.75rem] min-w-0 flex-1 items-center gap-2 rounded-xl bg-white px-3 transition-[box-shadow,border-color] ${
+              className={`flex h-9 min-w-0 flex-1 items-center gap-2 rounded-xl bg-white px-3 transition-[box-shadow,border-color] ${
                 toNote ? 'border-2 shadow-sm' : 'border border-gray-200/80'
               }`}
               style={
@@ -444,7 +459,7 @@ export const GraphConnectionPanel: React.FC<GraphConnectionPanelProps> = ({
                 <button
                   type="button"
                   onClick={() => onFocusNoteOnGraph?.(toNote.id)}
-                  className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-gray-900 py-2 rounded-lg hover:bg-gray-50/80 transition-colors -mx-1 px-1"
+                  className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-gray-900 h-full min-h-0 py-0 rounded-lg hover:bg-gray-50/80 transition-colors -mx-1 px-1 flex items-center"
                   title="在图中定位"
                 >
                   {noteSearchText(toNote)}
@@ -456,7 +471,7 @@ export const GraphConnectionPanel: React.FC<GraphConnectionPanelProps> = ({
                   onChange={(e) => setQTo(e.target.value)}
                   onFocus={onToInputFocus}
                   placeholder={pickTarget === 'to' ? '在图中点击节点作为终点' : '搜索'}
-                  className="min-w-0 flex-1 border-0 bg-transparent py-2 text-sm outline-none focus:ring-2 focus:ring-inset focus:ring-offset-0 placeholder:text-gray-400"
+                  className="min-w-0 flex-1 h-full border-0 bg-transparent py-0 text-sm leading-normal outline-none focus:ring-2 focus:ring-inset focus:ring-offset-0 placeholder:text-gray-400"
                   style={{ ['--tw-ring-color' as string]: themeColor }}
                 />
               )}
@@ -526,7 +541,7 @@ export const GraphConnectionPanel: React.FC<GraphConnectionPanelProps> = ({
           <input
             value={draft.label}
             onChange={(e) => onDraftChange({ label: e.target.value })}
-            className="w-full px-3 py-2 rounded-xl border border-gray-200/80 bg-white text-sm outline-none focus:ring-2 focus:ring-offset-0"
+            className="w-full h-9 px-3 py-0 rounded-xl border border-gray-200/80 bg-white text-sm leading-normal outline-none focus:ring-2 focus:ring-offset-0"
             style={{ ['--tw-ring-color' as string]: themeColor }}
           />
         </div>

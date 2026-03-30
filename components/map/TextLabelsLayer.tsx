@@ -23,8 +23,8 @@ interface TextLabelsLayerProps {
   hoveredNoteId?: string | null;
   // 拖拽过程中使用坐标覆盖（避免 label/连线与 pin 位置不一致）
   noteCoordOverrides?: Record<string, Coordinates>;
-  /** 非 tab 模式：点击“编辑”按钮打开编辑器 */
-  onEditNote?: (noteId: string) => void;
+  /** 地图编辑模式：双击已展示的文字标签打开完整便签编辑器 */
+  onLabelDoubleClickEdit?: (noteId: string) => void;
 }
 
 function getLabelText(rawText: string): string {
@@ -55,37 +55,6 @@ function getTimeText(note: Note): string {
     return `${note.startYear}–${note.endYear}`;
   }
   return String(note.startYear);
-}
-
-/** 地图 label 选中后的编辑入口：仅铅笔图标（与 lucide Pencil 一致） */
-function labelEditPencilButtonHtml(
-  noteId: string,
-  themeColor: string,
-  labelFontSize: number,
-  buttonClass: 'custom-text-label-edit-btn' | 'pre-selected-label-edit-btn'
-): string {
-  const iconPx = Math.max(12, Math.min(18, Math.round(labelFontSize)));
-  return `<button
-    data-note-id="${noteId}"
-    class="${buttonClass}"
-    type="button"
-    title="编辑"
-    aria-label="编辑"
-    style="
-      pointer-events: auto;
-      flex-shrink: 0;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      background: ${themeColor};
-      color: white;
-      border: none;
-      border-radius: 6px;
-      padding: 4px;
-      cursor: pointer;
-      line-height: 0;
-    "
-  ><svg xmlns="http://www.w3.org/2000/svg" width="${iconPx}" height="${iconPx}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></button>`;
 }
 
 function isNoteShownAsSelectedLabel(
@@ -129,7 +98,7 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
   connectionHighlightNoteIds,
   hoveredNoteId,
   noteCoordOverrides = {},
-  onEditNote
+  onLabelDoubleClickEdit
 }) => {
   // 如果当前是“连线高亮模式”，忽略全局 showTextLabels 开关，只根据给定的 ID 集合渲染 label
   const isConnectionHighlightMode =
@@ -224,7 +193,7 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
               selectedNoteId,
               selectedNoteIds
             );
-            const showEditBtn = !isPreviewMode && isSelected && typeof onEditNote === 'function';
+            const allowLabelPointer = !isPreviewMode && isSelected;
             const zOff = textLabelZIndexOffset(
               hoveredNoteId,
               selectedNoteId,
@@ -249,11 +218,10 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
                   box-shadow: 0 2px 4px rgba(0,0,0,0.2);
                   display: inline-flex;
                   align-items: flex-start;
-                  gap: 6px;
-                  pointer-events: auto;
+                  pointer-events: ${allowLabelPointer ? 'auto' : 'none'};
                   width: fit-content;
                 ">
-                  <div style="display:flex; flex-direction:column; gap:2px; pointer-events:none;">
+                  <div style="display:flex; flex-direction:column; gap:2px;">
                     <span style="
                       flex: 0 1 auto;
                       min-width: 0;
@@ -269,11 +237,6 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
                         : ''
                     }
                   </div>
-                  ${
-                    showEditBtn
-                      ? labelEditPencilButtonHtml(note.id, themeColor, fontSize, 'custom-text-label-edit-btn')
-                      : ''
-                  }
                 </div>
             `,
               className: 'custom-text-label',
@@ -294,11 +257,12 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
                   mousedown: (e) => {
                     e.originalEvent?.stopPropagation();
                     e.originalEvent?.stopImmediatePropagation();
-                    const target = e.originalEvent?.target as HTMLElement | null;
-                    if (!target) return;
-                    if (target.closest('.custom-text-label-edit-btn')) {
-                      onEditNote?.(note.id);
-                    }
+                  },
+                  dblclick: (e) => {
+                    e.originalEvent?.stopPropagation();
+                    e.originalEvent?.stopImmediatePropagation();
+                    if (!isSelected || !onLabelDoubleClickEdit) return;
+                    onLabelDoubleClickEdit(note.id);
                   }
                 }}
               />
@@ -351,11 +315,6 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
                           ? 2
                           : 0;
 
-                    const editBtn =
-                      !isPreviewMode && isSelected && typeof onEditNote === 'function'
-                        ? labelEditPencilButtonHtml(note.id, themeColor, fontSize, 'pre-selected-label-edit-btn')
-                        : '';
-
                     return `
                       <div 
                         data-note-id="${note.id}"
@@ -383,7 +342,7 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
                           margin-bottom: 4px;
                         "
                       >
-                        <div style="display:flex; flex-direction:column; gap:2px; pointer-events:none;">
+                        <div style="display:flex; flex-direction:column; gap:2px;">
                           <span
                             class="pre-selected-label-text"
                             style="
@@ -402,7 +361,6 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
                               : ''
                           }
                         </div>
-                        ${editBtn}
                       </div>
                     `;
                   }).join('')}
@@ -419,22 +377,24 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
                 const target = e.originalEvent.target as HTMLElement;
                 const noteId =
                   target.getAttribute('data-note-id') ||
-                  target.closest('.pre-selected-label-edit-btn')?.getAttribute('data-note-id') ||
                   target.closest('.pre-selected-label-item')?.getAttribute('data-note-id');
-
-                // Edit button click: open editor (non-tab)
-                if (target.closest('.pre-selected-label-edit-btn')) {
-                  if (noteId && onEditNote) {
-                    onEditNote(noteId);
-                  }
-                  return;
-                }
 
                 if (noteId && onSelectNote) {
                   onSelectNote(noteId);
                 } else if (onClearSelection) {
                   onClearSelection();
                 }
+              },
+              dblclick: (e) => {
+                e.originalEvent.stopPropagation();
+                e.originalEvent.stopImmediatePropagation();
+                if (!onLabelDoubleClickEdit) return;
+                const target = e.originalEvent.target as HTMLElement;
+                const noteId =
+                  target.getAttribute('data-note-id') ||
+                  target.closest('.pre-selected-label-item')?.getAttribute('data-note-id');
+                // 仅编辑模式传入 onLabelDoubleClickEdit：双击展开列表中的该行打开编辑器
+                if (noteId) onLabelDoubleClickEdit(noteId);
               }
             }}
           />
@@ -486,7 +446,7 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
             selectedNoteId,
             selectedNoteIds
           );
-          const showEditBtn = !isPreviewMode && isSelected && typeof onEditNote === 'function';
+          const labelPointerInteractive = !isPreviewMode && isSelected;
           const zOff = textLabelZIndexOffset(
             hoveredNoteId,
             selectedNoteId,
@@ -507,14 +467,13 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
                   white-space: nowrap;
                   border: ${isFavorite ? 2 : 1.5}px solid ${themeColor};
                   box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-                  pointer-events: ${showEditBtn ? 'auto' : 'none'};
+                  pointer-events: ${labelPointerInteractive ? 'auto' : 'none'};
                   display: flex;
                   align-items: flex-start;
                   justify-content: flex-start;
-                  gap: 6px;
                   width: fit-content;
                 ">
-                  <div style="display:flex; flex-direction:column; gap:2px; pointer-events:none;">
+                  <div style="display:flex; flex-direction:column; gap:2px;">
                     <span style="
                       flex: 0 1 auto;
                       min-width: 0;
@@ -530,11 +489,6 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
                         : ''
                     }
                   </div>
-                  ${
-                    showEditBtn
-                      ? labelEditPencilButtonHtml(note.id, themeColor, fontSize, 'custom-text-label-edit-btn')
-                      : ''
-                  }
                 </div>
             `,
             className: 'custom-text-label',
@@ -553,14 +507,14 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
               zIndexOffset={zOff}
               eventHandlers={{
                 mousedown: (e) => {
-                  // 只在点到 edit 按钮时打开编辑器
                   e.originalEvent?.stopPropagation();
                   e.originalEvent?.stopImmediatePropagation();
-                  const target = e.originalEvent?.target as HTMLElement | null;
-                  if (!target) return;
-                  if (target.closest('.custom-text-label-edit-btn')) {
-                    onEditNote?.(note.id);
-                  }
+                },
+                dblclick: (e) => {
+                  e.originalEvent?.stopPropagation();
+                  e.originalEvent?.stopImmediatePropagation();
+                  if (!isSelected || !onLabelDoubleClickEdit) return;
+                  onLabelDoubleClickEdit(note.id);
                 }
               }}
             />

@@ -1,7 +1,9 @@
 import React from 'react';
-import { Layers, Edit3, Save } from 'lucide-react';
+import { Edit3, Save } from 'lucide-react';
 import type { Frame } from '../../../types';
+import type { GraphLayerGroupStandard } from '../../../utils/graph/graphRuntimeCore';
 import { ChromeIconButton } from '../../ui/ChromeIconButton';
+import { LayerToolbarIcon } from '../../ui/LayerToolbarIcon';
 
 interface MapLayerControlProps {
   showPanel: boolean;
@@ -14,11 +16,17 @@ interface MapLayerControlProps {
   setFrameLayerVisibility: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   showAllFrames: boolean;
   setShowAllFrames: (v: boolean) => void;
-  activeFrame: Frame | null;
-  editingFrameDescription: string | null;
-  setEditingFrameDescription: (v: string | null) => void;
-  onSaveFrameDescription: () => void;
+  activeFrame?: Frame | null;
+  editingFrameDescription?: string | null;
+  setEditingFrameDescription?: (v: string | null) => void;
+  onSaveFrameDescription?: () => void;
   frameLayerRef: React.RefObject<HTMLDivElement | null>;
+  /** 统一节点图层（tag/frame），排在帧描述/帧列表左侧 */
+  unifiedNotesLayerSlot?: React.ReactNode;
+  /** 展开面板相对图层按钮：`start`=左边缘对齐（主地图顶栏），`end`=右边缘对齐（右上角工具条等） */
+  dropdownAlign?: 'start' | 'end';
+  /** 工具栏按钮图标：与图层面板当前 tag/frame 一致 */
+  layerGroupStandard?: GraphLayerGroupStandard;
 }
 
 export const MapLayerControl: React.FC<MapLayerControlProps> = ({
@@ -32,13 +40,17 @@ export const MapLayerControl: React.FC<MapLayerControlProps> = ({
   setFrameLayerVisibility,
   showAllFrames,
   setShowAllFrames,
-  activeFrame,
-  editingFrameDescription,
-  setEditingFrameDescription,
-  onSaveFrameDescription,
-  frameLayerRef
+  activeFrame = null,
+  editingFrameDescription = null,
+  setEditingFrameDescription = () => {},
+  onSaveFrameDescription = () => {},
+  frameLayerRef,
+  unifiedNotesLayerSlot,
+  dropdownAlign = 'end',
+  layerGroupStandard = 'tag'
 }) => {
   const ch = chromeSurfaceStyle;
+  const panelAnchorCls = dropdownAlign === 'start' ? 'left-0' : 'right-0';
   return (
   <div className="relative" ref={frameLayerRef}>
     <ChromeIconButton
@@ -49,19 +61,33 @@ export const MapLayerControl: React.FC<MapLayerControlProps> = ({
       pressThemeFlash
       nonChromeIdleHover="imperative-gray100"
       onClick={() => onTogglePanel()}
-      title="图层"
+      title={
+        layerGroupStandard === 'tag'
+          ? '图层（标签组顺序、显隐、半径权重）'
+          : '图层（帧组顺序、显隐、半径权重）'
+      }
     >
-      <Layers size={18} className="sm:w-5 sm:h-5" />
+      <LayerToolbarIcon layerGroupStandard={layerGroupStandard} />
     </ChromeIconButton>
 
     {showPanel && (
-      <div className="absolute right-0 top-full flex gap-2 items-start pointer-events-none mt-2">
+      <div className={`absolute ${panelAnchorCls} top-full flex gap-2 items-start pointer-events-none mt-2`}>
+        {unifiedNotesLayerSlot ? (
+          <div
+            className="pointer-events-auto shrink-0"
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+          >
+            {unifiedNotesLayerSlot}
+          </div>
+        ) : null}
         {activeFrame && (
           <div
             className={`w-72 sm:w-80 rounded-xl shadow-xl border border-gray-100 flex flex-col pointer-events-auto overflow-hidden animate-in fade-in slide-in-from-right-4 ${ch ? '' : 'bg-white'}`}
             style={{ maxHeight: '60vh', ...ch }}
             onClick={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
           >
             <div className="p-3 border-b border-gray-100 flex items-center justify-between bg-gray-50/50 shrink-0">
               <div className="flex items-center gap-2 overflow-hidden">
@@ -108,81 +134,6 @@ export const MapLayerControl: React.FC<MapLayerControlProps> = ({
             </div>
           </div>
         )}
-
-        <div
-          className={`w-56 rounded-xl shadow-xl border border-gray-100 py-2 pointer-events-auto shrink-0 ${ch ? '' : 'bg-white'}`}
-          style={ch}
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="px-3 py-2 text-xs font-bold text-gray-500 uppercase tracking-wide">Frame Layers</div>
-          <div className="h-px bg-gray-100 mb-1" />
-
-          <div className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-700 font-medium">Show All</span>
-            </div>
-            <input
-              type="checkbox"
-              checked={showAllFrames}
-              onChange={(e) => {
-                e.stopPropagation();
-                setShowAllFrames(!showAllFrames);
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => e.stopPropagation()}
-              className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none ${showAllFrames ? '' : 'bg-transparent'}`}
-              style={{ backgroundColor: showAllFrames ? themeColor : 'transparent', borderColor: themeColor }}
-            />
-          </div>
-
-          {!showAllFrames && (
-            <>
-              <div className="h-px bg-gray-100 my-1" />
-              {frames?.map((frame) => (
-                <div
-                  key={frame.id}
-                  className="px-3 py-2 flex items-center justify-between hover:bg-gray-50 cursor-pointer group"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const isMulti = e.ctrlKey || e.metaKey || e.shiftKey;
-                    if (isMulti) {
-                      setFrameLayerVisibility(prev => ({
-                        ...prev,
-                        [frame.id]: !prev[frame.id]
-                      }));
-                    } else {
-                      const newVisibility: Record<string, boolean> = {};
-                      frames?.forEach(f => {
-                        newVisibility[f.id] = f.id === frame.id;
-                      });
-                      setFrameLayerVisibility(newVisibility);
-                    }
-                  }}
-                >
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded border border-gray-300" style={{ backgroundColor: frame.color }} />
-                    <span className="text-sm text-gray-700 truncate" title={frame.title}>{frame.title}</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={frameLayerVisibility[frame.id] ?? true}
-                    readOnly
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={(e) => e.stopPropagation()}
-                    className={`w-4 h-4 rounded border-2 cursor-pointer appearance-none pointer-events-none ${
-                      frameLayerVisibility[frame.id] ?? true ? '' : 'bg-transparent'
-                    }`}
-                    style={{
-                      backgroundColor: (frameLayerVisibility[frame.id] ?? true) ? themeColor : 'transparent',
-                      borderColor: themeColor
-                    }}
-                  />
-                </div>
-              ))}
-            </>
-          )}
-        </div>
       </div>
     )}
   </div>

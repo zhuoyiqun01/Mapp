@@ -32,7 +32,7 @@ export function useTiptapEditor({ noteId, content, onMarkdownChange }: UseTiptap
   // keep up so that switching to "preview mode" shows the latest text.
   useEffect(() => {
     if (!editor) return;
-    const currentMarkdown = (editor.storage.markdown as any).getMarkdown();
+    const currentMarkdown = (editor.storage as { markdown?: { getMarkdown: () => string } }).markdown?.getMarkdown() ?? '';
     if (content !== currentMarkdown) {
       editor.commands.setContent(content || '');
     }
