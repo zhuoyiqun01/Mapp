@@ -74,14 +74,12 @@ export function applyThemeChromeCssVars(root: HTMLElement, themeColor: string): 
     root.style.removeProperty('--theme-chrome-lab-l');
   }
 
-  // 主题色底上的滚动条：滑块与轨道与 chrome 前景同系，保证对比度
+  // 主题色底上的滚动条：拇指与 chrome 前景同色（实色），悬停略加深/变浅
   if (fg === '#000000') {
-    root.style.setProperty('--theme-scrollbar-thumb', 'rgba(0, 0, 0, 0.38)');
-    root.style.setProperty('--theme-scrollbar-thumb-hover', 'rgba(0, 0, 0, 0.52)');
-    root.style.setProperty('--theme-scrollbar-track', 'rgba(0, 0, 0, 0.1)');
+    root.style.setProperty('--theme-scrollbar-thumb', '#000000');
+    root.style.setProperty('--theme-scrollbar-thumb-hover', '#404040');
   } else {
-    root.style.setProperty('--theme-scrollbar-thumb', 'rgba(255, 255, 255, 0.42)');
-    root.style.setProperty('--theme-scrollbar-thumb-hover', 'rgba(255, 255, 255, 0.58)');
-    root.style.setProperty('--theme-scrollbar-track', 'rgba(255, 255, 255, 0.14)');
+    root.style.setProperty('--theme-scrollbar-thumb', '#ffffff');
+    root.style.setProperty('--theme-scrollbar-thumb-hover', '#e8e8e8');
   }
 }

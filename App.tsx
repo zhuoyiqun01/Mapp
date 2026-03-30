@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Map as MapIcon, Grid, Menu, Loader2, Table2, GitBranch, Cloud, CloudOff, CheckCircle2, AlertCircle, RefreshCw, Plus } from 'lucide-react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
+import { Map as MapIcon, Grid, Menu, Loader2, Table2, GitBranch, Cloud, CloudOff, CheckCircle2, AlertCircle, Plus } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { MotionDiv } from './components/ui/MotionDiv';
 import { MapView } from './components/MapView';
@@ -14,7 +14,9 @@ import {
   MAP_STYLE_OPTIONS,
   PROJECT_OPEN_OVERLAY_FADE_S,
   PROJECT_OPEN_SLIDE_DURATION_S,
-  PROJECT_OPEN_SLIDE_EASE
+  PROJECT_OPEN_SLIDE_EASE,
+  PROJECT_SIDEBAR_DRAWER_WIDTH_PX,
+  PROJECT_SIDEBAR_FIXED_WIDTH_MIN_VIEWPORT_PX
 } from './constants';
 import { useProjectState } from './components/hooks/useProjectState';
 import { useViewState } from './components/hooks/useViewState';
@@ -63,7 +65,18 @@ export default function App() {
   const projectState = useProjectState();
 
   const [sidebarExpandingToHome, setSidebarExpandingToHome] = useState(false);
+  /** 在项目内切换到另一项目时：先全宽展开再给关闭动画，避免「直接收起」难以感知是否切换成功 */
+  const [sidebarExpandForProjectSwitch, setSidebarExpandForProjectSwitch] = useState(false);
+  /** 从主页点进项目：先进入工作区壳层，左侧由全宽收束为侧栏（非从屏幕外滑入） */
+  const [pendingEnterWorkspaceFromHome, setPendingEnterWorkspaceFromHome] = useState(false);
+  const [sidebarDockedInline, setSidebarDockedInline] = useState(false);
+  /** 回主页：先让 overlay 在卸载前采用无位移 exit，避免与「项目切换收起」共用同一套滑出 */
+  const [homeOverlayExitInstant, setHomeOverlayExitInstant] = useState(false);
   const expandToHomeProjectIdRef = useRef<string | null>(null);
+  /** 从主页进入项目：pending 至少持续一小段时间，避免太短导致视觉上像瞬切 */
+  const homeEnterTransitionStartRef = useRef<number | null>(null);
+  // 用 number 兜底，避免 dom+node 定义混用导致类型不一致
+  const homeEnterPendingClearTimerRef = useRef<number | null>(null);
 
   const viewState = useViewState();
   const appState = useAppState();
@@ -132,6 +145,45 @@ export default function App() {
     waypoints,
     setWaypoints
   } = appState;
+
+  const [projectSidebarLargeViewport, setProjectSidebarLargeViewport] = useState(() =>
+    typeof window !== 'undefined' &&
+      window.matchMedia(`(min-width: ${PROJECT_SIDEBAR_FIXED_WIDTH_MIN_VIEWPORT_PX}px)`).matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(`(min-width: ${PROJECT_SIDEBAR_FIXED_WIDTH_MIN_VIEWPORT_PX}px)`);
+    const onMq = () => setProjectSidebarLargeViewport(mq.matches);
+    onMq();
+    mq.addEventListener('change', onMq);
+    return () => mq.removeEventListener('change', onMq);
+  }, []);
+
+  const inProjectHomeTransition =
+    pendingEnterWorkspaceFromHome ||
+    sidebarExpandingToHome ||
+    sidebarExpandForProjectSwitch;
+
+  const atSteadyProjectHome = !activeProject && !inProjectHomeTransition;
+
+  const projectSidebarDrawerWidth = useMemo(() => {
+    if (
+      sidebarExpandingToHome ||
+      sidebarExpandForProjectSwitch ||
+      atSteadyProjectHome ||
+      pendingEnterWorkspaceFromHome
+    ) {
+      return '100%';
+    }
+    return projectSidebarLargeViewport
+      ? `${PROJECT_SIDEBAR_DRAWER_WIDTH_PX}px`
+      : '62%';
+  }, [
+    sidebarExpandingToHome,
+    sidebarExpandForProjectSwitch,
+    atSteadyProjectHome,
+    pendingEnterWorkspaceFromHome,
+    projectSidebarLargeViewport
+  ]);
 
   const { handleDataImport: handleProjectDataImport } = useDataImport({
     project: activeProject as Project,
@@ -344,30 +396,155 @@ export default function App() {
     }
   }, [projectState]);
 
+  const closeProjectSidebar = useCallback(() => {
+    setSidebarExpandForProjectSwitch(false);
+    setPendingEnterWorkspaceFromHome(false);
+    if (!activeProject) {
+      // 无项目时侧栏即启动页：保持全宽 docked，不收到「空工作区」
+      setIsSidebarOpen(true);
+      setSidebarDockedInline(true);
+      return;
+    }
+    setSidebarDockedInline(false);
+    setIsSidebarOpen(false);
+  }, [activeProject]);
+
+  /** 从主页进入：项目加载成功后结束「待定」壳层 */
+  useEffect(() => {
+    if (!activeProject) return;
+    if (!pendingEnterWorkspaceFromHome) return;
+
+    const start = homeEnterTransitionStartRef.current;
+    // 若找不到起始点，兜底立刻结束
+    if (start == null) {
+      setPendingEnterWorkspaceFromHome(false);
+      homeEnterTransitionStartRef.current = null;
+      return;
+    }
+
+    const elapsedMs = performance.now() - start;
+    // 与「项目 -> 项目」切换保持同一套中间态停留节奏：
+    // handleSelectProject(switchingProject) 里会等待到 expandMs，
+    // 随后又延迟 expandMs+80 才关闭 sidebarExpandForProjectSwitch，
+    // 因此中间态至少会停留约 2*expandMs+80。
+    const expandMs = Math.round(PROJECT_OPEN_SLIDE_DURATION_S * 1000);
+    const minMs = expandMs * 2 + 80;
+    const remaining = Math.max(0, minMs - elapsedMs);
+
+    if (homeEnterPendingClearTimerRef.current) {
+      window.clearTimeout(homeEnterPendingClearTimerRef.current);
+      homeEnterPendingClearTimerRef.current = null;
+    }
+
+    homeEnterPendingClearTimerRef.current = window.setTimeout(() => {
+      setPendingEnterWorkspaceFromHome(false);
+      homeEnterTransitionStartRef.current = null;
+      homeEnterPendingClearTimerRef.current = null;
+    }, remaining);
+
+    return () => {
+      if (homeEnterPendingClearTimerRef.current) {
+        window.clearTimeout(homeEnterPendingClearTimerRef.current);
+        homeEnterPendingClearTimerRef.current = null;
+      }
+    };
+  }, [activeProject, pendingEnterWorkspaceFromHome]);
+
+  /** 从主页进入项目过程中加载失败时回到纯主页 */
+  useEffect(() => {
+    if (!pendingEnterWorkspaceFromHome || isLoadingProject) return;
+    if (!activeProject) {
+      setPendingEnterWorkspaceFromHome(false);
+      setSidebarDockedInline(true);
+      setIsSidebarOpen(true);
+    }
+  }, [pendingEnterWorkspaceFromHome, isLoadingProject, activeProject]);
+
   // Project selection handler with loading
   const handleSelectProject = useCallback(async (id: string) => {
+    if (currentProjectId === id) {
+      closeProjectSidebar();
+      return;
+    }
+
     if (currentProjectId && currentProjectId !== id) {
       console.log('[App] Clearing cache for old project:', currentProjectId);
       clearViewPositionCache(currentProjectId);
     }
 
-    setIsSidebarOpen(false);
+    const fromHome = !currentProjectId;
+    const switchingProject = !!currentProjectId && currentProjectId !== id;
+    /** 切换前是否内联 dock：从主页进项目后保持 dock，收尾不应当成「浮层侧栏」一律关掉 */
+    const dockedBeforeSwitch = sidebarDockedInline;
+
     setSidebarExpandingToHome(false);
     clearMapNavigation();
     clearBoardNavigation();
 
+    if (fromHome) {
+      setSidebarExpandForProjectSwitch(false);
+      homeEnterTransitionStartRef.current = performance.now();
+      setPendingEnterWorkspaceFromHome(true);
+      setSidebarDockedInline(true);
+      setIsSidebarOpen(true);
+    } else if (switchingProject) {
+      setIsSidebarOpen(true);
+      setSidebarExpandForProjectSwitch(true);
+    } else {
+      setSidebarExpandForProjectSwitch(false);
+      setIsSidebarOpen(true);
+    }
+
+    const t0 = performance.now();
     await projectState.selectProject(id);
-  }, [currentProjectId, projectState, clearMapNavigation, clearBoardNavigation]);
+
+    if (switchingProject) {
+      const expandMs = PROJECT_OPEN_SLIDE_DURATION_S * 1000;
+      const elapsed = performance.now() - t0;
+      if (elapsed < expandMs) {
+        await new Promise((r) => setTimeout(r, expandMs - elapsed));
+      }
+      if (dockedBeforeSwitch) {
+        setIsSidebarOpen(true);
+        setSidebarDockedInline(true);
+      } else {
+        setIsSidebarOpen(false);
+        setSidebarDockedInline(false);
+      }
+      window.setTimeout(() => setSidebarExpandForProjectSwitch(false), Math.round(expandMs) + 80);
+    }
+  }, [
+    currentProjectId,
+    sidebarDockedInline,
+    projectState,
+    clearMapNavigation,
+    clearBoardNavigation,
+    closeProjectSidebar
+  ]);
 
   const handleBackToHome = useCallback(() => {
-    if (sidebarExpandingToHome) return;
+    if (sidebarExpandingToHome || homeOverlayExitInstant) return;
+    // 始终走 docked：与当前项目列表共用一个 ProjectManager，全宽中间态仅收束列表；
+    // 定时结束后清空项目再展开主页其余 UI，避免先卸 dock 再走 overlay 滑出（像项目切换收尾）。
+    setHomeOverlayExitInstant(true);
+  }, [sidebarExpandingToHome, homeOverlayExitInstant]);
+
+  useLayoutEffect(() => {
+    if (!homeOverlayExitInstant) return;
+    setSidebarExpandForProjectSwitch(false);
+    setPendingEnterWorkspaceFromHome(false);
+    setSidebarDockedInline(true);
+    setIsSidebarOpen(true);
     expandToHomeProjectIdRef.current = currentProjectId;
     setSidebarExpandingToHome(true);
-  }, [sidebarExpandingToHome, currentProjectId]);
+    setHomeOverlayExitInstant(false);
+  }, [homeOverlayExitInstant, currentProjectId]);
 
   useEffect(() => {
     if (!sidebarExpandingToHome) return;
-    const ms = Math.round(PROJECT_OPEN_SLIDE_DURATION_S * 1000);
+    const expandMs = Math.round(PROJECT_OPEN_SLIDE_DURATION_S * 1000);
+    // 让「项目 -> 主页」中间态停留节奏与「项目 -> 项目」一致
+    const ms = expandMs * 2 + 80;
     const id = window.setTimeout(() => {
       const pid = expandToHomeProjectIdRef.current;
       expandToHomeProjectIdRef.current = null;
@@ -376,8 +553,16 @@ export default function App() {
       clearBoardNavigation();
       setCurrentProjectId(null);
       setActiveProject(null);
-      setIsSidebarOpen(false);
-      setSidebarExpandingToHome(false);
+      setIsSidebarOpen(true);
+      setSidebarDockedInline(true);
+      /** 先保留 sidebarExpandingToHome，下一帧再关 transitionListOnly：列表与主页共用 expand 壳与同一套 scroll 区，避免整块列表瞬切 */
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          setSidebarExpandingToHome(false);
+          setSidebarExpandForProjectSwitch(false);
+          setPendingEnterWorkspaceFromHome(false);
+        });
+      });
     }, ms);
     return () => window.clearTimeout(id);
   }, [
@@ -387,6 +572,26 @@ export default function App() {
     setCurrentProjectId,
     setActiveProject,
     setIsSidebarOpen
+  ]);
+
+  /** 稳定无项目：全宽 docked 侧栏即启动页 */
+  useEffect(() => {
+    if (isLoading) return;
+    if (
+      !activeProject &&
+      !pendingEnterWorkspaceFromHome &&
+      !sidebarExpandingToHome &&
+      !sidebarExpandForProjectSwitch
+    ) {
+      setSidebarDockedInline(true);
+      setIsSidebarOpen(true);
+    }
+  }, [
+    isLoading,
+    activeProject,
+    pendingEnterWorkspaceFromHome,
+    sidebarExpandingToHome,
+    sidebarExpandForProjectSwitch
   ]);
 
   // Cloud Sync State
@@ -399,7 +604,13 @@ export default function App() {
   // UI Visibility State (Tab key toggle)
   const [isUIVisible, setIsUIVisible] = useState(true);
 
-  
+  /** 侧栏 docked：全宽启动页与项目内联共用同一壳，不再切换到单独「全屏 ProjectManager」 */
+  const showDockedProjectSidebar =
+    isUIVisible && isSidebarOpen && sidebarDockedInline;
+
+  /** 进入工作区加载 / 回主页展开 / 切换项目：仅列表区域过渡，装饰与 stable 主页一致 */
+  const projectManagerTransitionListOnly = inProjectHomeTransition;
+
   // Map Style State
   const [mapStyle, setMapStyle] = useState<string>('carto-light-nolabels');
 
@@ -909,6 +1120,7 @@ export default function App() {
   };
 
   const handleCreateProject = async (project: Project) => {
+    const enteringFromHome = !currentProjectId;
     // JSON 全量导入已在 storage 中按 project.id 保存；若再 createProject 会新建空项目并选错 ID，导致「导入后空白」
     const hasImportedPayload =
       (project.notes?.length ?? 0) > 0 ||
@@ -918,8 +1130,15 @@ export default function App() {
     if (hasImportedPayload) {
       await projectState.loadProjects();
       setViewMode('map');
-      setIsSidebarOpen(false);
       setSidebarExpandingToHome(false);
+      setSidebarExpandForProjectSwitch(false);
+      if (enteringFromHome) {
+        setPendingEnterWorkspaceFromHome(true);
+        setSidebarDockedInline(true);
+        setIsSidebarOpen(true);
+      } else {
+        setIsSidebarOpen(false);
+      }
       await projectState.selectProject(project.id);
       return;
     }
@@ -929,8 +1148,15 @@ export default function App() {
     });
 
     setViewMode('map');
-    setIsSidebarOpen(false);
     setSidebarExpandingToHome(false);
+    setSidebarExpandForProjectSwitch(false);
+    if (enteringFromHome) {
+      setPendingEnterWorkspaceFromHome(true);
+      setSidebarDockedInline(true);
+      setIsSidebarOpen(true);
+    } else {
+      setIsSidebarOpen(false);
+    }
     await projectState.selectProject(projectId);
   };
 
@@ -1017,151 +1243,114 @@ export default function App() {
         touchAction: 'manipulation'
       }}
     >
-      {/* Loading Progress Overlay（删项 / 清理 / 加载项目） */}
-      {(isLoadingProject || isDeletingProject) && (
-        <div className="fixed inset-0 z-[10000] bg-black/50 flex items-center justify-center">
-          <div className="bg-white rounded-2xl p-8 shadow-2xl max-w-sm w-full mx-4">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-gray-800 mb-4">
-                {isDeletingProject ? '删除项目中...' : (currentProjectId ? '加载项目中...' : '检查数据中...')}
-              </div>
-              {isLoadingProject && (
-                <>
-                  <div className="w-full bg-gray-200 rounded-full h-4 mb-4">
-                    <div
-                      className="bg-blue-500 h-4 rounded-full transition-all duration-300"
-                      style={{ width: `${loadingProgress}%` }}
-                    ></div>
-                  </div>
-                  <div className="text-lg font-semibold text-gray-600">{loadingProgress}%</div>
-                  {!currentProjectId && (
-                    <div className="text-sm text-gray-500 mt-2">
-                      正在修复图片数据和清理损坏文件...
-                    </div>
-                  )}
-                </>
-              )}
-              {isDeletingProject && (
-                <div className="flex items-center justify-center space-x-2">
-                  <Loader2 size={24} className="animate-spin text-blue-500" />
-                  <div className="text-sm text-gray-500">
-                    正在删除项目文件...
-                  </div>
-                </div>
-              )}
-            </div>
+      {/* 删除项目：保留简短阻断提示（加载项目改由 ProjectManager 顶部分条） */}
+      {isDeletingProject && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/40 backdrop-blur-[2px]">
+          <div
+            className="mx-4 flex max-w-sm flex-col items-center gap-4 rounded-2xl border border-gray-200/80 p-8 shadow-2xl"
+            style={panelChromeStyle}
+          >
+            <Loader2 size={28} className="animate-spin shrink-0 text-gray-700" aria-hidden />
+            <p className="text-center text-sm font-medium text-gray-700">正在删除项目文件…</p>
           </div>
         </div>
       )}
 
-      {!activeProject ? (
-        <div className="fixed inset-0 z-[150] flex flex-col" style={{ backgroundColor: themeColor }}>
-          {isUIVisible && (
-            <div className="absolute top-4 right-4 z-[160]">
-              <button
-                onClick={() => setShowCleanupMenu(!showCleanupMenu)}
-                disabled={isRunningCleanup}
-                className="p-3 bg-white/90 hover:bg-white rounded-full shadow-lg transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed relative"
-                title="清理数据选项"
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-gray-50">
+        <div className="flex h-full min-h-0 min-w-0 w-full flex-1 flex-row bg-gray-50">
+            {showDockedProjectSidebar && (
+              <MotionDiv
+                className="relative z-[1990] h-full min-h-0 shrink-0 overflow-visible shadow-2xl"
+                style={{
+                  borderRightWidth: 1,
+                  borderRightStyle: 'solid',
+                  borderRightColor: themeColor,
+                  willChange: 'width'
+                }}
+                initial={false}
+                animate={{ width: projectSidebarDrawerWidth }}
+                transition={{
+                  width: {
+                    type: 'tween',
+                    duration: PROJECT_OPEN_SLIDE_DURATION_S,
+                    ease: PROJECT_OPEN_SLIDE_EASE
+                  }
+                }}
               >
-                <RefreshCw
-                  size={20}
-                  className={`text-gray-700 ${isRunningCleanup ? 'animate-spin' : ''}`}
+                <ProjectManager
+                  isSidebar
+                  expandToHomeLayout={!activeProject}
+                  transitionListOnly={projectManagerTransitionListOnly}
+                  sidebarExpandingToHome={sidebarExpandingToHome}
+                  clearSelectionInTransition={sidebarExpandingToHome}
+                  showHomeDataCleanupButton={!activeProject}
+                  homeCleanupMenuOpen={showCleanupMenu}
+                  onHomeCleanupMenuToggle={() => setShowCleanupMenu(!showCleanupMenu)}
+                  onHomeCleanupOrphanedData={handleCleanupOrphanedData}
+                  isHomeCleanupRunning={isRunningCleanup}
+                  showProjectLoadBar={isLoadingProject && !isDeletingProject}
+                  projectLoadProgress={loadingProgress}
+                  projects={summariesToProjects(projectSummaries)}
+                  currentProjectId={currentProjectId}
+                  onCreateProject={handleCreateProject}
+                  onSelectProject={handleSelectProject}
+                  onDeleteProject={handleDeleteProject}
+                  onUpdateProject={handleUpdateProject}
+                  onDuplicateProject={handleDuplicateProject}
+                  onCloseSidebar={closeProjectSidebar}
+                  onBackToHome={handleBackToHome}
+                  viewMode={viewMode}
+                  activeProject={activeProject}
+                  onExportCSV={handleExportCSV}
+                  syncStatus={syncStatus}
+                  onCleanupBrokenReferences={handleCleanupBrokenReferences}
+                  onCheckData={handleCheckData}
+                  themeColor={themeColor}
+                  onThemeColorChange={handleThemeColorChange}
+                  mapUiChromeOpacity={mapUiChromeOpacity}
+                  onMapUiChromeOpacityChange={handleMapUiChromeOpacityChange}
+                  mapUiChromeBlurPx={mapUiChromeBlurPx}
+                  onMapUiChromeBlurPxChange={handleMapUiChromeBlurPxChange}
+                  currentMapStyle={mapStyle}
+                  onMapStyleChange={(styleId) => {
+                    setMapStyle(styleId);
+                    set('mapp-map-style', styleId);
+                  }}
                 />
-              </button>
-              {showCleanupMenu && (
-                <div className="absolute top-full right-0 mt-2 bg-white rounded-lg shadow-xl border border-gray-200 min-w-48 py-1 z-20">
-                  <button
-                    onClick={() => {
-                      setShowCleanupMenu(false);
-                      handleCleanupOrphanedData(false);
-                    }}
-                    disabled={isRunningCleanup}
-                    className="w-full text-left px-4 py-3 text-sm hover:bg-gray-50 transition-colors flex items-center gap-2"
-                  >
-                    <RefreshCw size={16} className="text-green-600" />
-                    <div>
-                      <div className="font-medium">安全清理</div>
-                      <div className="text-xs text-gray-500">只清理孤立数据和普通重复</div>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowCleanupMenu(false);
-                      handleCleanupOrphanedData(true);
-                    }}
-                    disabled={isRunningCleanup}
-                    className="w-full text-left px-4 py-3 text-sm hover:bg-red-50 transition-colors flex items-center gap-2"
-                  >
-                    <RefreshCw size={16} className="text-red-600" />
-                    <div>
-                      <div className="font-medium">深度清理</div>
-                      <div className="text-xs text-gray-500">清理所有重复（包括可疑的）</div>
-                    </div>
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-          {showCleanupMenu && (
-            <div className="fixed inset-0 z-[155]" onClick={() => setShowCleanupMenu(false)} />
-          )}
-          <ProjectManager
-            isSidebar
-            expandToHomeLayout
-            projects={summariesToProjects(projectSummaries)}
-            currentProjectId={null}
-            activeProject={null}
-            onCreateProject={handleCreateProject}
-            onSelectProject={handleSelectProject}
-            onDeleteProject={handleDeleteProject}
-            onUpdateProject={handleUpdateProject}
-            onDuplicateProject={handleDuplicateProject}
-            onCheckData={handleCheckData}
-            onCleanupBrokenReferences={handleCleanupBrokenReferences}
-            themeColor={themeColor}
-            onThemeColorChange={handleThemeColorChange}
-            mapUiChromeOpacity={mapUiChromeOpacity}
-            onMapUiChromeOpacityChange={handleMapUiChromeOpacityChange}
-            mapUiChromeBlurPx={mapUiChromeBlurPx}
-            onMapUiChromeBlurPxChange={handleMapUiChromeBlurPxChange}
-            viewMode={viewMode}
-            syncStatus={syncStatus}
-            currentMapStyle={mapStyle}
-            onMapStyleChange={(styleId) => {
-              setMapStyle(styleId);
-              set('mapp-map-style', styleId);
-            }}
-          />
-        </div>
-      ) : (
-        <>
+              </MotionDiv>
+            )}
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <AnimatePresence>
-      {isSidebarOpen && isUIVisible && (
+      {isSidebarOpen && isUIVisible && !sidebarDockedInline && (
           <div className="fixed inset-0 z-[2000] flex overflow-hidden">
              <MotionDiv
                className="fixed inset-0 bg-black/20"
                onClick={() => {
-                 if (sidebarExpandingToHome) return;
-                 setIsSidebarOpen(false);
+                 if (sidebarExpandingToHome || sidebarExpandForProjectSwitch) return;
+                 closeProjectSidebar();
                }}
                initial={{ opacity: 0 }}
-               animate={{ opacity: sidebarExpandingToHome ? 0 : 1 }}
+               animate={{ opacity: sidebarExpandingToHome || sidebarExpandForProjectSwitch ? 0 : 1 }}
                exit={{ opacity: 0 }}
                transition={{ duration: PROJECT_OPEN_OVERLAY_FADE_S }}
                style={{
                  willChange: 'opacity',
-                 pointerEvents: sidebarExpandingToHome ? 'none' : 'auto'
+                 pointerEvents:
+                   sidebarExpandingToHome || sidebarExpandForProjectSwitch ? 'none' : 'auto'
                }}
              />
              <MotionDiv
                className="relative h-full z-[2001] overflow-hidden shrink-0"
-               initial={{ x: '-100%', width: '62%' }}
+               initial={{ x: '-100%', width: projectSidebarDrawerWidth }}
                animate={{
                  x: 0,
-                 width: sidebarExpandingToHome ? '100%' : '62%'
+                 width: projectSidebarDrawerWidth
                }}
-               exit={{ x: '-100%' }}
+               exit={
+                 homeOverlayExitInstant
+                   ? { opacity: 0, transition: { duration: 0 } }
+                   : { x: '-100%' }
+               }
                transition={{
                  x: {
                    type: 'tween',
@@ -1178,15 +1367,25 @@ export default function App() {
              >
               <ProjectManager 
                  isSidebar
-                 expandToHomeLayout={sidebarExpandingToHome}
+                 expandToHomeLayout={sidebarExpandingToHome || sidebarExpandForProjectSwitch}
+                 transitionListOnly={projectManagerTransitionListOnly}
+                 sidebarExpandingToHome={sidebarExpandingToHome}
+                clearSelectionInTransition={sidebarExpandingToHome}
+                 showHomeDataCleanupButton={!activeProject}
+                 homeCleanupMenuOpen={showCleanupMenu}
+                 onHomeCleanupMenuToggle={() => setShowCleanupMenu(!showCleanupMenu)}
+                 onHomeCleanupOrphanedData={handleCleanupOrphanedData}
+                 isHomeCleanupRunning={isRunningCleanup}
+                 showProjectLoadBar={isLoadingProject && !isDeletingProject}
+                 projectLoadProgress={loadingProgress}
                  projects={summariesToProjects(projectSummaries)}
                  currentProjectId={currentProjectId}
                  onCreateProject={handleCreateProject}
                  onSelectProject={handleSelectProject}
                  onDeleteProject={handleDeleteProject}
          onUpdateProject={handleUpdateProject}
-                 onDuplicateProject={handleDuplicateProject}
-                  onCloseSidebar={() => setIsSidebarOpen(false)}
+                  onDuplicateProject={handleDuplicateProject}
+                  onCloseSidebar={closeProjectSidebar}
                   onBackToHome={handleBackToHome}
                   viewMode={viewMode}
                   activeProject={activeProject}
@@ -1196,6 +1395,10 @@ export default function App() {
                   onCheckData={handleCheckData}
                   themeColor={themeColor}
                   onThemeColorChange={handleThemeColorChange}
+                  mapUiChromeOpacity={mapUiChromeOpacity}
+                  onMapUiChromeOpacityChange={handleMapUiChromeOpacityChange}
+ mapUiChromeBlurPx={mapUiChromeBlurPx}
+                  onMapUiChromeBlurPxChange={handleMapUiChromeBlurPxChange}
                   currentMapStyle={mapStyle}
                   onMapStyleChange={(styleId) => {
                     setMapStyle(styleId);
@@ -1208,7 +1411,7 @@ export default function App() {
       </AnimatePresence>
 
       <div
-        className={`flex-1 relative min-h-0 overflow-hidden z-0${viewMode === 'table' || viewMode === 'graph' ? ` ${tableGraphDataFileDrop.rootProps.className}` : ''}`}
+        className={`relative z-0 min-h-0 flex-1 overflow-hidden${viewMode === 'table' || viewMode === 'graph' ? ` ${tableGraphDataFileDrop.rootProps.className}` : ''}`}
         style={viewMode === 'table' || viewMode === 'graph' ? tableGraphDataFileDrop.rootProps.style : undefined}
         onDragEnter={viewMode === 'table' || viewMode === 'graph' ? tableGraphDataFileDrop.rootProps.onDragEnter : undefined}
         onDragOver={viewMode === 'table' || viewMode === 'graph' ? tableGraphDataFileDrop.rootProps.onDragOver : undefined}
@@ -1216,17 +1419,21 @@ export default function App() {
         onDrop={viewMode === 'table' || viewMode === 'graph' ? tableGraphDataFileDrop.rootProps.onDrop : undefined}
         onDragEnd={viewMode === 'table' || viewMode === 'graph' ? tableGraphDataFileDrop.rootProps.onDragEnd : undefined}
       >
-        
+        {activeProject ? (
+          <>
         {/* 同步状态指示器 - 只在侧边栏打开时显示（在侧边栏内） */}
         {/* 主视图中不再显示云图标，统一在侧边栏显示 */}
         
         {!isEditorOpen &&
           (!mappingWorkspaceEditMode || viewMode === 'board') &&
-          isUIVisible && (
+          isUIVisible &&
+          !isSidebarOpen && (
           <button
              onClick={(e) => {
                // 只有在没有拖动时才触发点击
                if (!sidebarButtonDragRef.current.isDragging) {
+                 setSidebarExpandForProjectSwitch(false);
+                 setSidebarDockedInline(false);
                  setIsSidebarOpen(true);
                }
              }}
@@ -1518,9 +1725,19 @@ export default function App() {
             onUpdateProject={handleUpdateProject}
           />
         )}
+          </>
+        ) : pendingEnterWorkspaceFromHome || isLoadingProject ? (
+          <div className="flex h-full min-h-[12rem] flex-1 flex-col items-center justify-center gap-3 bg-gray-100 text-gray-600">
+            <Loader2 size={32} className="animate-spin shrink-0" aria-hidden />
+            <span className="text-sm font-medium">加载项目…</span>
+          </div>
+        ) : (
+          <div className="h-full min-h-0 flex-1 bg-gray-100" aria-hidden />
+        )}
       </div>
 
       {!isEditorOpen &&
+        activeProject &&
         (!mappingWorkspaceEditMode || viewMode === 'board') &&
         isUIVisible && (
         <div
@@ -1596,8 +1813,9 @@ export default function App() {
           </button>
         </div>
       )}
-        </>
-      )}
+            </div>
+        </div>
+      </div>
 
     </div>
     </EditInspectorProvider>

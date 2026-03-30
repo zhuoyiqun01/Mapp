@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Settings, Map, SlidersHorizontal, LayoutGrid, Network, Table2 } from 'lucide-react';
+import { X, Settings, Map, SlidersHorizontal, Grid, GitBranch, Table2 } from 'lucide-react';
 import { set } from 'idb-keyval';
 import { MAP_STYLE_OPTIONS } from '../constants';
 import type { Project } from '../types';
 import { GraphStyleSettingsBlock } from './GraphStyleSettingsBlock';
 import { ThemeColorPicker } from './ThemeColorPicker';
-import { AppearanceSettingsBlock } from './AppearanceSettingsBlock';
 import { HelpHint } from './ui/HelpHint';
 import { SettingsCollapsibleSection } from './ui/SettingsCollapsibleSection';
 import { SettingsCompactSlider } from './ui/SettingsCompactSlider';
@@ -114,28 +113,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
         {/* Content */}
           <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-4 theme-surface-scrollbar">
-          <SettingsCollapsibleSection
-            title="界面外观"
-            icon={<SlidersHorizontal size={18} />}
-            defaultOpen={false}
-            themeColor={themeColor}
-            hint={
-              <HelpHint>
-                统一调整应用中的主题强调色，以及地图与相关面板的玻璃效果（白底区域透明度与背景模糊）。进入项目后地图浮层会立即套用。
-              </HelpHint>
-            }
-          >
-            <AppearanceSettingsBlock
-              themeColor={themeColor}
-              onRequestThemeEdit={() => setShowThemeColorPicker(true)}
-              mapUiChromeOpacity={mapUiChromeOpacity}
-              onMapUiChromeOpacityChange={onMapUiChromeOpacityChange}
-              mapUiChromeBlurPx={mapUiChromeBlurPx}
-              onMapUiChromeBlurPxChange={onMapUiChromeBlurPxChange}
-              showSectionHeading={false}
-            />
-          </SettingsCollapsibleSection>
-
           <SettingsCollapsibleSection
             title="Mapping Style"
             icon={<Map size={18} />}
@@ -246,7 +223,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
           <SettingsCollapsibleSection
             title="Board Style"
-            icon={<LayoutGrid size={18} />}
+            icon={<Grid size={18} />}
             defaultOpen={openBoard}
             themeColor={themeColor}
           >
@@ -255,7 +232,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
           <SettingsCollapsibleSection
             title="Graph Style"
-            icon={<Network size={18} />}
+            icon={<GitBranch size={18} />}
             defaultOpen={openGraph}
             themeColor={themeColor}
           >

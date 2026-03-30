@@ -14,9 +14,8 @@
   /* 与 useAppState / App 中主题默认值一致，首屏未跑 JS 前作回退 */
   --theme-color: #3b82f6;
   --theme-color-dark: #3566d6;
-  --theme-scrollbar-thumb: rgba(255, 255, 255, 0.42);
-  --theme-scrollbar-thumb-hover: rgba(255, 255, 255, 0.58);
-  --theme-scrollbar-track: rgba(255, 255, 255, 0.14);
+  --theme-scrollbar-thumb: #ffffff;
+  --theme-scrollbar-thumb-hover: #e8e8e8;
   /* 与 mapChromeSurfaceStyle / App 状态同步，避免再叠一层 Tailwind backdrop-blur */
   --map-ui-chrome-opacity: 0.9;
   --map-ui-chrome-blur-px: 8px;
@@ -53,10 +52,10 @@ body {
   display: none;  /* Chrome, Safari and Opera */
 }
 
-/* 铺在主题色上（主页 / 侧边栏）：由 applyThemeChromeCssVars 写入 --theme-scrollbar-* */
+/* 铺在主题色上（主页 / 侧边栏）：拇指实色与 --theme-chrome-fg 一致，由 applyThemeChromeCssVars 写入 */
 .theme-surface-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: var(--theme-scrollbar-thumb) var(--theme-scrollbar-track);
+  scrollbar-color: var(--theme-scrollbar-thumb) transparent;
 }
 
 .theme-surface-scrollbar::-webkit-scrollbar {
@@ -65,8 +64,7 @@ body {
 }
 
 .theme-surface-scrollbar::-webkit-scrollbar-track {
-  background: var(--theme-scrollbar-track);
-  border-radius: 9999px;
+  background: transparent;
 }
 
 .theme-surface-scrollbar::-webkit-scrollbar-thumb {
@@ -76,6 +74,32 @@ body {
 
 .theme-surface-scrollbar::-webkit-scrollbar-thumb:hover {
   background: var(--theme-scrollbar-thumb-hover);
+}
+
+/** ProjectManager：项目加载细分条在进度尚低时的 indeterminate 扫光 */
+@keyframes project-manager-load-indeterminate {
+  0% {
+    left: -40%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+.project-manager-load-bar-fill--indeterminate {
+  left: -40%;
+  width: 32%;
+  animation: project-manager-load-indeterminate 1.05s ease-in-out infinite;
+  will-change: left;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-manager-load-bar-fill--indeterminate {
+    animation: none;
+    left: 10%;
+    width: 40%;
+    opacity: 0.85;
+  }
 }
 
 /** 无 panelChromeStyle 内联时，与 mapChromeSurfaceStyle 同一套变量（由 App 写入根节点） */

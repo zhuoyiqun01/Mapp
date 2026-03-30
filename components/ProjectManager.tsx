@@ -1,14 +1,78 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Project, Note } from '../types';
-import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check, Upload, Settings, ZoomIn, Copy } from 'lucide-react';
+import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check, Upload, Palette, ZoomIn, Copy, RefreshCw } from 'lucide-react';
 import { generateId, formatDate, exportToJpeg, exportToJpegCentered, compressImageFromBase64 } from '../utils';
 import { loadProject, loadNoteImages, saveProject, loadAllProjects } from '../utils/persistence/storage';
 import { getLastSyncTime, type SyncStatus } from '../utils/persistence/sync';
-import { DEFAULT_THEME_COLOR } from '../constants';
+import { AnimatePresence } from 'framer-motion';
+import {
+  DEFAULT_THEME_COLOR,
+  PROJECT_OPEN_SLIDE_DURATION_S,
+  PROJECT_OPEN_SLIDE_EASE,
+  PROJECT_SIDEBAR_DRAWER_WIDTH_PX
+} from '../constants';
 import { ThemeColorPicker } from './ThemeColorPicker';
 import { AppearanceSettingsBlock } from './AppearanceSettingsBlock';
 import { mapChromeSurfaceStyle, mapChromeHoverBackground } from '../utils/map/mapChromeStyle';
+import { MotionDiv } from './ui/MotionDiv';
+
+/** 项目「更多」菜单 portal：高于侧栏与覆盖层，低于删除项目阻断层 10000 */
+const PM_PROJECT_MORE_MENU_Z = 9901;
+
+function computeProjectMoreMenuFixedStyle(
+  row: DOMRectReadOnly,
+  button: DOMRectReadOnly,
+  fullWidth: boolean,
+  vw: number,
+  vh: number
+): React.CSSProperties {
+  const gap = 8;
+  const estH = 280;
+  const zIndex = PM_PROJECT_MORE_MENU_Z;
+  if (fullWidth) {
+    const spaceBelow = vh - row.bottom;
+    const spaceAbove = row.top;
+    const openUp = spaceBelow < estH + gap && spaceAbove > spaceBelow;
+    const maxH = Math.min(
+      vh * 0.6,
+      openUp ? Math.max(120, row.top - gap * 2) : Math.max(120, vh - row.bottom - gap * 2)
+    );
+    const left = Math.max(gap, Math.min(row.left, vw - gap));
+    const width = Math.min(row.width, vw - left - gap);
+    const base: React.CSSProperties = {
+      position: 'fixed',
+      left,
+      width: Math.max(120, width),
+      maxHeight: maxH,
+      zIndex
+    };
+    if (openUp) {
+      return { ...base, bottom: vh - row.top + gap, top: 'auto' };
+    }
+    return { ...base, top: row.bottom + gap, bottom: 'auto' };
+  }
+  const w = 192;
+  const spaceBelow = vh - button.bottom;
+  const spaceAbove = button.top;
+  const openUp = spaceBelow < estH + gap && spaceAbove > spaceBelow;
+  const maxH = Math.min(
+    vh * 0.6,
+    openUp ? Math.max(120, button.top - gap * 2) : Math.max(120, vh - button.bottom - gap * 2)
+  );
+  const left = Math.max(gap, Math.min(button.right - w, vw - w - gap));
+  const base: React.CSSProperties = {
+    position: 'fixed',
+    left,
+    width: w,
+    maxHeight: maxH,
+    zIndex
+  };
+  if (openUp) {
+    return { ...base, bottom: vh - button.top + gap, top: 'auto' };
+  }
+  return { ...base, top: button.bottom + gap, bottom: 'auto' };
+}
 
 // Export resolution dialog component
 const ExportResolutionDialog: React.FC<{
@@ -170,7 +234,7 @@ const ExportResolutionDialog: React.FC<{
   );
 };
 
-// Menu dropdown component that adjusts position to avoid going off-screen
+/** 更多菜单：mapChrome 实色 + 模糊由 surfaceStyle 提供；几何由 fixedPlacementStyle（portal fixed） */
 const MenuDropdown: React.FC<{
   project: Project;
   onRename: (projectId: string) => void;
@@ -183,38 +247,30 @@ const MenuDropdown: React.FC<{
   onDelete: (id: string) => void;
   onClose: () => void;
   surfaceStyle: React.CSSProperties;
-}> = ({ project, onRename, onDuplicate, onExportData, onExportFullProject, onCompressImages, onCheckData, onCleanupBrokenReferences, onDelete, onClose, surfaceStyle }) => {
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState<'bottom' | 'top'>('bottom');
-
-  useEffect(() => {
-    if (menuRef.current) {
-      // Find the button that triggered this menu (previous sibling)
-      const buttonElement = menuRef.current.parentElement?.querySelector('button[class*="rounded-full"]') as HTMLElement;
-      
-      if (buttonElement) {
-        const buttonRect = buttonElement.getBoundingClientRect();
-        const estimatedMenuHeight = 220; // Approximate menu height
-        const spaceBelow = window.innerHeight - buttonRect.bottom;
-        const spaceAbove = buttonRect.top;
-        
-        // If not enough space below but enough space above, show above
-        if (spaceBelow < estimatedMenuHeight + 20 && spaceAbove > spaceBelow) {
-          setPosition('top');
-        } else {
-          setPosition('bottom');
-        }
-      }
-    }
-  }, []);
-
+  fixedPlacementStyle: React.CSSProperties;
+  motionOriginClass: 'origin-top' | 'origin-top-right';
+}> = ({
+  project,
+  onRename,
+  onDuplicate,
+  onExportData,
+  onExportFullProject,
+  onCompressImages,
+  onCheckData,
+  onCleanupBrokenReferences,
+  onDelete,
+  onClose,
+  surfaceStyle,
+  fixedPlacementStyle,
+  motionOriginClass
+}) => {
   return (
     <div 
-      ref={menuRef}
-      className={`absolute right-0 w-48 max-h-[60vh] overflow-auto theme-surface-scrollbar rounded-xl shadow-xl z-[2030] border border-gray-200/80 py-1 animate-in fade-in zoom-in-95 origin-top-right ${
-        position === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'
-      }`}
-      style={surfaceStyle}
+      data-pm-more-menu
+      className={`overflow-y-auto theme-surface-scrollbar rounded-xl shadow-xl border border-white/50 py-1 animate-in fade-in zoom-in-95 ${motionOriginClass}`}
+      style={{ ...surfaceStyle, ...fixedPlacementStyle }}
+      onClick={(e) => e.stopPropagation()}
+      role="menu"
     >
       <button
         onClick={() => { onRename(project.id); onClose(); }}
@@ -260,7 +316,7 @@ const MenuDropdown: React.FC<{
             }}
             className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
           >
-            <Settings size={16} /> Check Data
+                      <Palette size={16} /> Check Data
           </button>
           <div className="h-px bg-gray-100 my-1" />
         </>
@@ -300,6 +356,12 @@ interface ProjectManagerProps {
   isSidebar?: boolean;
   /** 侧栏向右展成全宽过渡为「主页」布局：列表同主页（居中、项项带框） */
   expandToHomeLayout?: boolean;
+  /** 纯主页时显示右上角「清理数据」入口（由 App 持有菜单状态） */
+  showHomeDataCleanupButton?: boolean;
+  homeCleanupMenuOpen?: boolean;
+  onHomeCleanupMenuToggle?: () => void;
+  onHomeCleanupOrphanedData?: (forceDeleteDuplicates: boolean) => void | Promise<void>;
+  isHomeCleanupRunning?: boolean;
   onCloseSidebar?: () => void;
   onBackToHome?: () => void;
   viewMode?: 'map' | 'board' | 'table' | 'graph';
@@ -316,6 +378,17 @@ interface ProjectManagerProps {
   onMapUiChromeBlurPxChange?: (blurPx: number) => void;
   currentMapStyle?: string;
   onMapStyleChange?: (styleId: string) => void;
+  /** 加载项目：面板顶部分条，避免全屏遮罩 */
+  showProjectLoadBar?: boolean;
+  projectLoadProgress?: number;
+  /**
+   * 全屏壳「中间态」：只保留项目列表（与主页营销/设置/清理/New Project 等装饰分离），便于与主页之间做共享元素动效。
+   */
+  transitionListOnly?: boolean;
+  /** 从项目回主页：已清空 current 但仍处于展开宽度过渡尾部，用于与主页共用同一套列表布局、避免瞬切 */
+  sidebarExpandingToHome?: boolean;
+  /** 仅取消“选中态高亮”（保持可见行收束逻辑不变） */
+  clearSelectionInTransition?: boolean;
 }
 
 export const ProjectManager: React.FC<ProjectManagerProps> = ({
@@ -329,6 +402,11 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   syncStatus,
   isSidebar = false,
   expandToHomeLayout = false,
+  showHomeDataCleanupButton = false,
+  homeCleanupMenuOpen = false,
+  onHomeCleanupMenuToggle,
+  onHomeCleanupOrphanedData,
+  isHomeCleanupRunning = false,
   onCloseSidebar,
   onBackToHome,
   viewMode = 'map',
@@ -343,7 +421,12 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   mapUiChromeBlurPx = 8,
   onMapUiChromeBlurPxChange,
   currentMapStyle = 'carto-light-nolabels',
-  onMapStyleChange
+  onMapStyleChange,
+  showProjectLoadBar = false,
+  projectLoadProgress = 0,
+  transitionListOnly = false,
+  sidebarExpandingToHome = false,
+  clearSelectionInTransition = false
 }) => {
   // Helper function to calculate darker version of theme color
   const getDarkerColor = (color: string): string => {
@@ -362,6 +445,8 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   };
   
   const themeColorDark = getDarkerColor(themeColor);
+  const mapChromeSurface = mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx);
+  const mapChromeHoverBg = mapChromeHoverBackground(mapUiChromeOpacity);
   const [isCreating, setIsCreating] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -373,11 +458,15 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [showThemeColorPicker, setShowThemeColorPicker] = useState(false);
   const [showHomeSettings, setShowHomeSettings] = useState(false);
+  const [showAppearanceSettingsBlockInSettings, setShowAppearanceSettingsBlockInSettings] = useState(true);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [pendingExport, setPendingExport] = useState<{ elementId: string; fileName: string } | null>(null);
-  const [homeCardHoverId, setHomeCardHoverId] = useState<string | null>(null);
-  const [settingsFabHover, setSettingsFabHover] = useState(false);
   const [newProjectHover, setNewProjectHover] = useState(false);
+  const [hoveredProjectRowId, setHoveredProjectRowId] = useState<string | null>(null);
+  const [projectMoreAnchor, setProjectMoreAnchor] = useState<{
+    row: DOMRectReadOnly;
+    button: DOMRectReadOnly;
+  } | null>(null);
 
   const handleCreate = () => {
     if (!newProjectName.trim()) return;
@@ -1043,67 +1132,171 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     }
   };
 
-  const homeLikeList = !isSidebar || expandToHomeLayout;
+  /** 回主页收尾：已无当前项目但仍在 expand 动画尾部 → 用主页壳与列表布局，只在之后一帧再关 transitionListOnly */
+  const finishingReturnToHomeLayout =
+    isSidebar && !!sidebarExpandingToHome && !activeProject;
+  const useTransitionShell =
+    !!transitionListOnly && !finishingReturnToHomeLayout;
 
-  const containerClass = expandToHomeLayout
-    ? "h-full w-full overflow-y-auto theme-surface-scrollbar flex flex-col items-center justify-start pt-24 pb-0 p-4 relative"
-    : isSidebar
-      ? "h-full w-full shadow-2xl flex flex-col border-r overflow-hidden"
-      : "w-full h-[100dvh] min-h-0 overflow-y-auto theme-surface-scrollbar flex flex-col items-center justify-start pt-40 pb-0 p-4 relative";
+  const homeLikeList =
+    (!isSidebar || expandToHomeLayout) &&
+    (!transitionListOnly || finishingReturnToHomeLayout);
+  const compactProjectList =
+    (isSidebar && !expandToHomeLayout) ||
+    (transitionListOnly && !finishingReturnToHomeLayout);
 
-  const titleClass = isSidebar && !expandToHomeLayout
-    ? "hidden"
-    : "text-6xl md:text-8xl font-black text-theme-chrome-fg tracking-tighter mb-12 text-center drop-shadow-sm leading-[0.9] flex flex-col";
+  const containerClass = useTransitionShell
+    ? 'h-full w-full min-h-0 overflow-hidden flex flex-col relative'
+    : expandToHomeLayout
+      ? isSidebar
+        ? 'h-full w-full min-h-0 flex flex-col items-center justify-start pt-24 pb-0 p-4 relative shadow-2xl border-r'
+        : 'h-full w-full min-h-0 flex flex-col items-center justify-start pt-24 pb-0 p-4 relative'
+      : isSidebar
+        ? 'h-full w-full shadow-2xl flex flex-col border-r overflow-hidden'
+        : 'w-full h-[100dvh] min-h-0 overflow-y-auto theme-surface-scrollbar flex flex-col items-center justify-start pt-40 pb-0 p-4 relative';
 
-  return (
-    <div 
-      className={`${containerClass} ${isDragging ? 'ring-4 ring-offset-2' : ''}`}
-      style={{
-        backgroundColor: themeColor,
-        borderColor: isSidebar && !expandToHomeLayout ? themeColor : undefined,
-        boxShadow: isDragging ? `0 0 0 4px ${themeColor}` : undefined
-      }}
-      onDragEnter={handleDragEnter}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-    >
-      {isDragging && (
-        <div className="fixed inset-0 z-[4000] flex items-center justify-center pointer-events-none" style={{ backgroundColor: `${themeColor}33` }}>
-          <div
-            className="rounded-2xl shadow-2xl p-8 border-4 border-solid"
-            style={{
-              borderColor: themeColor,
-              ...mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx)
-            }}
-          >
-            <div className="text-center">
-              <div className="text-4xl mb-4">📁</div>
-              <div className="text-xl font-bold text-gray-800">Drop JSON file to merge project</div>
-              <div className="text-sm text-gray-600 mt-2">Duplicate data will be automatically skipped</div>
+  const titleClass =
+    'text-6xl md:text-8xl font-black text-theme-chrome-fg tracking-tighter mb-12 text-center drop-shadow-sm leading-[0.9] flex flex-col';
+
+  useLayoutEffect(() => {
+    if (!openMenuId || homeLikeList) {
+      setProjectMoreAnchor(null);
+      return;
+    }
+    const update = () => {
+      const row = document.querySelector(
+        `[data-pm-project-row="${CSS.escape(openMenuId)}"]`
+      ) as HTMLElement | null;
+      const btn = row?.querySelector('[data-pm-more-btn]') as HTMLElement | null;
+      if (row && btn) {
+        setProjectMoreAnchor({
+          row: row.getBoundingClientRect(),
+          button: btn.getBoundingClientRect()
+        });
+      }
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [openMenuId, homeLikeList]);
+
+  /** 点菜单外空白关闭「更多」（无蒙层）；保留菜单内与任意「更多」按钮上的点击 */
+  useEffect(() => {
+    if (!openMenuId) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const t = e.target;
+      const el = t instanceof Element ? t : (t as Node | null)?.parentElement;
+      if (!el) return;
+      if (el.closest('[data-pm-more-menu]')) return;
+      if (el.closest('[data-pm-more-btn]')) return;
+      setOpenMenuId(null);
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => document.removeEventListener('pointerdown', onPointerDown, true);
+  }, [openMenuId]);
+
+  const mainHomeChrome = (
+    <>
+      {showHomeDataCleanupButton &&
+        !transitionListOnly &&
+        homeLikeList &&
+        onHomeCleanupMenuToggle &&
+        onHomeCleanupOrphanedData && (
+          <>
+            <div className="pointer-events-auto absolute top-4 right-4 z-[2010]">
+              <button
+                type="button"
+                onClick={() => onHomeCleanupMenuToggle()}
+                disabled={isHomeCleanupRunning}
+                className="relative flex h-10 w-10 items-center justify-center rounded-xl text-theme-chrome-fg transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50"
+                style={{ backgroundColor: themeColor }}
+                title="清理数据选项"
+                onMouseEnter={(e) => {
+                  if (!isHomeCleanupRunning) e.currentTarget.style.backgroundColor = themeColorDark;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = themeColor;
+                }}
+              >
+                <RefreshCw
+                  size={20}
+                  strokeWidth={2}
+                  className={isHomeCleanupRunning ? 'animate-spin' : ''}
+                  aria-hidden
+                />
+              </button>
+              {homeCleanupMenuOpen && (
+                <div className="absolute top-full right-0 z-[2020] mt-2 min-w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-xl">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onHomeCleanupMenuToggle();
+                      void onHomeCleanupOrphanedData(false);
+                    }}
+                    disabled={isHomeCleanupRunning}
+                    className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm transition-colors hover:bg-gray-50"
+                  >
+                    <RefreshCw size={16} className="text-green-600" />
+                    <div>
+                      <div className="font-medium">安全清理</div>
+                      <div className="text-xs text-gray-500">只清理孤立数据和普通重复</div>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onHomeCleanupMenuToggle();
+                      void onHomeCleanupOrphanedData(true);
+                    }}
+                    disabled={isHomeCleanupRunning}
+                    className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm transition-colors hover:bg-red-50"
+                  >
+                    <RefreshCw size={16} className="text-red-600" />
+                    <div>
+                      <div className="font-medium">深度清理</div>
+                      <div className="text-xs text-gray-500">清理所有重复（包括可疑的）</div>
+                    </div>
+                  </button>
+                </div>
+              )}
             </div>
-          </div>
-        </div>
-      )}
-      {/* 主页 / 全宽「启动」层：设置；侧栏仅在展开且无打开项目时显示（与独立主页同款） */}
-      {(!isSidebar || (expandToHomeLayout && !activeProject)) &&
+            {homeCleanupMenuOpen && (
+              <div
+                className="fixed inset-0 z-[2005]"
+                onClick={() => onHomeCleanupMenuToggle()}
+                aria-hidden
+              />
+            )}
+          </>
+        )}
+      {/* 全屏启动页或侧栏展成主页布局：设置入口与 chrome 设定一致，与当前是否打开项目无关 */}
+      {(!isSidebar || expandToHomeLayout) &&
+        !transitionListOnly &&
         onThemeColorChange &&
         onMapUiChromeOpacityChange &&
         onMapUiChromeBlurPxChange && (
         <>
           <button
             type="button"
-            onClick={() => setShowHomeSettings(true)}
-            className="absolute top-4 left-4 z-[2010] p-2.5 rounded-xl shadow-lg border border-white/40 text-gray-700 transition-colors pointer-events-auto"
-            title="设置"
-            style={{
-              ...mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx),
-              ...(settingsFabHover ? { backgroundColor: mapChromeHoverBackground(mapUiChromeOpacity) } : {})
+            onClick={() => {
+              setShowAppearanceSettingsBlockInSettings(true);
+              setShowHomeSettings(true);
             }}
-            onMouseEnter={() => setSettingsFabHover(true)}
-            onMouseLeave={() => setSettingsFabHover(false)}
+            className="absolute top-4 left-4 z-[2010] flex h-10 w-10 items-center justify-center rounded-xl text-theme-chrome-fg transition-colors pointer-events-auto"
+            title="设置"
+            style={{ backgroundColor: themeColor }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = themeColorDark;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = themeColor;
+            }}
           >
-            <Settings size={22} />
+            <Palette size={22} strokeWidth={2} aria-hidden />
           </button>
           {showHomeSettings &&
             typeof document !== 'undefined' &&
@@ -1121,11 +1314,11 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                 >
                   <div
                     className="rounded-xl shadow-2xl flex flex-col max-h-[min(85dvh,85vh)] overflow-hidden border border-gray-200/80"
-                    style={mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx)}
+                    style={mapChromeSurface}
                   >
                     <div className="flex items-center justify-between px-4 py-3 shrink-0">
                       <div className="flex items-center gap-2">
-                        <Settings size={20} className="text-gray-700" />
+                        <Palette size={20} className="text-gray-700" />
                         <h2 className="text-xl font-semibold text-gray-900">设置</h2>
                       </div>
                       <button
@@ -1137,16 +1330,18 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                       </button>
                     </div>
                     <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-4 theme-surface-scrollbar">
-                      <AppearanceSettingsBlock
-                        themeColor={themeColor}
-                        onRequestThemeEdit={() => {
-                          setShowThemeColorPicker(true);
-                        }}
-                        mapUiChromeOpacity={mapUiChromeOpacity}
-                        onMapUiChromeOpacityChange={onMapUiChromeOpacityChange}
-                        mapUiChromeBlurPx={mapUiChromeBlurPx}
-                        onMapUiChromeBlurPxChange={onMapUiChromeBlurPxChange}
-                      />
+                      {showAppearanceSettingsBlockInSettings ? (
+                        <AppearanceSettingsBlock
+                          themeColor={themeColor}
+                          onRequestThemeEdit={() => {
+                            setShowThemeColorPicker(true);
+                          }}
+                          mapUiChromeOpacity={mapUiChromeOpacity}
+                          onMapUiChromeOpacityChange={onMapUiChromeOpacityChange}
+                          mapUiChromeBlurPx={mapUiChromeBlurPx}
+                          onMapUiChromeBlurPxChange={onMapUiChromeBlurPxChange}
+                        />
+                      ) : null}
                     </div>
                   </div>
                 </div>
@@ -1156,19 +1351,54 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         </>
       )}
 
-      {isSidebar && !expandToHomeLayout && (
+      {transitionListOnly && activeProject && onCloseSidebar && (
+        <button
+          type="button"
+          onClick={onCloseSidebar}
+          className="pointer-events-auto absolute top-3 right-4 z-[2010] flex h-10 w-10 items-center justify-center rounded-xl text-theme-chrome-fg transition-colors"
+          style={{ backgroundColor: themeColor }}
+          title="关闭"
+          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = themeColorDark)}
+          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = themeColor)}
+          aria-label="关闭项目列表"
+        >
+          <X size={22} strokeWidth={2} aria-hidden />
+        </button>
+      )}
+
+      {isSidebar && !expandToHomeLayout && !transitionListOnly && (
         <>
-          <button
-            onClick={() => {
-              if (onBackToHome) onBackToHome();
-            }} 
-            className="absolute top-4 left-4 p-2 rounded-xl text-theme-chrome-fg transition-colors z-[2010]"
-            style={{ backgroundColor: themeColor }}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = themeColorDark}
-            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
-          >
-            <Home size={24} />
-          </button>
+          <div className="absolute top-4 left-4 z-[2010] flex items-center gap-2">
+            <button
+              onClick={() => {
+                if (onBackToHome) onBackToHome();
+              }}
+              className="p-2 rounded-xl text-theme-chrome-fg transition-colors"
+              style={{ backgroundColor: themeColor }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = themeColorDark}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
+            >
+              <Home size={24} />
+            </button>
+            {onThemeColorChange &&
+              onMapUiChromeOpacityChange &&
+              onMapUiChromeBlurPxChange && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAppearanceSettingsBlockInSettings(true);
+                    setShowHomeSettings(true);
+                  }}
+                  className="p-2 rounded-xl text-theme-chrome-fg transition-colors"
+                  style={{ backgroundColor: themeColor }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = themeColorDark)}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = themeColor)}
+                  title="设置"
+                >
+                  <Palette size={22} strokeWidth={2} aria-hidden />
+                </button>
+              )}
+          </div>
           <div className="absolute top-4 right-4 z-[2000] flex items-center gap-2">
             {activeProject && syncStatus === 'idle' && getLastSyncTime() && (
               <div
@@ -1206,48 +1436,67 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         </>
       )}
 
-      <div
-        className={
-          isSidebar && !expandToHomeLayout
-            ? 'p-6 pt-28 border-b flex-shrink-0'
-            : 'flex flex-col items-center'
-        }
-        style={isSidebar && !expandToHomeLayout ? { borderColor: `${themeColor}33` } : undefined}
-      >
-        {homeLikeList && (
-          <>
-          <h1 className={titleClass}>
-            <span>START</span>
-            <span>YOUR</span>
-            <span>MAPPING</span>
-          </h1>
-        
-            {/* New Project Button */}
-          <button
-            type="button"
-            onClick={() => setIsCreating(true)}
-            className="mt-8 px-8 py-4 text-black rounded-full font-bold text-lg shadow-xl border border-white/50 hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
-            style={{
-              ...mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx),
-              ...(newProjectHover ? { backgroundColor: mapChromeHoverBackground(mapUiChromeOpacity) } : {})
+      {/* popLayout：hero 开始离场时即从 flex 占位中移除，列表可与中间态同步上移 */}
+      <AnimatePresence initial={false} mode="popLayout">
+        {homeLikeList ? (
+          <MotionDiv
+            key="pm-home-hero"
+            className="relative z-[5] flex w-full shrink-0 flex-col items-center overflow-visible"
+            initial={{ y: '-8rem', opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: '-8rem', opacity: 0 }}
+            transition={{
+              duration: PROJECT_OPEN_SLIDE_DURATION_S,
+              ease: PROJECT_OPEN_SLIDE_EASE
             }}
-            onMouseEnter={() => setNewProjectHover(true)}
-            onMouseLeave={() => setNewProjectHover(false)}
+            style={{ willChange: 'transform, opacity' }}
           >
-            <Plus size={24} /> New Project
-          </button>
-          </>
-        )}
-      </div>
+            <h1 className={titleClass}>
+              <span>START</span>
+              <span>YOUR</span>
+              <span>MAPPING</span>
+            </h1>
 
-      <div
+            <button
+              type="button"
+              onClick={() => setIsCreating(true)}
+              className="mt-8 px-8 py-4 text-black rounded-full font-bold text-lg shadow-xl border border-white/50 hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
+              style={{
+                ...mapChromeSurface,
+                ...(newProjectHover ? { backgroundColor: mapChromeHoverBg } : {})
+              }}
+              onMouseEnter={() => setNewProjectHover(true)}
+              onMouseLeave={() => setNewProjectHover(false)}
+            >
+              <Plus size={24} /> New Project
+            </button>
+          </MotionDiv>
+        ) : null}
+      </AnimatePresence>
+
+      <MotionDiv
+        layout
+        layoutScroll
+        transition={{
+          layout: {
+            type: 'tween',
+            duration: PROJECT_OPEN_SLIDE_DURATION_S,
+            ease: PROJECT_OPEN_SLIDE_EASE
+          }
+        }}
         className={
-          isSidebar && !expandToHomeLayout
-            ? 'flex-1 overflow-y-auto theme-surface-scrollbar w-full p-4'
-            : 'w-full max-w-md mt-8 bg-transparent p-4 pb-8'
+          isSidebar
+          ? `min-h-0 flex-1 w-full max-w-md mx-auto overflow-y-auto overscroll-contain ${
+              transitionListOnly ? 'scrollbar-hide' : 'theme-surface-scrollbar'
+            } px-4 ${compactProjectList ? 'pt-28 pb-4' : 'mt-8 pb-8'}`
+            : compactProjectList
+            ? `flex-1 overflow-y-auto overscroll-contain ${
+                transitionListOnly ? 'scrollbar-hide' : 'theme-surface-scrollbar'
+              } w-full px-4 pb-4 ${transitionListOnly ? 'pt-14' : 'pt-28'}`
+              : 'min-h-0 flex-1 w-full max-w-md mt-8 overflow-y-auto overscroll-contain theme-surface-scrollbar bg-transparent p-4 pb-8'
         }
         style={
-          isSidebar && !expandToHomeLayout
+          compactProjectList
             ? {
                 touchAction: 'pan-y',
                 overscrollBehavior: 'contain',
@@ -1256,46 +1505,77 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
             : {}
         }
         onTouchStart={(e) => {
-          if (isSidebar && !expandToHomeLayout) {
+          if (compactProjectList) {
             e.stopPropagation();
           }
         }}
         onTouchMove={(e) => {
-          if (isSidebar && !expandToHomeLayout) {
+          if (compactProjectList) {
             e.stopPropagation();
           }
         }}
         onWheel={(e) => {
-          if (isSidebar && !expandToHomeLayout) {
+          if (compactProjectList) {
             e.stopPropagation();
           }
         }}
         onScroll={(e) => {
-          if (isSidebar && !expandToHomeLayout) {
+          if (compactProjectList) {
             e.stopPropagation();
           }
         }}
       >
         <div className="flex flex-col gap-3">
-          {projects.map(p => (
-            <div
+          {projects.map(p => {
+            // 仅在「项目 -> 主页」中间态取消选中高亮；收束可见行的逻辑仍使用原 currentProjectId。
+            const isCurrentOpen =
+              !clearSelectionInTransition &&
+              currentProjectId != null &&
+              p.id === currentProjectId;
+            const nonCurrentGlass =
+              !isCurrentOpen && hoveredProjectRowId === p.id && openMenuId !== p.id;
+            const onGlassPanel = isCurrentOpen || nonCurrentGlass;
+            const hideOtherWhenTransition =
+              transitionListOnly && currentProjectId != null && p.id !== currentProjectId;
+            const rowOpacity = hideOtherWhenTransition ? 0 : 1;
+            return (
+            <MotionDiv
               key={p.id}
-              className={`group relative flex items-center justify-between p-4 rounded-2xl transition-all shadow-lg border border-white/50 ${
-                p.id === currentProjectId ? 'text-black' : 'text-gray-800'
+              data-pm-project-row={p.id}
+              className={`group relative flex items-center justify-between rounded-2xl border border-solid p-4 transition-[color,box-shadow] duration-150 ease-out motion-reduce:transition-none ${
+                onGlassPanel
+                  ? 'border-white/50 text-black shadow-lg'
+                  : 'border-transparent text-theme-chrome-fg shadow-none'
               }`}
+              animate={{ opacity: rowOpacity }}
+              transition={{
+                opacity: {
+                  duration: PROJECT_OPEN_SLIDE_DURATION_S,
+                  ease: PROJECT_OPEN_SLIDE_EASE
+                }
+              }}
               style={{
-                ...mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx),
-                ...(p.id === currentProjectId
+                pointerEvents: hideOtherWhenTransition ? 'none' : undefined,
+                ...(isCurrentOpen
                   ? {
-                      backgroundColor: `rgba(255,255,255,${Math.min(1, mapUiChromeOpacity + 0.1)})`,
+                      ...mapChromeSurface,
+                      backgroundColor: mapChromeHoverBg,
                       boxShadow: `0 0 0 2px ${themeColor}`
                     }
-                  : homeCardHoverId === p.id
-                    ? { backgroundColor: mapChromeHoverBackground(mapUiChromeOpacity) }
-                    : {})
+                  : nonCurrentGlass
+                    ? { ...mapChromeSurface }
+                    : {
+                        backgroundColor: 'transparent',
+                        backdropFilter: 'none',
+                        WebkitBackdropFilter: 'none'
+                      })
               }}
-              onMouseEnter={() => setHomeCardHoverId(p.id)}
-              onMouseLeave={() => setHomeCardHoverId((id) => (id === p.id ? null : id))}
+              onMouseEnter={() => setHoveredProjectRowId(p.id)}
+              onMouseLeave={(e) => {
+                const related = e.relatedTarget as Node | null;
+                if (related && (e.currentTarget as HTMLElement).contains(related)) return;
+                setHoveredProjectRowId((id) => (id === p.id ? null : id));
+              }}
             >
               <div 
                 className="flex-1 cursor-pointer" 
@@ -1350,133 +1630,117 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                   <>
                     <div
                       className="font-bold text-lg leading-tight"
-                      style={{
-                        color: p.id === currentProjectId ? '#000' : undefined
-                      }}
+                      style={onGlassPanel ? { color: '#000' } : undefined}
                     >
                       {p.name}
                     </div>
-                    <div className="text-xs flex items-center gap-1 mt-1" style={{ color: 'rgba(0,0,0,0.4)' }}>
-                  <MapIcon size={12}/>
-                  {formatDate(p.createdAt)}
-                </div>
+                    <div
+                      className={`text-xs flex items-center gap-1 mt-1 ${
+                        onGlassPanel ? 'text-black/40' : 'text-theme-chrome-fg opacity-40'
+                      }`}
+                    >
+                      <MapIcon size={12} />
+                      {formatDate(p.createdAt)}
+                    </div>
                   </>
                 )}
               </div>
 
-              <div className="relative">
+              <div className="relative z-[1]">
                 <button 
-                  ref={(el) => {
-                    if (el && openMenuId === p.id) {
-                      // Store button reference for position calculation
-                      (el as any).__menuButton = true;
-                    }
-                  }}
+                  type="button"
+                  data-pm-more-btn
                   onClick={(e) => { 
                     e.stopPropagation(); 
                     setOpenMenuId(openMenuId === p.id ? null : p.id); 
                   }}
-                  className="p-2 rounded-full transition-colors"
-                  style={{ color: p.id === currentProjectId ? themeColor : `${themeColor}99` }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = p.id === currentProjectId ? `${themeColor}1A` : `${themeColor}33`;
-                    e.currentTarget.style.color = themeColor;
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = '';
-                    e.currentTarget.style.color = p.id === currentProjectId ? themeColor : `${themeColor}99`;
-                  }}
+                  className={`p-2 rounded-full transition-colors ${
+                    onGlassPanel
+                      ? 'text-gray-900/90 hover:bg-black/[0.06]'
+                      : 'text-theme-chrome-fg opacity-80 hover:opacity-100 hover:bg-white/10'
+                  }`}
                 >
                   <MoreHorizontal size={20} />
                 </button>
-
-                {openMenuId === p.id && (
-                  <>
-                    <div className="fixed inset-0 z-[2020] bg-black/20 pointer-events-auto" onClick={() => setOpenMenuId(null)} />
-                    {!homeLikeList ? (
-                      <MenuDropdown
-                        project={p}
-                        onRename={handleRename}
-                        onDuplicate={handleDuplicateProject}
-                        onExportData={handleExportData}
-                        onExportFullProject={handleExportFullProject}
-                        onCompressImages={handleCompressImages}
-                        onCheckData={onCheckData}
-                        onCleanupBrokenReferences={onCleanupBrokenReferences}
-                        onDelete={onDeleteProject}
-                        onClose={() => setOpenMenuId(null)}
-                        surfaceStyle={mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx)}
-                      />
-                    ) : (
-                      <div
-                        className="fixed inset-x-4 bottom-6 z-[2030] rounded-3xl shadow-2xl border border-white/50 py-2 animate-in slide-in-from-bottom-4"
-                        style={mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx)}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <div className="px-4 pt-2 pb-1">
-                          <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Project</div>
-                          <div className="text-sm font-bold text-gray-800 truncate">{p.name}</div>
-                        </div>
-                      <button
-                          onClick={() => handleRename(p.id)}
-                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
-                      >
-                          <Edit2 size={16} /> Rename
-                      </button>
-                      <div className="h-px bg-gray-100 my-1" />
-                      <button
-                          onClick={() => handleDuplicateProject(p)}
-                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
-                      >
-                          <Copy size={16} /> Duplicate Project
-                      </button>
-                      <div className="h-px bg-gray-100 my-1" />
-                      <button 
-                          onClick={() => handleExportData(p)}
-                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
-                      >
-                          <Download size={16} /> Export Data (CSV)
-                      </button>
-                      <div className="h-px bg-gray-100 my-1" />
-                      <button 
-                          onClick={() => handleExportFullProject(p)}
-                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
-                      >
-                          <Download size={16} /> Export Full Project (JSON)
-                      </button>
-                      <div className="h-px bg-gray-100 my-1" />
-                      <button 
-                          onClick={() => handleCompressImages(p)}
-                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
-                      >
-                          <ImageIcon size={16} /> Data Check
-                      </button>
-                      <div className="h-px bg-gray-100 my-1" />
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); onDeleteProject(p.id); }}
-                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-red-50 text-red-500 flex items-center gap-2"
-                      >
-                        <Trash2 size={16} /> Delete Project
-                      </button>
-                    </div>
-                    )}
-                  </>
-                )}
               </div>
-            </div>
-          ))}
+            </MotionDiv>
+            );
+          })}
           
-          {projects.length === 0 && homeLikeList && (
+          {projects.length === 0 && (homeLikeList || transitionListOnly) && (
              <div className="text-center py-8 italic opacity-60 text-theme-chrome-fg">No projects yet. Start one!</div>
           )}
         </div>
-      </div>
+      </MotionDiv>
+    </>
+  );
+
+  return (
+    <div 
+      className={`${containerClass} ${isDragging ? 'ring-4 ring-offset-2' : ''}`}
+      style={{
+        backgroundColor: themeColor,
+        borderColor: isSidebar && !expandToHomeLayout ? themeColor : undefined,
+        boxShadow: isDragging ? `0 0 0 4px ${themeColor}` : undefined
+      }}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {showProjectLoadBar ? (
+        <div
+          className="pointer-events-none absolute top-0 left-0 right-0 z-[2008] h-[3px] overflow-hidden"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={projectLoadProgress}
+          aria-label="加载项目进度"
+        >
+          <div
+            className="absolute inset-0 opacity-25"
+            style={{ backgroundColor: 'var(--theme-chrome-fg)' }}
+          />
+          {projectLoadProgress < 8 ? (
+            <div
+              className="project-manager-load-bar-fill--indeterminate absolute top-0 h-full"
+              style={{ backgroundColor: 'var(--theme-chrome-fg)' }}
+            />
+          ) : (
+            <div
+              className="absolute top-0 left-0 h-full transition-[width] duration-300 ease-out"
+              style={{
+                width: `${Math.min(100, Math.max(5, projectLoadProgress))}%`,
+                backgroundColor: 'var(--theme-chrome-fg)'
+              }}
+            />
+          )}
+        </div>
+      ) : null}
+      {isDragging && (
+        <div className="fixed inset-0 z-[4000] flex items-center justify-center pointer-events-none" style={{ backgroundColor: `${themeColor}33` }}>
+          <div
+            className="rounded-2xl shadow-2xl p-8 border-4 border-solid"
+            style={{
+              borderColor: themeColor,
+              ...mapChromeSurface
+            }}
+          >
+            <div className="text-center">
+              <div className="text-4xl mb-4">📁</div>
+              <div className="text-xl font-bold text-gray-800">Drop JSON file to merge project</div>
+              <div className="text-sm text-gray-600 mt-2">Duplicate data will be automatically skipped</div>
+            </div>
+          </div>
+        </div>
+      )}
+      {mainHomeChrome}
 
       {isCreating && (
         <div className="fixed inset-0 z-[3000] bg-black/50 flex items-center justify-center p-4">
           <div
             className="rounded-3xl shadow-2xl w-full max-w-md p-6 animate-in zoom-in-95 border border-gray-200/80"
-            style={mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx)}
+            style={mapChromeSurface}
           >
             <h2 className="text-2xl font-black text-gray-800 mb-6">New Project</h2>
             <div className="space-y-4">
@@ -1529,7 +1793,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         <div className="fixed inset-0 z-[3000] bg-black/50 flex items-center justify-center p-4">
           <div
             className="rounded-3xl shadow-2xl w-full max-w-md p-6 animate-in zoom-in-95 border border-gray-200/80"
-            style={mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx)}
+            style={mapChromeSurface}
           >
             <h2 className="text-2xl font-black text-gray-800 mb-6">
               {isImportingFromData ? 'Import from Data' : 'Import Project'}
@@ -1577,7 +1841,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           onClose={() => setShowThemeColorPicker(false)}
           currentColor={themeColor}
           onColorChange={onThemeColorChange}
-          panelChromeStyle={mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx)}
+          panelChromeStyle={mapChromeSurface}
         />
       )}
 
@@ -1597,6 +1861,129 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         mapUiChromeOpacity={mapUiChromeOpacity}
         mapUiChromeBlurPx={mapUiChromeBlurPx}
         />
+
+      {openMenuId &&
+        typeof document !== 'undefined' &&
+        (() => {
+          const pm = projects.find((proj) => proj.id === openMenuId);
+          if (!pm) return null;
+          const vw = window.innerWidth;
+          const vh = window.innerHeight;
+          return createPortal(
+            <>
+              {homeLikeList ? (
+                <div
+                  data-pm-more-menu
+                  className="fixed bottom-6 left-1/2 max-h-[min(70dvh,70vh)] w-[calc(100%-2rem)] -translate-x-1/2 overflow-y-auto overscroll-contain rounded-3xl shadow-2xl border border-white/50 py-2 animate-in slide-in-from-bottom-4 theme-surface-scrollbar"
+                  style={{
+                    ...mapChromeSurface,
+                    maxWidth: PROJECT_SIDEBAR_DRAWER_WIDTH_PX,
+                    zIndex: PM_PROJECT_MORE_MENU_Z
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  role="dialog"
+                  aria-label="Project actions"
+                >
+                  <div className="px-4 pt-2 pb-1">
+                    <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+                      Project
+                    </div>
+                    <div className="text-sm font-bold text-gray-800 truncate">{pm.name}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleRename(pm.id);
+                      setOpenMenuId(null);
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                  >
+                    <Edit2 size={16} /> Rename
+                  </button>
+                  <div className="h-px bg-gray-100 my-1" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleDuplicateProject(pm);
+                      setOpenMenuId(null);
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                  >
+                    <Copy size={16} /> Duplicate Project
+                  </button>
+                  <div className="h-px bg-gray-100 my-1" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleExportData(pm);
+                      setOpenMenuId(null);
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                  >
+                    <Download size={16} /> Export Data (CSV)
+                  </button>
+                  <div className="h-px bg-gray-100 my-1" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleExportFullProject(pm);
+                      setOpenMenuId(null);
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                  >
+                    <Download size={16} /> Export Full Project (JSON)
+                  </button>
+                  <div className="h-px bg-gray-100 my-1" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleCompressImages(pm);
+                      setOpenMenuId(null);
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                  >
+                    <ImageIcon size={16} /> Data Check
+                  </button>
+                  <div className="h-px bg-gray-100 my-1" />
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteProject(pm.id);
+                      setOpenMenuId(null);
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-sm hover:bg-red-50 text-red-500 flex items-center gap-2"
+                  >
+                    <Trash2 size={16} /> Delete Project
+                  </button>
+                </div>
+              ) : projectMoreAnchor ? (
+                <MenuDropdown
+                  project={pm}
+                  onRename={handleRename}
+                  onDuplicate={handleDuplicateProject}
+                  onExportData={handleExportData}
+                  onExportFullProject={handleExportFullProject}
+                  onCompressImages={handleCompressImages}
+                  onCheckData={onCheckData}
+                  onCleanupBrokenReferences={onCleanupBrokenReferences}
+                  onDelete={onDeleteProject}
+                  onClose={() => setOpenMenuId(null)}
+                  surfaceStyle={mapChromeSurface}
+                  fixedPlacementStyle={computeProjectMoreMenuFixedStyle(
+                    projectMoreAnchor.row,
+                    projectMoreAnchor.button,
+                    compactProjectList,
+                    vw,
+                    vh
+                  )}
+                  motionOriginClass={compactProjectList ? 'origin-top' : 'origin-top-right'}
+                />
+              ) : null}
+            </>,
+            document.body
+          );
+        })()}
 
     </div>
   );

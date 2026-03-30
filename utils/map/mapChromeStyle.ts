@@ -7,6 +7,20 @@ export const MODAL_BACKDROP_MASK_STYLE: CSSProperties = {
   WebkitBackdropFilter: 'blur(10px)'
 };
 
+/** 项目菜单等轻覆盖：模糊强度与 map UI chrome 一致，避免平整灰色遮罩 */
+export function mapChromeMenuBackdropStyle(blurPx: number): CSSProperties {
+  const b = Math.min(48, Math.max(0, blurPx));
+  const style: CSSProperties = {
+    backgroundColor: 'rgba(0, 0, 0, 0.12)'
+  };
+  if (b > 0) {
+    const f = `blur(${b}px)`;
+    style.backdropFilter = f;
+    style.WebkitBackdropFilter = f;
+  }
+  return style;
+}
+
 export const DEFAULT_MAP_UI_CHROME_OPACITY = 0.9;
 export const DEFAULT_MAP_UI_CHROME_BLUR_PX = 8;
 

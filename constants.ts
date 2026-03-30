@@ -127,5 +127,10 @@ export const PROJECT_OPEN_OVERLAY_FADE_S = 0.2;
 export const PROJECT_OPEN_SLIDE_DURATION_S = 0.3;
 export const PROJECT_OPEN_SLIDE_EASE: [number, number, number, number] = [0.4, 0, 0.2, 1];
 
+/** 大屏侧栏抽屉固定宽度（ px）；小屏仍为视口比例 62% */
+export const PROJECT_SIDEBAR_DRAWER_WIDTH_PX = 420;
+/** 与 Tailwind `lg` 一致：≥此宽度视为大屏，侧栏用固定像素宽 */
+export const PROJECT_SIDEBAR_FIXED_WIDTH_MIN_VIEWPORT_PX = 1024;
+
 /** 毫秒版，供 setTimeout 兜底 */
 export const PROJECT_OPEN_OVERLAY_FADE_MS = Math.round(PROJECT_OPEN_OVERLAY_FADE_S * 1000);
