@@ -97,6 +97,19 @@ export const MapControls: React.FC<MapControlsProps> = ({
       onDoubleClick={(e) => e.stopPropagation()}
     >
       {/* First Row: Main Controls */}
+      {/* 要求：设置按钮在左上角工具栏最左侧（第一个） */}
+      <ChromeIconButton
+        themeColor={themeColor}
+        chromeSurfaceStyle={neutralStyle}
+        chromeHoverBackground={neutralHover}
+        nonChromeIdleHover="imperative-gray100"
+        onClick={() => onOpenSettings()}
+        onPointerMove={(e) => e.stopPropagation()}
+        title="设置"
+      >
+        <Settings size={18} className="sm:w-5 sm:h-5" />
+      </ChromeIconButton>
+
       <div className="relative" ref={locateMenuRef}>
         <ChromeIconButton
           className="group"
@@ -175,18 +188,6 @@ export const MapControls: React.FC<MapControlsProps> = ({
         title={showTextLabels ? '隐藏 label' : 'label'}
       >
         <Type size={18} className="sm:w-5 sm:h-5" />
-      </ChromeIconButton>
-
-      <ChromeIconButton
-        themeColor={themeColor}
-        chromeSurfaceStyle={neutralStyle}
-        chromeHoverBackground={neutralHover}
-        nonChromeIdleHover="imperative-gray100"
-        onClick={() => onOpenSettings()}
-        onPointerMove={(e) => e.stopPropagation()}
-        title="设置"
-      >
-        <Settings size={18} className="sm:w-5 sm:h-5" />
       </ChromeIconButton>
     </div>
   );

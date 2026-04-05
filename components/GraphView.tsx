@@ -194,7 +194,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
     const labelFontPx = project.graphLabelFontPx ?? DEFAULT_GRAPH_STYLESHEET_SIZING.labelFontPx;
     const edgeWeight = project.graphEdgeWeight ?? DEFAULT_GRAPH_STYLESHEET_SIZING.edgeWeight;
     return {
-      nodeSize: Math.min(36, Math.max(4, nodeSize)),
+      nodeSize: Math.min(36, Math.max(1, nodeSize)),
       labelFontPx: Math.min(16, Math.max(4, labelFontPx)),
       edgeWeight: Math.min(4, Math.max(0.1, Math.round(edgeWeight * 10) / 10))
     };
@@ -205,7 +205,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
       if (!onUpdateProject || !projectId) return;
       const nextPatch: Partial<Project> = {};
       if (patch.nodeSize != null) {
-        nextPatch.graphNodeSize = Math.round(Math.min(36, Math.max(4, patch.nodeSize)));
+        nextPatch.graphNodeSize = Math.round(Math.min(36, Math.max(1, patch.nodeSize)));
       }
       if (patch.labelSize != null) {
         nextPatch.graphLabelFontPx = Math.round(Math.min(16, Math.max(4, patch.labelSize)));
@@ -1051,6 +1051,22 @@ export const GraphView: React.FC<GraphViewProps> = ({
       }
     });
   }, [hoveredConnectionId, selectedConnectionId, edgeStructureKey]);
+
+  /** 有“选中对象”时：把未高亮的点/边整体再 dim 50%（在各自基础透明度上 *0.5） */
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    const hasSelection = !!focusedNodeId || !!selectedConnectionId;
+    const keepSel =
+      'node.focus-core, node.focus-nh, node.focus-hover, node.focus-edge-endpoint, node:selected,' +
+      'edge.focus-e, edge.focus-edge-hover, edge.focus-edge-selected, edge:selected';
+    cy.batch(() => {
+      cy.elements().removeClass('graph-dim');
+      if (!hasSelection) return;
+      const keep = cy.elements(keepSel);
+      cy.elements().not(keep).addClass('graph-dim');
+    });
+  }, [focusedNodeId, selectedConnectionId, hoveredConnectionId, hoveredNote?.id, edgeStructureKey, nodeStructureKey]);
 
   /** 时间线布局下：图层面板权重或牵引强度变更时重跑时间线 preset */
   useEffect(() => {

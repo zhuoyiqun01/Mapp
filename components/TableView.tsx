@@ -184,6 +184,15 @@ export const TableView: React.FC<TableViewProps> = ({
     [onUpdateProject, project]
   );
 
+  const handleUpdateFrameTitle = useCallback(
+    async (frameId: string, nextTitle: string) => {
+      if (!onUpdateProject) return;
+      const nextFrames = (project.frames ?? []).map((f) => (f.id === frameId ? { ...f, title: nextTitle } : f));
+      await onUpdateProject(project, { frames: nextFrames });
+    },
+    [onUpdateProject, project]
+  );
+
   const confirmPendingDelete = async () => {
     if (!pendingDelete || deleteSubmitting) return;
     setDeleteSubmitting(true);
@@ -399,7 +408,7 @@ export const TableView: React.FC<TableViewProps> = ({
         {subView === 'points' ? (
           <>
             {onUpdateProject ? (
-              <div className="relative mb-6 w-full max-w-xl">
+              <div className="relative mb-6 w-full max-w-xl mx-auto">
                 <ProjectNotesLayerPanel
                   embed
                   themeColor={themeColor}
@@ -416,6 +425,8 @@ export const TableView: React.FC<TableViewProps> = ({
                   onBatchUpdateNotes={handleTableBatchNotes}
                   frames={project.frames ?? []}
                   onActivateNote={(n) => setEditorNoteId(n.id)}
+                  tableMode
+                  onUpdateFrameTitle={handleUpdateFrameTitle}
                 />
               </div>
             ) : (

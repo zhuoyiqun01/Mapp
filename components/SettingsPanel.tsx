@@ -36,6 +36,11 @@ interface SettingsPanelProps {
   /** 有则展示 Graph Style，并写入项目 */
   graphProject?: Project;
   onGraphProjectPatch?: (patch: Partial<Project>) => void | Promise<void>;
+  boardVariantToggles?: {
+    primary: boolean;
+    image: boolean;
+    onChange: (next: { primary: boolean; image: boolean }) => void;
+  };
 }
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
@@ -57,7 +62,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   labelSize,
   onLabelSizeChange,
   graphProject,
-  onGraphProjectPatch
+  onGraphProjectPatch,
+  boardVariantToggles
 }) => {
   const [showThemeColorPicker, setShowThemeColorPicker] = useState(false);
 
@@ -227,7 +233,49 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             defaultOpen={openBoard}
             themeColor={themeColor}
           >
-            <p className="py-2 text-xs leading-relaxed text-gray-500">看板视图相关样式将放在此处，敬请期待。</p>
+            {boardVariantToggles ? (
+              <>
+                <p className="py-1 text-xs leading-relaxed text-gray-500">
+                  显示类型（便签 / 图片）
+                </p>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-2 mt-2">
+                  <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={boardVariantToggles.primary}
+                      onChange={(e) =>
+                        boardVariantToggles.onChange({
+                          primary: e.target.checked,
+                          image: boardVariantToggles.image
+                        })
+                      }
+                      className="h-4 w-4 rounded border-gray-200"
+                      style={{ accentColor: 'var(--theme-color)' }}
+                    />
+                    <span>便签</span>
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={boardVariantToggles.image}
+                      onChange={(e) =>
+                        boardVariantToggles.onChange({
+                          primary: boardVariantToggles.primary,
+                          image: e.target.checked
+                        })
+                      }
+                      className="h-4 w-4 rounded border-gray-200"
+                      style={{ accentColor: 'var(--theme-color)' }}
+                    />
+                    <span>图片</span>
+                  </label>
+                </div>
+              </>
+            ) : (
+              <p className="py-2 text-xs leading-relaxed text-gray-500">
+                看板视图相关样式将放在此处，敬请期待。
+              </p>
+            )}
           </SettingsCollapsibleSection>
 
           <SettingsCollapsibleSection

@@ -30731,6 +30731,11 @@
         const tagT = Number(tNode.data?.("tagLayerNorm"));
         const tagAvg = Number.isFinite(tagS) && Number.isFinite(tagT) ? (tagS + tagT) / 2 : 0.5;
         len *= 1 + (tagAvg - 0.5) * 0.82;
+        const rawLenFactor = Number(edge?.data?.("edgeIdealLenFactor"));
+        if (Number.isFinite(rawLenFactor)) {
+          const f = Math.max(0.55, Math.min(4, rawLenFactor));
+          len *= f;
+        }
         const cLow = Math.min(cS, cT);
         const cHigh = Math.max(cS, cT);
         const lowId = cS <= cT ? sId : tId;
@@ -30743,7 +30748,7 @@
             len *= 1 + 0.26 * competition * (0.4 + 0.6 * (1 - cLow));
           }
         }
-        return Math.max(46, Math.min(320, len));
+        return Math.max(46, Math.min(720, len));
       },
       nodeRepulsion: (node) => {
         const c = centrality.normByNodeId.get(String(node?.id?.() ?? "")) ?? 0;

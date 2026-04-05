@@ -28,10 +28,10 @@ export const GraphStyleSettingsBlock: React.FC<GraphStyleSettingsBlockProps> = (
         label="节点大小"
         themeColor={themeColor}
         value={nodeSize}
-        min={4}
+        min={1}
         max={36}
         step={1}
-        onChange={(v) => onPatch({ graphNodeSize: Math.round(Math.min(36, Math.max(4, v))) })}
+        onChange={(v) => onPatch({ graphNodeSize: Math.round(Math.min(36, Math.max(1, v))) })}
         formatValue={(v) => `${Math.round(v)}px`}
         minCaption="小"
         maxCaption="大"

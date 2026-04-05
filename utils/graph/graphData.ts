@@ -248,6 +248,8 @@ export function buildGraphElements(
           color: noteNodeColor(note, themeColor),
           layerItemHidden: Boolean(note.layerItemHidden),
           stackZ: stackZById.get(note.id) ?? 2,
+          /** 0~1：图中“相对层级(level)”归一化分数（后续在本函数末尾填充） */
+          levelNorm: 0,
           /** 图谱「按标签分组网格」用：无首个标签时归入 GRAPH_UNTAGGED_TAG_GROUP，避免被样式表隐藏 */
           tagGroup,
           /**
@@ -279,6 +281,91 @@ export function buildGraphElements(
       };
     });
 
+  // ---- level（相对层级，连续值）----
+  // 仅使用“有效单向边”参与：forward/backward；排除 both/none（不提供层级约束）
+  const nodeIds = notes.map((n) => n.id);
+  const dirEdges: Array<{ u: string; v: string; w: number }> = [];
+  for (const c of connections) {
+    if (!noteIds.has(c.fromNoteId) || !noteIds.has(c.toNoteId)) continue;
+    const dir = connectionToGraphDirection(c);
+    if (dir !== 'forward' && dir !== 'backward') continue;
+    const u = dir === 'forward' ? c.fromNoteId : c.toNoteId; // u -> v
+    const v = dir === 'forward' ? c.toNoteId : c.fromNoteId;
+    if (u === v) continue;
+    // 用现有 edgeWeight 作为约束权重的近似（越粗的边通常语义越强）
+    // edgeWeight 在后面也会算，这里先用 1，随后用节点/边数据再校准也不影响稳定性。
+    dirEdges.push({ u, v, w: 1 });
+  }
+
+  // 用 soft 约束拟合层级：希望 L(v) - L(u) >= margin；允许违背但惩罚
+  // logistic loss: log(1 + exp(margin - (Lv - Lu))) + l2
+  const level = new Map<string, number>();
+  nodeIds.forEach((id) => {
+    const note = noteById.get(id);
+    const t = note?.startYear;
+    // 有时间时用时间做一个温和初始化（更快收敛）；无时间则 0
+    level.set(id, t != null && Number.isFinite(t) ? Number(t) : 0);
+  });
+  const levelVals0 = nodeIds.map((id) => level.get(id) ?? 0);
+  const min0 = Math.min(...levelVals0, 0);
+  const max0 = Math.max(...levelVals0, 0);
+  if (max0 - min0 > 1e-6) {
+    nodeIds.forEach((id) => {
+      const x = level.get(id) ?? 0;
+      level.set(id, (x - min0) / (max0 - min0));
+    });
+  }
+
+  const margin = 0.08;
+  const lr = 0.06;
+  const l2 = 0.0025;
+  const iters = Math.max(60, Math.min(240, Math.round(18 + dirEdges.length * 0.12)));
+  for (let iter = 0; iter < iters; iter += 1) {
+    // 简单洗牌（Fisher–Yates）
+    for (let i = dirEdges.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = dirEdges[i];
+      dirEdges[i] = dirEdges[j];
+      dirEdges[j] = tmp;
+    }
+    for (const e of dirEdges) {
+      const lu = level.get(e.u) ?? 0;
+      const lv = level.get(e.v) ?? 0;
+      const d = lv - lu;
+      const z = margin - d;
+      // sigmoid(z) = 1 / (1 + exp(-z))
+      const s = 1 / (1 + Math.exp(-z));
+      const g = s * e.w;
+      // 梯度：∂/∂lu = +g , ∂/∂lv = -g （推动 lv-lu 变大）
+      const du = g + l2 * lu;
+      const dv = -g + l2 * lv;
+      level.set(e.u, lu - lr * du);
+      level.set(e.v, lv - lr * dv);
+    }
+  }
+
+  // 归一化到 0~1（分位数，抗极端值）
+  const lvAll = nodeIds.map((id) => level.get(id) ?? 0).sort((a, b) => a - b);
+  const q = (p: number) => {
+    if (lvAll.length === 0) return 0;
+    const idx = Math.max(0, Math.min(lvAll.length - 1, Math.round(p * (lvAll.length - 1))));
+    return lvAll[idx];
+  };
+  const p10 = q(0.1);
+  const p90 = q(0.9);
+  const span = Math.abs(p90 - p10) < 1e-9 ? 1 : (p90 - p10);
+  const levelNormById = new Map<string, number>();
+  nodeIds.forEach((id) => {
+    const s = level.get(id) ?? 0;
+    levelNormById.set(id, Math.max(0, Math.min(1, (s - p10) / span)));
+  });
+
+  nodes.forEach((n) => {
+    const id = String(n.data?.id ?? '');
+    if (!id) return;
+    (n.data as any).levelNorm = levelNormById.get(id) ?? 0;
+  });
+
   const edges: ElementDefinition[] = [];
   for (const c of connections) {
     if (!noteIds.has(c.fromNoteId) || !noteIds.has(c.toNoteId)) continue;
@@ -298,12 +385,62 @@ export function buildGraphElements(
     // tag 权重越高，连线越粗；以 0.5 作为中位基准，不改 edge label 字号逻辑。
     const tagBoost = Math.max(0, tagNorm - 0.5) * 1.2;
     const edgeWeight = baseEdgeWeight + favEndpointCount * 0.5 + tagBoost;
-    const { edgeLine, edgeLineFocus, edgeLineHi } = edgeWeightToLines(edgeWeight);
+    let { edgeLine, edgeLineFocus, edgeLineHi } = edgeWeightToLines(edgeWeight);
 
     // 分普通/收藏加粗/收藏高亮态：minEdgeWidth 由 edgeWeightToLines 的 clamp 决定。
-    const edgeArrowScale = getArrowScaleForEdgeWidth(edgeLine, refEdgeLine, 0.4);
-    const edgeArrowScaleFocus = getArrowScaleForEdgeWidth(edgeLineFocus, refEdgeLineFocus, 0.8);
-    const edgeArrowScaleHi = getArrowScaleForEdgeWidth(edgeLineHi, refEdgeLineHi, 0.8);
+    // level → 边粗度/长度（跨层越大越显著；用于“辐射/层级跨度”的可视化）
+    // 仅对有效单向边生效，排除 both/none。
+    let edgeIdealLenFactor = 1;
+    let widthFactor = 1;
+    if (direction === 'forward' || direction === 'backward') {
+      const a = direction === 'forward' ? c.fromNoteId : c.toNoteId; // source (语义起点)
+      const b = direction === 'forward' ? c.toNoteId : c.fromNoteId; // target
+      const la = levelNormById.get(a) ?? 0;
+      const lb = levelNormById.get(b) ?? 0;
+      const d = Math.max(0, lb - la); // “顺层”跨度；跨层/回指不作为辐射依据
+      const edgeSpan = Math.min(1, Math.max(0, d / 0.6)); // 经验尺度：0.6 视为“大跨度”
+      // 线宽步进拉开一些：让跨度大的边更明显
+      widthFactor = 0.85 + (2.25 - 0.85) * Math.pow(edgeSpan, 1.65); // 0.85..2.25
+      // 长度强调“源头辐射”：source 越靠源头（level 越小），边越长；同时叠加层级跨度。
+      const sourceRootness = Math.max(0, Math.min(1, 1 - la)); // 1=最源头，0=最末端
+      // 增强对比：让前 20% 源头的边明显更长（更陡的非线性）
+      const rootBoost = 0.9 + 3.1 * Math.pow(sourceRootness, 2.2); // 0.9..4.0
+      const spanBoost = 1.0 + 1.2 * Math.pow(edgeSpan, 1.35); // 1.0..2.2
+      edgeIdealLenFactor = rootBoost * spanBoost; // 0.9..~8.8（布局侧会夹紧到 4.0）
+      edgeLine = Math.max(0.25, edgeLine * widthFactor);
+      edgeLineFocus = Math.max(0.35, edgeLineFocus * widthFactor);
+      edgeLineHi = Math.max(0.4, edgeLineHi * widthFactor);
+    }
+
+    // 箭头步进阻尼：线宽可以更粗，但箭头几何不要等比暴涨。
+    // 用 widthFactor 的较小指数参与箭头计算，并对最终 arrow-scale 做上限夹紧。
+    const arrowWidthFactor = Math.pow(Math.max(0.6, Math.min(2.25, widthFactor)), 0.55);
+    const edgeArrowScale = Math.min(
+      1.35,
+      Math.max(0.15, getArrowScaleForEdgeWidth(edgeLine / Math.max(1e-6, widthFactor) * arrowWidthFactor, refEdgeLine, 0.4))
+    );
+    const edgeArrowScaleFocus = Math.min(
+      1.35,
+      Math.max(
+        0.15,
+        getArrowScaleForEdgeWidth(
+          edgeLineFocus / Math.max(1e-6, widthFactor) * arrowWidthFactor,
+          refEdgeLineFocus,
+          0.8
+        )
+      )
+    );
+    const edgeArrowScaleHi = Math.min(
+      1.35,
+      Math.max(
+        0.15,
+        getArrowScaleForEdgeWidth(
+          edgeLineHi / Math.max(1e-6, widthFactor) * arrowWidthFactor,
+          refEdgeLineHi,
+          0.8
+        )
+      )
+    );
 
     edges.push({
       data: {
@@ -319,6 +456,8 @@ export function buildGraphElements(
         edgeLineWidth: edgeLine,
         edgeLineFocusWidth: edgeLineFocus,
         edgeLineHiWidth: edgeLineHi,
+        // 用于力导 idealEdgeLength：让源头边更长、更像辐射
+        edgeIdealLenFactor,
         // 用于样式表中按数据决定箭头端点几何大小
         edgeArrowScale,
         edgeArrowScaleFocus,
@@ -368,7 +507,7 @@ export const GRAPH_FOCUS_CORE_NODE_SCALE = 1.5;
 function mergeGraphSizing(partial?: Partial<GraphStylesheetSizing>): GraphStylesheetSizing {
   const o = { ...DEFAULT_GRAPH_STYLESHEET_SIZING };
   if (partial?.nodeSize != null && Number.isFinite(partial.nodeSize)) {
-    o.nodeSize = Math.min(36, Math.max(4, partial.nodeSize));
+    o.nodeSize = Math.min(36, Math.max(1, partial.nodeSize));
   }
   if (partial?.labelFontPx != null && Number.isFinite(partial.labelFontPx)) {
     o.labelFontPx = Math.min(16, Math.max(4, partial.labelFontPx));
@@ -482,6 +621,8 @@ export function getGraphStylesheet(
       style: {
         label: 'data(label)',
         'background-color': 'data(color)',
+        // 交互命中区域：比视觉半径外扩 2px（不改变渲染尺寸）
+        'bounds-expansion': 2,
         /** 未选中：与地图 label 未强调态一致的浅灰字，无衬底 */
         color: '#9ca3af',
         'text-valign': 'bottom',
@@ -673,6 +814,7 @@ export function getGraphStylesheet(
       selector: 'edge',
       style: {
         label: 'data(label)',
+        opacity: 0.4,
         'line-color': '#d1d5db',
         width: 'data(edgeLineWidth)',
         'arrow-scale': 'data(edgeArrowScale)',
@@ -684,7 +826,8 @@ export function getGraphStylesheet(
         'text-rotation': 'autorotate',
         'text-margin-y': -z.edgeMarginY,
         color: '#9ca3af',
-        'z-index': 0,
+        // 普通边始终在节点下方（悬停/选中/高亮边会在下面的 selector 里抬高）
+        'z-index': -1,
         'z-index-compare': 'manual'
       }
     },
@@ -721,6 +864,7 @@ export function getGraphStylesheet(
     {
       selector: 'edge:selected',
       style: {
+        opacity: 1,
         'line-color': z.themeColor,
         'target-arrow-color': z.themeColor,
         'source-arrow-color': z.themeColor,
@@ -730,6 +874,7 @@ export function getGraphStylesheet(
     {
       selector: 'edge.focus-e',
       style: {
+        opacity: 1,
         'line-color': z.themeColor,
         'target-arrow-color': z.themeColor,
         'source-arrow-color': z.themeColor,
@@ -748,6 +893,7 @@ export function getGraphStylesheet(
     {
       selector: 'edge.focus-edge-hover',
       style: {
+        opacity: 1,
         'line-color': z.themeColor,
         'target-arrow-color': z.themeColor,
         'source-arrow-color': z.themeColor,
@@ -765,6 +911,7 @@ export function getGraphStylesheet(
     {
       selector: 'edge.focus-edge-selected',
       style: {
+        opacity: 1,
         'line-color': z.themeColor,
         'target-arrow-color': z.themeColor,
         'source-arrow-color': z.themeColor,
@@ -940,6 +1087,37 @@ export function getGraphStylesheet(
       selector: 'edge.graph-frame-peek-dim.focus-edge-hover, edge.graph-frame-peek-dim.focus-edge-selected',
       style: {
         opacity: 0.95
+      }
+    },
+    /** 有选中对象时（GraphView 会给未高亮元素挂 graph-dim 类）：在“原透明度基础上再 *0.5” */
+    {
+      selector: 'node.graph-dim',
+      style: {
+        opacity: 0.5
+      }
+    },
+    {
+      selector: 'node[graphLinked = "no"].graph-dim',
+      style: {
+        opacity: 0.21
+      }
+    },
+    {
+      selector: 'node.graph-frame-peek-dim.graph-dim',
+      style: {
+        opacity: 0.16
+      }
+    },
+    {
+      selector: 'edge.graph-dim',
+      style: {
+        opacity: 0.2
+      }
+    },
+    {
+      selector: 'edge.graph-frame-peek-dim.graph-dim',
+      style: {
+        opacity: 0.15
       }
     },
     {

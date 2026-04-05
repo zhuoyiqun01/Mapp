@@ -5111,12 +5111,6 @@ const createNoteAtCenter = () => {
                             onUpdateNote={onUpdateNote}
                             onBatchUpdateNotes={handleBoardBatchNotes}
                             frames={frames ?? []}
-                            boardVariantToggles={{
-                              primary: layerVisibility.primary,
-                              image: layerVisibility.image,
-                              onChange: (next) =>
-                                setLayerVisibility((prev) => ({ ...prev, ...next }))
-                            }}
                             onActivateNote={panBoardToNoteCenter}
                         />
                     ) : null}
@@ -5420,6 +5414,11 @@ const createNoteAtCenter = () => {
         onMapUiChromeBlurPxChange={onMapUiChromeBlurPxChange ?? (() => {})}
         currentMapStyle={mapStyleId}
         onMapStyleChange={onMapStyleChange ?? (() => {})}
+        boardVariantToggles={{
+          primary: layerVisibility.primary,
+          image: layerVisibility.image,
+          onChange: (next) => setLayerVisibility((prev) => ({ ...prev, ...next }))
+        }}
         graphProject={project as Project | undefined}
         onGraphProjectPatch={
           onUpdateProject && project

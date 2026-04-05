@@ -131,6 +131,8 @@ export const PROJECT_OPEN_SLIDE_EASE: [number, number, number, number] = [0.4, 0
 export const PROJECT_SIDEBAR_DRAWER_WIDTH_PX = 420;
 /** 与 Tailwind `lg` 一致：≥此宽度视为大屏，侧栏用固定像素宽 */
 export const PROJECT_SIDEBAR_FIXED_WIDTH_MIN_VIEWPORT_PX = 1024;
+/** 项目列表容器最大宽度（与 Tailwind `max-w-md = 28rem = 448px` 对齐） */
+export const PROJECT_LIST_MAX_WIDTH_PX = 480;
 
 /** 毫秒版，供 setTimeout 兜底 */
 export const PROJECT_OPEN_OVERLAY_FADE_MS = Math.round(PROJECT_OPEN_OVERLAY_FADE_S * 1000);

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDown,
   ChevronLeft,
@@ -14,6 +14,7 @@ import type { Frame, GraphLayerState, Note } from '../../types';
 import {
   GRAPH_LAYER_WEIGHT_MAX,
   GRAPH_LAYER_WEIGHT_MIN,
+  GRAPH_UNTAGGED_TAG_GROUP,
   type GraphLayerGroupStandard
 } from '../../utils/graph/graphRuntimeCore';
 import {
@@ -24,6 +25,7 @@ import {
 } from '../../utils/layer/unifiedNoteLayer';
 import { SettingsCompactSlider } from '../ui/SettingsCompactSlider';
 import { TagAddPanel } from '../ui/TagAddPanel';
+import { NoteTimeRangeControl } from '../note-editor/NoteTimeRangeControl';
 
 function insertRelative(order: string[], fromKey: string, toKey: string, place: 'before' | 'after'): string[] {
   const next = [...order];
@@ -69,6 +71,10 @@ export interface ProjectNotesLayerPanelProps {
   embed?: boolean;
   /** Map：`start` 与图层按钮左对齐，`end` 与按钮右对齐 */
   dockAlign?: 'start' | 'end';
+  /** Table：点位记录不显示显隐，展示所有 tag + 时间，并支持双击组名内联重命名 */
+  tableMode?: boolean;
+  /** Table：重命名 frame（更新 project.frames.title） */
+  onUpdateFrameTitle?: (frameId: string, nextTitle: string) => void;
 }
 
 export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
@@ -87,7 +93,9 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
   onActivateNote,
   boardVariantToggles,
   embed = false,
-  dockAlign = 'start'
+  dockAlign = 'start',
+  tableMode = false,
+  onUpdateFrameTitle
 }) => {
   const hiddenSet = new Set((merged.hidden ?? []).map((h) => String(h).trim()));
   const keysSet = useMemo(() => new Set((merged.order ?? []).map((k) => String(k).trim())), [merged.order]);
@@ -247,11 +255,224 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
   const [overNoteId, setOverNoteId] = useState<string | null>(null);
   const [noteDropPlace, setNoteDropPlace] = useState<'before' | 'after'>('before');
 
+  // Table：双击组名内联重命名（不额外打开浮层）
+  const [editingGroupKey, setEditingGroupKey] = useState<string | null>(null);
+  const [editingGroupDraft, setEditingGroupDraft] = useState<string>('');
+  const cancelRenameRef = useRef(false);
+
+  type TableTagEditDraft = {
+    noteId: string;
+    tagIndex: number;
+    draftLabel: string;
+    draftColor: string;
+    portalPlacement: { top: number; left: number };
+  };
+  const [tableTagEditDraft, setTableTagEditDraft] = useState<TableTagEditDraft | null>(null);
+
+  const cancelEditingGroup = useCallback(() => {
+    cancelRenameRef.current = true;
+    setEditingGroupKey(null);
+    setEditingGroupDraft('');
+  }, []);
+
+  const toTagGroupKey = useCallback(
+    (label: string | undefined) => {
+      const s = String(label ?? '').trim();
+      return s === '' ? GRAPH_UNTAGGED_TAG_GROUP : s;
+    },
+    []
+  );
+
+  const openTableTagEditPanel = useCallback(
+    (noteId: string, tagIndex: number, t: { label: string; color?: string }, anchorEl: HTMLElement) => {
+      const rect = anchorEl.getBoundingClientRect();
+      const TAG_PANEL_EST_W = 260;
+      const TAG_PANEL_EST_H = 220;
+      const gap = 8;
+
+      let top = rect.bottom + gap;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      if (spaceBelow < TAG_PANEL_EST_H && rect.top > TAG_PANEL_EST_H + gap) {
+        top = rect.top - TAG_PANEL_EST_H - gap;
+      }
+
+      let left = rect.left;
+      left = Math.max(8, Math.min(left, window.innerWidth - TAG_PANEL_EST_W - 8));
+
+      const color = t.color != null && TAG_COLORS.includes(t.color) ? t.color : TAG_COLORS[0];
+
+      setTableTagEditDraft({
+        noteId,
+        tagIndex,
+        draftLabel: t.label ?? '',
+        draftColor: color,
+        portalPlacement: { top, left }
+      });
+    },
+    []
+  );
+
   const patch = useCallback(
     (fn: (prev: GraphLayerState) => GraphLayerState) => {
       onStateChange(fn(merged));
     },
     [merged, onStateChange]
+  );
+
+  const renameTagLayerKeyInState = useCallback(
+    (oldKey: string, nextKey: string) => {
+      if (!tableMode) return;
+      if (oldKey === nextKey) return;
+      patch((p) => {
+        const dedupePreserveOrder = (arr: string[]) => {
+          const seen = new Set<string>();
+          const out: string[] = [];
+          for (const x of arr) {
+            const v = String(x).trim();
+            if (seen.has(v)) continue;
+            seen.add(v);
+            out.push(v);
+          }
+          return out;
+        };
+
+        const nextOrder = dedupePreserveOrder(
+          (p.order ?? []).map((k) => (String(k).trim() === oldKey ? nextKey : String(k).trim()))
+        );
+        const nextHidden = dedupePreserveOrder(
+          (p.hidden ?? []).map((k) => (String(k).trim() === oldKey ? nextKey : String(k).trim()))
+        );
+
+        const nextWeights =
+          p.weights == null
+            ? p.weights
+            : (() => {
+                const w = { ...p.weights };
+                if (w[oldKey] != null) {
+                  if (w[nextKey] == null) w[nextKey] = w[oldKey];
+                  delete w[oldKey];
+                }
+                return w;
+              })();
+
+        return { ...p, order: nextOrder, hidden: nextHidden, weights: nextWeights };
+      });
+    },
+    [patch, tableMode]
+  );
+
+  const applyRenameTagGroup = useCallback(
+    async (oldKey: string, nextKey: string) => {
+      if (!tableMode) return;
+      const oldK = String(oldKey).trim();
+      const newK = String(nextKey).trim();
+      if (!newK || oldK === newK) return;
+      if (oldK === '' || oldK === GRAPH_UNTAGGED_TAG_GROUP) return;
+      if (newK === '' || newK === GRAPH_UNTAGGED_TAG_GROUP) return;
+
+      // Table：重命名 tag 组名时，只修改用于“决定所属分组”的第一条标签（tags[0]）
+      // （与 noteBelongsToLayerGroupKey / noteTagLayerGroupKey 的分组依据保持一致）
+      const affectedNotes = notes.filter((n) => noteBelongsToLayerGroupKey(n, oldK, 'tag'));
+      const updatedNotes = affectedNotes.map((note) => {
+        const nextTags = (note.tags ?? []).map((t, i) =>
+          i === 0 && normalizeTagLabel(t.label) === oldK ? { ...t, label: newK } : t
+        );
+        return { ...note, tags: nextTags };
+      });
+
+      if (affectedNotes.length > 0) {
+        // 先更新笔记标签
+        if (onBatchUpdateNotes) {
+          await onBatchUpdateNotes(updatedNotes);
+        } else {
+          updatedNotes.forEach((n) => void onUpdateNote(n));
+        }
+      }
+
+      // 再更新 layer 面板的组键/显隐/权重（order/hidden/weights 是以首标签组 key 组织的）
+      // 即便笔记内部是多个标签，这里也只需要保证 layer state 里的组键正确迁移。
+
+      patch((p) => {
+        const dedupePreserveOrder = (arr: string[]) => {
+          const seen = new Set<string>();
+          const out: string[] = [];
+          for (const x of arr) {
+            const v = String(x).trim();
+            if (seen.has(v)) continue;
+            seen.add(v);
+            out.push(v);
+          }
+          return out;
+        };
+
+        const nextOrder = dedupePreserveOrder((p.order ?? []).map((k) => (String(k).trim() === oldK ? newK : String(k).trim())));
+        const nextHidden = dedupePreserveOrder((p.hidden ?? []).map((k) => (String(k).trim() === oldK ? newK : String(k).trim())));
+        const nextWeights =
+          p.weights == null
+            ? p.weights
+            : (() => {
+                const w = { ...p.weights };
+                if (w[oldK] != null) {
+                  // If target key already exists, keep its weight.
+                  if (w[newK] == null) w[newK] = w[oldK];
+                  delete w[oldK];
+                }
+                return w;
+              })();
+
+        return { ...p, order: nextOrder, hidden: nextHidden, weights: nextWeights };
+      });
+    },
+    [notes, onBatchUpdateNotes, onUpdateNote, patch, tableMode]
+  );
+
+  const applyRenameFrameGroup = useCallback(
+    async (oldFrameId: string, nextTitle: string) => {
+      if (!tableMode) return;
+      if (!onUpdateFrameTitle) return;
+      const oldId = String(oldFrameId).trim();
+      const newTitleTrim = String(nextTitle).trim();
+      if (!oldId || !newTitleTrim) return;
+
+      const oldTitle = framesById.get(oldId)?.title ?? oldId;
+
+      await onUpdateFrameTitle(oldId, newTitleTrim);
+
+      const affectedNotes = notes.filter((n) => noteBelongsToLayerGroupKey(n, oldId, 'frame'));
+      if (affectedNotes.length > 0) {
+        const updatedNotes = affectedNotes.map((note) => {
+          const nextGroupNames =
+            note.groupNames?.length != null
+              ? note.groupNames?.map((name) => (name === oldTitle ? newTitleTrim : name))
+              : note.groupNames;
+          const nextGroupName = note.groupName === oldTitle ? newTitleTrim : note.groupName;
+          return { ...note, groupNames: nextGroupNames, groupName: nextGroupName };
+        });
+
+        if (onBatchUpdateNotes) {
+          await onBatchUpdateNotes(updatedNotes);
+        } else {
+          updatedNotes.forEach((n) => void onUpdateNote(n));
+        }
+      }
+    },
+    [framesById, notes, onBatchUpdateNotes, onUpdateFrameTitle, onUpdateNote, tableMode, patch]
+  );
+
+  const commitEditingGroup = useCallback(
+    async (oldKey: string, draft: string) => {
+      cancelRenameRef.current = false;
+      const next = String(draft).trim();
+      if (layerGroupStandard === 'tag') {
+        await applyRenameTagGroup(oldKey, next);
+      } else {
+        await applyRenameFrameGroup(oldKey, next);
+      }
+      setEditingGroupKey(null);
+      setEditingGroupDraft('');
+      cancelRenameRef.current = false;
+    },
+    [applyRenameFrameGroup, applyRenameTagGroup, layerGroupStandard]
   );
 
   const clearDropIndicator = useCallback(() => {
@@ -352,7 +573,9 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
                 onLayerGroupStandardChange('tag');
               }}
               className={`flex flex-1 items-center justify-center rounded-lg px-2 py-1.5 transition-colors ${
-                layerGroupStandard === 'tag' ? 'text-white' : 'text-gray-600'
+                layerGroupStandard === 'tag'
+                  ? 'text-theme-chrome-fg'
+                  : 'text-theme-chrome-fg opacity-60'
               } ${layerGroupStandard === 'tag' ? '' : 'bg-gray-100 hover:bg-gray-200'}`}
               style={layerGroupStandard === 'tag' ? { backgroundColor: themeColor } : undefined}
               aria-label="切换为按标签分组"
@@ -368,7 +591,9 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
                 onLayerGroupStandardChange('frame');
               }}
               className={`flex flex-1 items-center justify-center rounded-lg px-2 py-1.5 transition-colors ${
-                layerGroupStandard === 'frame' ? 'text-white' : 'text-gray-600'
+                layerGroupStandard === 'frame'
+                  ? 'text-theme-chrome-fg'
+                  : 'text-theme-chrome-fg opacity-60'
               } ${layerGroupStandard === 'frame' ? '' : 'bg-gray-100 hover:bg-gray-200'}`}
               style={layerGroupStandard === 'frame' ? { backgroundColor: themeColor } : undefined}
               aria-label="切换为按帧分组"
@@ -498,12 +723,58 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
                         </span>
                       ) : null}
                     </div>
-                    <span
-                      className="min-w-0 flex-1 truncate text-sm font-medium text-gray-800"
-                      title={groupDisplayLabel(k, layerGroupStandard, framesById)}
-                    >
-                      {groupDisplayLabel(k, layerGroupStandard, framesById)}
-                    </span>
+                    {tableMode && editingGroupKey === k ? (
+                      <input
+                        autoFocus
+                        value={editingGroupDraft}
+                        onChange={(e) => setEditingGroupDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          e.stopPropagation();
+                          if (e.key === 'Escape') {
+                            e.preventDefault();
+                            cancelEditingGroup();
+                            return;
+                          }
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            void commitEditingGroup(k, editingGroupDraft);
+                          }
+                        }}
+                        onBlur={() => {
+                          if (cancelRenameRef.current) {
+                            cancelRenameRef.current = false;
+                            return;
+                          }
+                          void commitEditingGroup(k, editingGroupDraft);
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                        }}
+                        className="min-w-0 flex-1 truncate px-2 py-0.5 text-sm font-medium text-gray-800 border border-gray-200 rounded-md outline-none focus:ring-2"
+                        style={{ ['--tw-ring-color' as string]: themeColor }}
+                        title={editingGroupDraft}
+                      />
+                    ) : (
+                      <span
+                        className="min-w-0 flex-1 truncate text-sm font-medium text-gray-800"
+                        title={groupDisplayLabel(k, layerGroupStandard, framesById)}
+                        onDoubleClick={(e) => {
+                          if (!tableMode) return;
+                          e.stopPropagation();
+
+                          const canRenameTag =
+                            layerGroupStandard === 'tag' && k !== '' && k !== GRAPH_UNTAGGED_TAG_GROUP;
+                          const canRenameFrame = layerGroupStandard === 'frame' && k !== '' && !!onUpdateFrameTitle;
+                          if (!canRenameTag && !canRenameFrame) return;
+
+                          cancelRenameRef.current = false;
+                          setEditingGroupKey(k);
+                          setEditingGroupDraft(groupDisplayLabel(k, layerGroupStandard, framesById));
+                        }}
+                      >
+                        {groupDisplayLabel(k, layerGroupStandard, framesById)}
+                      </span>
+                    )}
                     <span className="shrink-0 text-[10px] text-gray-400">{groupNotes.length}</span>
                     <button
                       type="button"
@@ -615,26 +886,83 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
                               >
                                 <GripVertical size={14} strokeWidth={2} />
                               </div>
-                              <button
-                                type="button"
-                                draggable={false}
-                                className="min-w-0 flex-1 truncate text-left text-xs text-gray-500 hover:text-gray-700"
-                                title={note.text || ''}
-                                onClick={() => onActivateNote?.(note)}
-                              >
-                                {truncateRawTextLabel(note.text || '')}
-                              </button>
-                              <button
-                                type="button"
-                                draggable={false}
-                                className="shrink-0 rounded-md p-1 text-gray-500 hover:bg-gray-100"
-                                aria-label={nVisible ? '隐藏节点' : '显示节点'}
-                                onClick={() =>
-                                  onUpdateNote({ ...note, layerItemHidden: !note.layerItemHidden })
-                                }
-                              >
-                                {nVisible ? <Eye size={16} strokeWidth={2} /> : <EyeOff size={16} strokeWidth={2} />}
-                              </button>
+                              {tableMode ? (
+                                <div
+                                  className="flex-1 min-w-0 flex items-center gap-2 cursor-pointer"
+                                  onClick={() => onActivateNote?.(note)}
+                                >
+                                  <div
+                                    className="min-w-0 flex-1 truncate text-left text-xs text-gray-500"
+                                    title={note.text || ''}
+                                  >
+                                    {truncateRawTextLabel(note.text || '')}
+                                  </div>
+
+                                  <div className="flex-1 min-w-0 flex flex-wrap items-center gap-1">
+                                    {(note.tags ?? []).length > 0 ? (
+                                      (note.tags ?? []).map((t, tagIndex) => {
+                                        const tagKey = normalizeTagLabel(t.label);
+                                        return (
+                                          <button
+                                            key={`${note.id}:${t.id}:${t.label}`}
+                                            type="button"
+                                            draggable={false}
+                                            className="inline-flex items-center px-2 py-0.5 rounded-full border border-white/70 shadow-sm text-[10px] font-semibold transition-transform hover:scale-105"
+                                            style={{
+                                              backgroundColor: t.color ?? themeColor,
+                                              color: 'white'
+                                            }}
+                                            title="点击编辑该便签的这一条标签"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              openTableTagEditPanel(note.id, tagIndex, t, e.currentTarget);
+                                            }}
+                                          >
+                                            {tagKey || '无标签'}
+                                          </button>
+                                        );
+                                      })
+                                    ) : (
+                                      <span className="text-[10px] text-gray-400">-</span>
+                                    )}
+                                  </div>
+
+                                  <div className="shrink-0">
+                                    <NoteTimeRangeControl
+                                      startYear={note.startYear}
+                                      endYear={note.endYear}
+                                      themeColor={themeColor}
+                                      panelChromeStyle={panelChromeStyle}
+                                      onChange={(next) => {
+                                        onUpdateNote({ ...note, startYear: next.startYear, endYear: next.endYear });
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    draggable={false}
+                                    className="min-w-0 flex-1 truncate text-left text-xs text-gray-500 hover:text-gray-700"
+                                    title={note.text || ''}
+                                    onClick={() => onActivateNote?.(note)}
+                                  >
+                                    {truncateRawTextLabel(note.text || '')}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    draggable={false}
+                                    className="shrink-0 rounded-md p-1 text-gray-500 hover:bg-gray-100"
+                                    aria-label={nVisible ? '隐藏节点' : '显示节点'}
+                                    onClick={() =>
+                                      onUpdateNote({ ...note, layerItemHidden: !note.layerItemHidden })
+                                    }
+                                  >
+                                    {nVisible ? <Eye size={16} strokeWidth={2} /> : <EyeOff size={16} strokeWidth={2} />}
+                                  </button>
+                                </>
+                              )}
                             </div>
                             {lineA ? (
                               <div
@@ -712,6 +1040,53 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
           dismissIgnoreClosestSelector={undefined}
           autoFocus={false}
           onLabelChange={() => {}}
+        />
+      )}
+
+      {tableTagEditDraft && (
+        <TagAddPanel
+          themeColor={themeColor}
+          panelChromeStyle={panelChromeStyle}
+          title="编辑便签标签"
+          label={tableTagEditDraft.draftLabel}
+          onLabelChange={(v) =>
+            setTableTagEditDraft((prev) => (prev ? { ...prev, draftLabel: v } : prev))
+          }
+          selectedColor={tableTagEditDraft.draftColor}
+          onColorChange={(c) =>
+            setTableTagEditDraft((prev) => (prev ? { ...prev, draftColor: c } : prev))
+          }
+          onApply={async () => {
+            const note = notes.find((n) => n.id === tableTagEditDraft.noteId);
+            if (!note) return;
+
+            const oldFirstKey = toTagGroupKey(note.tags?.[0]?.label);
+            const newFirstKey = toTagGroupKey(tableTagEditDraft.tagIndex === 0 ? tableTagEditDraft.draftLabel : note.tags?.[0]?.label);
+
+            const nextTags = (note.tags ?? []).map((t, i) =>
+              i !== tableTagEditDraft.tagIndex
+                ? t
+                : {
+                    ...t,
+                    label: tableTagEditDraft.draftLabel,
+                    color: tableTagEditDraft.draftColor
+                  }
+            );
+
+            onUpdateNote({ ...note, tags: nextTags });
+
+            // 如果编辑的是第一个标签，迁移层状态 key（保证“重新分组”且保留显隐/权重）
+            if (tableTagEditDraft.tagIndex === 0 && oldFirstKey !== newFirstKey) {
+              renameTagLayerKeyInState(oldFirstKey, newFirstKey);
+            }
+
+            setTableTagEditDraft(null);
+          }}
+          onDismissOutside={() => setTableTagEditDraft(null)}
+          portalPlacement={tableTagEditDraft.portalPlacement}
+          closeOnInteractOutside
+          dismissIgnoreClosestSelector={undefined}
+          autoFocus={false}
         />
       )}
     </div>

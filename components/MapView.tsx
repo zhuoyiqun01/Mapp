@@ -1390,10 +1390,21 @@ export const MapView: React.FC<MapViewProps> = ({
           >
               <div className="flex justify-between items-center w-full pointer-events-none gap-2">
                 <div
-                  className="flex flex-row flex-wrap gap-1.5 sm:gap-2 pointer-events-auto items-center min-h-10 sm:min-h-12"
+                  className="flex flex-row flex-nowrap gap-1.5 sm:gap-2 pointer-events-auto items-center min-h-10 sm:min-h-12"
                   onPointerDown={(e) => e.stopPropagation()}
                   onTouchStart={(e) => e.stopPropagation()}
                 >
+                  <MapControls
+                    onLocateCurrentPosition={handleLocateCurrentPosition}
+                    isLocating={isLocating}
+                    mapNotes={mapRenderedNotes}
+                    themeColor={themeColor}
+                    chromeSurfaceStyle={mapChromeSurface}
+                    chromeHoverBackground={mapChromeHoverBg}
+                    showTextLabels={showTextLabels}
+                    setShowTextLabels={setShowTextLabels}
+                    onOpenSettings={() => setShowSettingsPanel(true)}
+                  />
                   <MapLayerControl
                     showPanel={showFrameLayerPanel}
                     onTogglePanel={() => setShowFrameLayerPanel(!showFrameLayerPanel)}
@@ -1433,17 +1444,6 @@ export const MapView: React.FC<MapViewProps> = ({
                         />
                       ) : null
                     }
-                  />
-                  <MapControls
-                    onLocateCurrentPosition={handleLocateCurrentPosition}
-                    isLocating={isLocating}
-                    mapNotes={mapRenderedNotes}
-                    themeColor={themeColor}
-                    chromeSurfaceStyle={mapChromeSurface}
-                    chromeHoverBackground={mapChromeHoverBg}
-                    showTextLabels={showTextLabels}
-                    setShowTextLabels={setShowTextLabels}
-                    onOpenSettings={() => setShowSettingsPanel(true)}
                   />
                 </div>
                 <div

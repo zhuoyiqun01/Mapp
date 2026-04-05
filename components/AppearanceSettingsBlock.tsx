@@ -15,6 +15,10 @@ export interface AppearanceSettingsBlockProps {
   onMapUiChromeOpacityChange: (opacity: number) => void;
   mapUiChromeBlurPx: number;
   onMapUiChromeBlurPxChange: (blurPx: number) => void;
+  easterEggGravityY?: number;
+  onEasterEggGravityYChange?: (v: number) => void;
+  easterEggMouseConstraintStiffness?: number;
+  onEasterEggMouseConstraintStiffnessChange?: (v: number) => void;
   /** 为 false 时不渲染顶部「界面外观」标题行（由外层折叠区块展示标题） */
   showSectionHeading?: boolean;
 }
@@ -27,6 +31,10 @@ export const AppearanceSettingsBlock: React.FC<AppearanceSettingsBlockProps> = (
   onMapUiChromeOpacityChange,
   mapUiChromeBlurPx,
   onMapUiChromeBlurPxChange,
+  easterEggGravityY,
+  onEasterEggGravityYChange,
+  easterEggMouseConstraintStiffness,
+  onEasterEggMouseConstraintStiffnessChange,
   showSectionHeading = true
 }) => (
   <div>
@@ -109,6 +117,47 @@ export const AppearanceSettingsBlock: React.FC<AppearanceSettingsBlockProps> = (
           />
         </div>
       </div>
+
+      {easterEggGravityY !== undefined &&
+      onEasterEggGravityYChange &&
+      easterEggMouseConstraintStiffness !== undefined &&
+      onEasterEggMouseConstraintStiffnessChange ? (
+        <>
+          <div className="pt-2 text-xs font-medium text-gray-500">彩蛋模式</div>
+          <div className="grid grid-cols-1 gap-x-3 gap-y-3 sm:grid-cols-2">
+            <div className="min-w-0">
+              <SettingsCompactSlider
+                label="Gravity"
+                hint={<HelpHint>控制彩蛋物理世界的重力强度（越大下落越快）。</HelpHint>}
+                themeColor={themeColor}
+                value={easterEggGravityY}
+                min={0}
+                max={3}
+                step={0.05}
+                onChange={onEasterEggGravityYChange}
+                formatValue={(v) => v.toFixed(2)}
+                minCaption="0"
+                maxCaption="3"
+              />
+            </div>
+            <div className="min-w-0">
+              <SettingsCompactSlider
+                label="Mouse Constraint Stiffness"
+                hint={<HelpHint>拖拽刚体时的“跟手”硬度；越大越紧，越小越软。</HelpHint>}
+                themeColor={themeColor}
+                value={easterEggMouseConstraintStiffness}
+                min={0.02}
+                max={0.5}
+                step={0.01}
+                onChange={onEasterEggMouseConstraintStiffnessChange}
+                formatValue={(v) => v.toFixed(2)}
+                minCaption="软"
+                maxCaption="硬"
+              />
+            </div>
+          </div>
+        </>
+      ) : null}
     </div>
   </div>
 );

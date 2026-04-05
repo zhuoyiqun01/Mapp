@@ -743,6 +743,15 @@ export function buildGraphCoseLayoutOptions(
         Number.isFinite(tagS) && Number.isFinite(tagT) ? (tagS + tagT) / 2 : 0.5;
       len *= 1 + (tagAvg - 0.5) * 0.82;
 
+      // “层级跨度”可视化：buildGraphElements 为边写入 edgeIdealLenFactor（默认 1）。
+      // 该因子主要由 Δlevel（层级跨度）驱动，用于让跨层边更长、更醒目。
+      const rawLenFactor = Number(edge?.data?.('edgeIdealLenFactor'));
+      if (Number.isFinite(rawLenFactor)) {
+        // 允许更大的长度倍率，否则差异会被夹平
+        const f = Math.max(0.55, Math.min(4.0, rawLenFactor));
+        len *= f;
+      }
+
       // 一侧为 hub、一侧明显更弱：辐条略短；若弱侧同时连接多个 hub，则拉长该辐条，避免多个高中心簇被同一节点拽得太近
       const cLow = Math.min(cS, cT);
       const cHigh = Math.max(cS, cT);
@@ -757,7 +766,8 @@ export function buildGraphCoseLayoutOptions(
         }
       }
 
-      return Math.max(46, Math.min(320, len));
+      // 提高上限，保证“源头辐射”的长边能拉开差异
+      return Math.max(46, Math.min(720, len));
     },
     nodeRepulsion: (node: any) => {
       const c = centrality.normByNodeId.get(String(node?.id?.() ?? '')) ?? 0;

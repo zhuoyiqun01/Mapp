@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Project, Note } from '../types';
-import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check, Upload, Palette, ZoomIn, Copy, RefreshCw } from 'lucide-react';
+import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check, Upload, Palette, Sparkles, ZoomIn, Copy, RefreshCw } from 'lucide-react';
 import { generateId, formatDate, exportToJpeg, exportToJpegCentered, compressImageFromBase64 } from '../utils';
 import { loadProject, loadNoteImages, saveProject, loadAllProjects } from '../utils/persistence/storage';
 import { getLastSyncTime, type SyncStatus } from '../utils/persistence/sync';
@@ -389,6 +389,13 @@ interface ProjectManagerProps {
   sidebarExpandingToHome?: boolean;
   /** 仅取消“选中态高亮”（保持可见行收束逻辑不变） */
   clearSelectionInTransition?: boolean;
+  /** 主页彩蛋模式：把标题交给物理层，UI 列表/按钮滑出 */
+  easterEggMode?: boolean;
+  onToggleEasterEggMode?: () => void;
+  easterEggGravityY?: number;
+  onEasterEggGravityYChange?: (v: number) => void;
+  easterEggMouseConstraintStiffness?: number;
+  onEasterEggMouseConstraintStiffnessChange?: (v: number) => void;
 }
 
 export const ProjectManager: React.FC<ProjectManagerProps> = ({
@@ -426,7 +433,13 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   projectLoadProgress = 0,
   transitionListOnly = false,
   sidebarExpandingToHome = false,
-  clearSelectionInTransition = false
+  clearSelectionInTransition = false,
+  easterEggMode = false,
+  onToggleEasterEggMode,
+  easterEggGravityY,
+  onEasterEggGravityYChange,
+  easterEggMouseConstraintStiffness,
+  onEasterEggMouseConstraintStiffnessChange
 }) => {
   // Helper function to calculate darker version of theme color
   const getDarkerColor = (color: string): string => {
@@ -1149,7 +1162,9 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     ? 'h-full w-full min-h-0 overflow-hidden flex flex-col relative'
     : expandToHomeLayout
       ? isSidebar
-        ? 'h-full w-full min-h-0 flex flex-col items-center justify-start pt-24 pb-0 p-4 relative shadow-2xl border-r'
+        ? activeProject
+          ? 'h-full w-full min-h-0 flex flex-col items-center justify-start pt-24 pb-0 p-4 relative shadow-2xl border-r'
+          : 'h-full w-full min-h-0 flex flex-col items-center justify-start pt-24 pb-0 p-4 relative'
         : 'h-full w-full min-h-0 flex flex-col items-center justify-start pt-24 pb-0 p-4 relative'
       : isSidebar
         ? 'h-full w-full shadow-2xl flex flex-col border-r overflow-hidden'
@@ -1274,30 +1289,51 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           </>
         )}
       {/* 全屏启动页或侧栏展成主页布局：设置入口与 chrome 设定一致，与当前是否打开项目无关 */}
-      {(!isSidebar || expandToHomeLayout) &&
+      {true &&
         !transitionListOnly &&
         onThemeColorChange &&
         onMapUiChromeOpacityChange &&
         onMapUiChromeBlurPxChange && (
         <>
-          <button
-            type="button"
-            onClick={() => {
-              setShowAppearanceSettingsBlockInSettings(true);
-              setShowHomeSettings(true);
-            }}
-            className="absolute top-4 left-4 z-[2010] flex h-10 w-10 items-center justify-center rounded-xl text-theme-chrome-fg transition-colors pointer-events-auto"
-            title="设置"
-            style={{ backgroundColor: themeColor }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = themeColorDark;
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = themeColor;
-            }}
-          >
-            <Palette size={22} strokeWidth={2} aria-hidden />
-          </button>
+          {!isSidebar || expandToHomeLayout ? (
+            <div className="absolute top-4 left-4 z-[2010] flex items-center gap-2 pointer-events-auto">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAppearanceSettingsBlockInSettings(true);
+                  setShowHomeSettings(true);
+                }}
+                className="flex h-10 w-10 items-center justify-center rounded-xl text-theme-chrome-fg transition-colors"
+                title="设置"
+                style={{ backgroundColor: themeColor }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = themeColorDark;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = themeColor;
+                }}
+              >
+                <Palette size={22} strokeWidth={2} aria-hidden />
+              </button>
+              {onToggleEasterEggMode && !activeProject ? (
+                <button
+                  type="button"
+                  onClick={() => onToggleEasterEggMode()}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl text-theme-chrome-fg transition-colors"
+                  title="彩蛋"
+                  style={{ backgroundColor: easterEggMode ? themeColorDark : themeColor }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = themeColorDark;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = easterEggMode ? themeColorDark : themeColor;
+                  }}
+                >
+                  <Sparkles size={22} strokeWidth={2} aria-hidden />
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           {showHomeSettings &&
             typeof document !== 'undefined' &&
             createPortal(
@@ -1340,6 +1376,10 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                           onMapUiChromeOpacityChange={onMapUiChromeOpacityChange}
                           mapUiChromeBlurPx={mapUiChromeBlurPx}
                           onMapUiChromeBlurPxChange={onMapUiChromeBlurPxChange}
+                          easterEggGravityY={easterEggGravityY}
+                          onEasterEggGravityYChange={onEasterEggGravityYChange}
+                          easterEggMouseConstraintStiffness={easterEggMouseConstraintStiffness}
+                          onEasterEggMouseConstraintStiffnessChange={onEasterEggMouseConstraintStiffnessChange}
                         />
                       ) : null}
                     </div>
@@ -1436,54 +1476,54 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         </>
       )}
 
-      {/* popLayout：hero 开始离场时即从 flex 占位中移除，列表可与中间态同步上移 */}
-      <AnimatePresence initial={false} mode="popLayout">
-        {homeLikeList ? (
-          <MotionDiv
-            key="pm-home-hero"
-            className="relative z-[5] flex w-full shrink-0 flex-col items-center overflow-visible"
-            initial={{ y: '-8rem', opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: '-8rem', opacity: 0 }}
-            transition={{
-              duration: PROJECT_OPEN_SLIDE_DURATION_S,
-              ease: PROJECT_OPEN_SLIDE_EASE
-            }}
-            style={{ willChange: 'transform, opacity' }}
+      {/* 顶部 Hero：始终占位，彩蛋模式下用透明内容占位，避免列表在切换时先上跳 */}
+      {homeLikeList ? (
+        <div className="relative z-[5] flex w-full shrink-0 flex-col items-center overflow-visible pointer-events-none">
+          <h1
+            className={titleClass}
+            style={easterEggMode ? { visibility: 'hidden' } : undefined}
           >
-            <h1 className={titleClass}>
-              <span>START</span>
-              <span>YOUR</span>
-              <span>MAPPING</span>
-            </h1>
+            <span>START</span>
+            <span>YOUR</span>
+            <span>MAPPING</span>
+          </h1>
+        </div>
+      ) : null}
 
-            <button
-              type="button"
-              onClick={() => setIsCreating(true)}
-              className="mt-8 px-8 py-4 text-black rounded-full font-bold text-lg shadow-xl border border-white/50 hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
-              style={{
-                ...mapChromeSurface,
-                ...(newProjectHover ? { backgroundColor: mapChromeHoverBg } : {})
-              }}
-              onMouseEnter={() => setNewProjectHover(true)}
-              onMouseLeave={() => setNewProjectHover(false)}
-            >
-              <Plus size={24} /> New Project
-            </button>
-          </MotionDiv>
-        ) : null}
-      </AnimatePresence>
-
-      <MotionDiv
-        layout
-        layoutScroll
-        transition={{
-          layout: {
-            type: 'tween',
+      {!transitionListOnly && homeLikeList ? (
+        <MotionDiv
+          className="relative z-[6] flex w-full shrink-0 flex-col items-center overflow-visible"
+          initial={false}
+          animate={easterEggMode ? { y: '200vh', opacity: 0 } : { y: 0, opacity: 1 }}
+          transition={{
             duration: PROJECT_OPEN_SLIDE_DURATION_S,
             ease: PROJECT_OPEN_SLIDE_EASE
-          }
+          }}
+          style={{ willChange: 'transform, opacity', pointerEvents: easterEggMode ? 'none' : 'auto' }}
+        >
+          <button
+            type="button"
+            onClick={() => setIsCreating(true)}
+            className="mt-8 px-8 py-4 text-black rounded-full font-bold text-lg shadow-xl border border-white/50 hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
+            style={{
+              ...mapChromeSurface,
+              ...(newProjectHover ? { backgroundColor: mapChromeHoverBg } : {})
+            }}
+            onMouseEnter={() => setNewProjectHover(true)}
+            onMouseLeave={() => setNewProjectHover(false)}
+          >
+            <Plus size={24} /> New Project
+          </button>
+        </MotionDiv>
+      ) : null}
+
+      <MotionDiv
+        initial={false}
+        transition={{
+          duration: PROJECT_OPEN_SLIDE_DURATION_S,
+          ease: PROJECT_OPEN_SLIDE_EASE
         }}
+        animate={easterEggMode ? { y: '200vh', opacity: 0 } : { y: 0, opacity: 1 }}
         className={
           isSidebar
           ? `min-h-0 flex-1 w-full max-w-md mx-auto overflow-y-auto overscroll-contain ${
@@ -1495,15 +1535,16 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
               } w-full px-4 pb-4 ${transitionListOnly ? 'pt-14' : 'pt-28'}`
               : 'min-h-0 flex-1 w-full max-w-md mt-8 overflow-y-auto overscroll-contain theme-surface-scrollbar bg-transparent p-4 pb-8'
         }
-        style={
-          compactProjectList
+        style={{
+          pointerEvents: easterEggMode ? 'none' : 'auto',
+          ...(compactProjectList
             ? {
                 touchAction: 'pan-y',
                 overscrollBehavior: 'contain',
                 WebkitOverflowScrolling: 'touch'
               }
-            : {}
-        }
+            : {})
+        }}
         onTouchStart={(e) => {
           if (compactProjectList) {
             e.stopPropagation();

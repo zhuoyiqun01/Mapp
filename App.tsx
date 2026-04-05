@@ -8,6 +8,7 @@ import { BoardView } from './components/BoardView';
 import { TableView } from './components/TableView';
 import { GraphView } from './components/GraphView';
 import { ProjectManager } from './components/ProjectManager';
+import { HomePhysicsPlayground } from './components/HomePhysicsPlayground';
 import { Note, ViewMode, Project } from './types';
 import { get, set } from 'idb-keyval';
 import {
@@ -16,6 +17,7 @@ import {
   PROJECT_OPEN_SLIDE_DURATION_S,
   PROJECT_OPEN_SLIDE_EASE,
   PROJECT_SIDEBAR_DRAWER_WIDTH_PX,
+  PROJECT_LIST_MAX_WIDTH_PX,
   PROJECT_SIDEBAR_FIXED_WIDTH_MIN_VIEWPORT_PX
 } from './constants';
 import { useProjectState } from './components/hooks/useProjectState';
@@ -72,6 +74,10 @@ export default function App() {
   const [sidebarDockedInline, setSidebarDockedInline] = useState(false);
   /** 回主页：先让 overlay 在卸载前采用无位移 exit，避免与「项目切换收起」共用同一套滑出 */
   const [homeOverlayExitInstant, setHomeOverlayExitInstant] = useState(false);
+  /** 彩蛋模式：仅稳定主页生效 */
+  const [homeEasterEggMode, setHomeEasterEggMode] = useState(false);
+  const [homeEasterEggGravityY, setHomeEasterEggGravityY] = useState(1.35);
+  const [homeEasterEggMouseConstraintStiffness, setHomeEasterEggMouseConstraintStiffness] = useState(0.18);
   const expandToHomeProjectIdRef = useRef<string | null>(null);
   /** 从主页进入项目：pending 至少持续一小段时间，避免太短导致视觉上像瞬切 */
   const homeEnterTransitionStartRef = useRef<number | null>(null);
@@ -165,25 +171,38 @@ export default function App() {
 
   const atSteadyProjectHome = !activeProject && !inProjectHomeTransition;
 
+  // 离开稳定主页时自动退出彩蛋模式，避免把 UI/物理效果带到其他状态
+  useEffect(() => {
+    if (!atSteadyProjectHome && homeEasterEggMode) setHomeEasterEggMode(false);
+  }, [atSteadyProjectHome, homeEasterEggMode]);
+
   const projectSidebarDrawerWidth = useMemo(() => {
-    if (
-      sidebarExpandingToHome ||
-      sidebarExpandForProjectSwitch ||
-      atSteadyProjectHome ||
-      pendingEnterWorkspaceFromHome
-    ) {
+    // 规则：
+    // - 主页（稳定）全宽
+    // - 主页->项目：pending 中间态全宽，随后收束到抽屉宽
+    // - 项目->主页：expanding 中间态全宽，随后退出到主页
+    // - 项目->项目：切换展开全宽
+    if (atSteadyProjectHome || pendingEnterWorkspaceFromHome || sidebarExpandingToHome) {
       return '100%';
     }
+    if (activeProject && sidebarExpandForProjectSwitch) return '100%';
     return projectSidebarLargeViewport
-      ? `${PROJECT_SIDEBAR_DRAWER_WIDTH_PX}px`
-      : '62%';
+      ? `${PROJECT_LIST_MAX_WIDTH_PX}px`
+      : `min(62vw, ${PROJECT_LIST_MAX_WIDTH_PX}px)`;
   }, [
+    activeProject,
     sidebarExpandingToHome,
     sidebarExpandForProjectSwitch,
     atSteadyProjectHome,
     pendingEnterWorkspaceFromHome,
     projectSidebarLargeViewport
   ]);
+
+  const projectSidebarIsFullWidth =
+    atSteadyProjectHome ||
+    pendingEnterWorkspaceFromHome ||
+    sidebarExpandingToHome ||
+    (!!activeProject && sidebarExpandForProjectSwitch);
 
   const { handleDataImport: handleProjectDataImport } = useDataImport({
     project: activeProject as Project,
@@ -703,6 +722,24 @@ export default function App() {
     loadMapUiChrome();
   }, []);
 
+  useEffect(() => {
+    const loadHomeEasterEggSettings = async () => {
+      try {
+        const g = await get<number>('mapp-home-easter-egg-gravity-y');
+        if (typeof g === 'number' && !Number.isNaN(g)) {
+          setHomeEasterEggGravityY(Math.min(3, Math.max(0, g)));
+        }
+        const s = await get<number>('mapp-home-easter-egg-mouse-stiffness');
+        if (typeof s === 'number' && !Number.isNaN(s)) {
+          setHomeEasterEggMouseConstraintStiffness(Math.min(0.5, Math.max(0.02, s)));
+        }
+      } catch (err) {
+        console.error('Failed to load home easter egg settings', err);
+      }
+    };
+    loadHomeEasterEggSettings();
+  }, []);
+
   // Load Projects from IndexedDB and Cloud
   useEffect(() => {
     const loadProjects = async () => {
@@ -1176,8 +1213,12 @@ export default function App() {
         await projectState.updateProject({ ...currentProject, ...updates });
       }
     } else {
-      // Update by full project object
-      await projectState.updateProject(projectOrId);
+      // Update by full project object (optionally with updates patch)
+      if (updates) {
+        await projectState.updateProject({ ...projectOrId, ...updates });
+      } else {
+        await projectState.updateProject(projectOrId);
+      }
     }
   };
 
@@ -1243,6 +1284,14 @@ export default function App() {
         touchAction: 'manipulation'
       }}
     >
+      <HomePhysicsPlayground
+        enabled={atSteadyProjectHome && homeEasterEggMode}
+        easterEggMode={atSteadyProjectHome && homeEasterEggMode}
+        gravityY={homeEasterEggGravityY}
+        mouseConstraintStiffness={homeEasterEggMouseConstraintStiffness}
+        projectNames={projectSummaries.map((p) => p.name)}
+        themeColor={themeColor}
+      />
       {/* 删除项目：保留简短阻断提示（加载项目改由 ProjectManager 顶部分条） */}
       {isDeletingProject && (
         <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/40 backdrop-blur-[2px]">
@@ -1262,10 +1311,11 @@ export default function App() {
               <MotionDiv
                 className="relative z-[1990] h-full min-h-0 shrink-0 overflow-visible shadow-2xl"
                 style={{
-                  borderRightWidth: 1,
+                  borderRightWidth: projectSidebarIsFullWidth ? 0 : 1,
                   borderRightStyle: 'solid',
                   borderRightColor: themeColor,
-                  willChange: 'width'
+                  willChange: 'width',
+                  boxShadow: projectSidebarIsFullWidth ? 'none' : undefined
                 }}
                 initial={false}
                 animate={{ width: projectSidebarDrawerWidth }}
@@ -1283,6 +1333,27 @@ export default function App() {
                   transitionListOnly={projectManagerTransitionListOnly}
                   sidebarExpandingToHome={sidebarExpandingToHome}
                   clearSelectionInTransition={sidebarExpandingToHome}
+                  easterEggMode={atSteadyProjectHome && homeEasterEggMode}
+                  onToggleEasterEggMode={() => {
+                    setHomeEasterEggMode((v) => {
+                      const next = !v;
+                      // 进入彩蛋模式时关闭“清理数据”菜单，避免遮罩/菜单覆盖物理层造成困惑
+                      if (next) setShowCleanupMenu(false);
+                      return next;
+                    });
+                  }}
+                  easterEggGravityY={homeEasterEggGravityY}
+                  onEasterEggGravityYChange={async (v) => {
+                    const next = Math.min(3, Math.max(0, v));
+                    setHomeEasterEggGravityY(next);
+                    await set('mapp-home-easter-egg-gravity-y', next);
+                  }}
+                  easterEggMouseConstraintStiffness={homeEasterEggMouseConstraintStiffness}
+                  onEasterEggMouseConstraintStiffnessChange={async (v) => {
+                    const next = Math.min(0.5, Math.max(0.02, v));
+                    setHomeEasterEggMouseConstraintStiffness(next);
+                    await set('mapp-home-easter-egg-mouse-stiffness', next);
+                  }}
                   showHomeDataCleanupButton={!activeProject}
                   homeCleanupMenuOpen={showCleanupMenu}
                   onHomeCleanupMenuToggle={() => setShowCleanupMenu(!showCleanupMenu)}
@@ -1371,6 +1442,26 @@ export default function App() {
                  transitionListOnly={projectManagerTransitionListOnly}
                  sidebarExpandingToHome={sidebarExpandingToHome}
                 clearSelectionInTransition={sidebarExpandingToHome}
+                 easterEggMode={atSteadyProjectHome && homeEasterEggMode}
+                 onToggleEasterEggMode={() => {
+                   setHomeEasterEggMode((v) => {
+                     const next = !v;
+                     if (next) setShowCleanupMenu(false);
+                     return next;
+                   });
+                 }}
+                 easterEggGravityY={homeEasterEggGravityY}
+                 onEasterEggGravityYChange={async (v) => {
+                   const next = Math.min(3, Math.max(0, v));
+                   setHomeEasterEggGravityY(next);
+                   await set('mapp-home-easter-egg-gravity-y', next);
+                 }}
+                 easterEggMouseConstraintStiffness={homeEasterEggMouseConstraintStiffness}
+                 onEasterEggMouseConstraintStiffnessChange={async (v) => {
+                   const next = Math.min(0.5, Math.max(0.02, v));
+                   setHomeEasterEggMouseConstraintStiffness(next);
+                   await set('mapp-home-easter-egg-mouse-stiffness', next);
+                 }}
                  showHomeDataCleanupButton={!activeProject}
                  homeCleanupMenuOpen={showCleanupMenu}
                  onHomeCleanupMenuToggle={() => setShowCleanupMenu(!showCleanupMenu)}
