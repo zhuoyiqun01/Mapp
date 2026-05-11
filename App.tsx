@@ -50,6 +50,7 @@ import {
   cleanupOrphanedData,
   cleanBrokenReferences,
   loadAllProjects,
+  saveProject,
   ProjectSummary
 } from './utils/persistence/storage';
 import { mapChromeSurfaceStyle, mapChromeHoverBackground } from './utils/map/mapChromeStyle';
@@ -58,6 +59,8 @@ import { useDataImport } from './components/hooks/useDataImport';
 import { useCsvImport } from './components/hooks/useCsvImport';
 import { useFileDrop } from './components/hooks/useFileDrop';
 import { EditInspectorProvider } from './components/editInspector/EditInspectorProvider';
+import { fetchBuiltinExamplesManifest } from './utils/builtinExamples/manifest';
+import { buildFreshProjectFromExportedProject, parseExportPayload } from './utils/builtinExamples/projectFromExport';
 
 export default function App() {
   const emptyNotes = useMemo(() => [], []);
@@ -78,6 +81,8 @@ export default function App() {
   const [homeEasterEggMode, setHomeEasterEggMode] = useState(false);
   const [homeEasterEggGravityY, setHomeEasterEggGravityY] = useState(1.35);
   const [homeEasterEggMouseConstraintStiffness, setHomeEasterEggMouseConstraintStiffness] = useState(0.18);
+  /** 仅开发者维护内置示例项目（增删/列表显示等）；默认对普通用户隐藏 */
+  const [exampleDevMaintenanceMode, setExampleDevMaintenanceMode] = useState(false);
   const expandToHomeProjectIdRef = useRef<string | null>(null);
   /** 从主页进入项目：pending 至少持续一小段时间，避免太短导致视觉上像瞬切 */
   const homeEnterTransitionStartRef = useRef<number | null>(null);
@@ -121,6 +126,59 @@ export default function App() {
     saveMapPosition,
     saveBoardPosition
   } = viewState;
+
+  /**
+   * selectProject 会先 setCurrentProjectId(新 id)、异步 load 完成后再 setActiveProject。
+   * 窗口期内 MapView 等会收到「project=旧数据 + currentProjectId=新 id」：地图缓存按新项目、
+   * 笔记坐标仍属旧项目，表现为上一项目的视图或首次进入布局错乱。
+   * 仅依赖 id 对齐，不依赖 isLoadingProject，避免与 setState 批处理竞态导致一帧错图。
+   */
+  const isWorkspaceProjectDataStale =
+    !!activeProject &&
+    !!currentProjectId &&
+    activeProject.id !== currentProjectId;
+
+  // 安装内置示例项目（首次打开/未安装时）
+  useEffect(() => {
+    let cancelled = false;
+    const keyInstalled = 'mapp-builtin-examples-installed';
+    const keyIds = 'mapp-builtin-example-project-ids';
+    const run = async () => {
+      try {
+        if (localStorage.getItem(keyInstalled) === '1') return;
+        const manifest = await fetchBuiltinExamplesManifest();
+        if (manifest.length === 0) return;
+
+        const createdIds: string[] = [];
+        for (const ex of manifest) {
+          const res = await fetch(`/examples/${ex.file}`, { cache: 'no-store' });
+          if (!res.ok) continue;
+          const text = await res.text();
+          const { project } = parseExportPayload(text);
+          const nameFromProject =
+            typeof project.name === 'string' && project.name.trim().length > 0
+              ? project.name.trim()
+              : ex.title;
+          const fresh = buildFreshProjectFromExportedProject(project, nameFromProject);
+          await saveProject(fresh);
+          createdIds.push(fresh.id);
+        }
+
+        if (cancelled) return;
+        if (createdIds.length > 0) {
+          localStorage.setItem(keyIds, JSON.stringify(createdIds));
+        }
+        localStorage.setItem(keyInstalled, '1');
+        await projectState.loadProjects();
+      } catch {
+        // 忽略：示例项目是增强功能，不阻塞主流程
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectState]);
 
   // 保存board位置（现在只在拖拽结束时调用，类似MapPositionTracker的moveend事件）
   const saveBoardPositionDirect = useCallback((projectId: string, x: number, y: number, scale: number) => {
@@ -484,11 +542,6 @@ export default function App() {
     if (currentProjectId === id) {
       closeProjectSidebar();
       return;
-    }
-
-    if (currentProjectId && currentProjectId !== id) {
-      console.log('[App] Clearing cache for old project:', currentProjectId);
-      clearViewPositionCache(currentProjectId);
     }
 
     const fromHome = !currentProjectId;
@@ -881,8 +934,14 @@ export default function App() {
 
   // Disable browser two-finger zoom and long-press interactions
   useEffect(() => {
+    const isInsideLeafletMap = (target: EventTarget | null): boolean => {
+      return target instanceof Element && !!target.closest('.leaflet-container');
+    };
+
     const preventZoom = (e: TouchEvent) => {
       if (e.touches.length > 1) {
+        // Leaflet 双指缩放依赖 touch 序列；全局 preventDefault 会废掉 TouchZoom。
+        if (isInsideLeafletMap(e.target)) return;
         e.preventDefault();
       }
     };
@@ -1331,6 +1390,7 @@ export default function App() {
                   isSidebar
                   expandToHomeLayout={!activeProject}
                   transitionListOnly={projectManagerTransitionListOnly}
+                  showHomeHeroInTransition={pendingEnterWorkspaceFromHome}
                   sidebarExpandingToHome={sidebarExpandingToHome}
                   clearSelectionInTransition={sidebarExpandingToHome}
                   easterEggMode={atSteadyProjectHome && homeEasterEggMode}
@@ -1387,6 +1447,10 @@ export default function App() {
                     setMapStyle(styleId);
                     set('mapp-map-style', styleId);
                   }}
+                  exampleDevMaintenanceMode={exampleDevMaintenanceMode}
+                  onExampleDevMaintenanceModeToggle={() =>
+                    setExampleDevMaintenanceMode((v) => !v)
+                  }
                 />
               </MotionDiv>
             )}
@@ -1440,6 +1504,7 @@ export default function App() {
                  isSidebar
                  expandToHomeLayout={sidebarExpandingToHome || sidebarExpandForProjectSwitch}
                  transitionListOnly={projectManagerTransitionListOnly}
+                 showHomeHeroInTransition={pendingEnterWorkspaceFromHome}
                  sidebarExpandingToHome={sidebarExpandingToHome}
                 clearSelectionInTransition={sidebarExpandingToHome}
                  easterEggMode={atSteadyProjectHome && homeEasterEggMode}
@@ -1495,6 +1560,10 @@ export default function App() {
                     setMapStyle(styleId);
                     set('mapp-map-style', styleId);
                   }}
+                 exampleDevMaintenanceMode={exampleDevMaintenanceMode}
+                 onExampleDevMaintenanceModeToggle={() =>
+                   setExampleDevMaintenanceMode((v) => !v)
+                 }
               />
              </MotionDiv>
         </div>
@@ -1599,6 +1668,12 @@ export default function App() {
         )}
 
         {viewMode === 'map' ? (
+          isWorkspaceProjectDataStale ? (
+          <div className="flex h-full w-full min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-gray-100 text-gray-600">
+            <Loader2 size={32} className="animate-spin shrink-0" aria-hidden />
+            <span className="text-sm font-medium">加载项目…</span>
+          </div>
+          ) : (
           <MapView 
             project={activeProject}
             workspaceEditMode={mappingWorkspaceEditMode}
@@ -1662,7 +1737,14 @@ export default function App() {
               await projectState.updateProject({ ...activeProject, connections });
             }}
           />
+          )
         ) : viewMode === 'board' ? (
+          isWorkspaceProjectDataStale ? (
+          <div className="flex h-full w-full min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-gray-100 text-gray-600">
+            <Loader2 size={32} className="animate-spin shrink-0" aria-hidden />
+            <span className="text-sm font-medium">加载项目…</span>
+          </div>
+          ) : (
           <BoardView 
             notes={activeProject.notes || emptyNotes}
             workspaceEditMode={mappingWorkspaceEditMode}
@@ -1734,7 +1816,14 @@ export default function App() {
               await projectState.updateProject({ ...activeProject, connections });
             }}
           />
+          )
         ) : viewMode === 'graph' ? (
+          isWorkspaceProjectDataStale ? (
+          <div className="flex h-full w-full min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-gray-100 text-gray-600">
+            <Loader2 size={32} className="animate-spin shrink-0" aria-hidden />
+            <span className="text-sm font-medium">加载项目…</span>
+          </div>
+          ) : (
           <GraphView
             projectId={currentProjectId ?? ''}
             project={activeProject}
@@ -1782,7 +1871,14 @@ export default function App() {
             onMapStyleChange={setMapStyle}
             onUpdateProject={handleUpdateProject}
           />
+          )
         ) : (
+          isWorkspaceProjectDataStale ? (
+          <div className="flex h-full w-full min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-gray-100 text-gray-600">
+            <Loader2 size={32} className="animate-spin shrink-0" aria-hidden />
+            <span className="text-sm font-medium">加载项目…</span>
+          </div>
+          ) : (
           <TableView 
             project={activeProject}
             onUpdateNote={updateNote}
@@ -1815,6 +1911,7 @@ export default function App() {
             projectId={currentProjectId ?? ''}
             onUpdateProject={handleUpdateProject}
           />
+          )
         )}
           </>
         ) : pendingEnterWorkspaceFromHome || isLoadingProject ? (

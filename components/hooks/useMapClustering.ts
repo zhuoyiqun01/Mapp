@@ -1,6 +1,7 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useLayoutEffect } from 'react';
 import type { Map as LeafletMap } from 'leaflet';
 import type { Note } from '../../types';
+import { unwrapLngNearCenter } from '../../utils/map/lngWorldWrap';
 
 interface ClusterResult {
   notes: Note[];
@@ -28,8 +29,12 @@ function calculatePinDistance(
     const container = map.getContainer();
     if (!container) return null;
 
-    const point1 = map.latLngToContainerPoint([note1.coords.lat, note1.coords.lng]);
-    const point2 = map.latLngToContainerPoint([note2.coords.lat, note2.coords.lng]);
+    const cLng = map.getCenter().lng;
+    const lng1 = unwrapLngNearCenter(note1.coords.lng, cLng);
+    const lng2 = unwrapLngNearCenter(note2.coords.lng, cLng);
+
+    const point1 = map.latLngToContainerPoint([note1.coords.lat, lng1]);
+    const point2 = map.latLngToContainerPoint([note2.coords.lat, lng2]);
 
     if (
       !point1 ||
@@ -116,6 +121,12 @@ export function useMapClustering({
 }: UseMapClusteringProps) {
   const [clusteredMarkers, setClusteredMarkers] = useState<ClusterResult[]>([]);
   const mapInstanceRef = useRef<LeafletMap | null>(null);
+  /** 缩放过程中为 true；供 rAF 内读取，避免仅用闭包变量与 Leaflet 异步不同步 */
+  const isZoomingRef = useRef(false);
+  const getFilteredNotesRef = useRef(getFilteredNotes);
+  useLayoutEffect(() => {
+    getFilteredNotesRef.current = getFilteredNotes;
+  }, [getFilteredNotes]);
 
   useEffect(() => {
     mapInstanceRef.current = mapInstance;
@@ -129,9 +140,20 @@ export function useMapClustering({
 
     let updateTimeoutId: ReturnType<typeof setTimeout> | null = null;
     let rafId: number | null = null;
-    let isZooming = false;
+
+    let settleRemoveTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const clearClusterSettleClass = () => {
+      if (settleRemoveTimer != null) {
+        clearTimeout(settleRemoveTimer);
+        settleRemoveTimer = null;
+      }
+      mapInstanceRef.current?.getContainer()?.classList.remove('map-cluster-settling');
+    };
 
     const updateClusters = () => {
+      if (isZoomingRef.current) return;
+
       const currentMap = mapInstanceRef.current;
       if (!currentMap) return;
 
@@ -146,24 +168,30 @@ export function useMapClustering({
       }
 
       const requestedRafId = requestAnimationFrame(() => {
+        if (isZoomingRef.current) return;
+
         const currentMap = mapInstanceRef.current;
         if (!currentMap) return;
 
         try {
           const container = currentMap.getContainer();
           if (!container || !container.offsetParent) {
-            updateTimeoutId = setTimeout(updateClusters, 50);
+            if (!isZoomingRef.current) {
+              updateTimeoutId = setTimeout(updateClusters, 50);
+            }
             return;
           }
 
           const mapPane = currentMap.getPane('mapPane');
           if (!mapPane) {
-            updateTimeoutId = setTimeout(updateClusters, 50);
+            if (!isZoomingRef.current) {
+              updateTimeoutId = setTimeout(updateClusters, 50);
+            }
             return;
           }
 
           const clusters = detectClusters(
-            getFilteredNotes(),
+            getFilteredNotesRef.current(),
             currentMap,
             clusterThreshold,
             forceSingleNoteIds
@@ -171,7 +199,9 @@ export function useMapClustering({
           setClusteredMarkers(clusters);
         } catch (e) {
           console.warn('Failed to update clusters:', e);
-          updateTimeoutId = setTimeout(updateClusters, 50);
+          if (!isZoomingRef.current) {
+            updateTimeoutId = setTimeout(updateClusters, 50);
+          }
         }
       });
       rafId = requestedRafId;
@@ -179,17 +209,9 @@ export function useMapClustering({
 
     const timeoutId = setTimeout(updateClusters, 100);
 
-    const handleZoom = () => {
-      isZooming = true;
-      if (updateTimeoutId) {
-        clearTimeout(updateTimeoutId);
-        updateTimeoutId = null;
-      }
-      updateClusters();
-    };
-
-    const handleZoomEnd = () => {
-      isZooming = false;
+    const handleZoomStart = () => {
+      isZoomingRef.current = true;
+      clearClusterSettleClass();
       if (updateTimeoutId) {
         clearTimeout(updateTimeoutId);
         updateTimeoutId = null;
@@ -198,19 +220,38 @@ export function useMapClustering({
         cancelAnimationFrame(rafId);
         rafId = null;
       }
+    };
+
+    const handleZoomEnd = () => {
+      isZoomingRef.current = false;
+      clearClusterSettleClass();
+      if (updateTimeoutId) {
+        clearTimeout(updateTimeoutId);
+        updateTimeoutId = null;
+      }
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      /** 缩放完全结束后再聚类一次；略延迟便于底图/视图稳定 */
       updateTimeoutId = setTimeout(() => {
+        const el = mapInstanceRef.current?.getContainer();
+        el?.classList.add('map-cluster-settling');
         updateClusters();
-        updateTimeoutId = setTimeout(updateClusters, 150);
-      }, 100);
+        settleRemoveTimer = setTimeout(() => {
+          mapInstanceRef.current?.getContainer()?.classList.remove('map-cluster-settling');
+          settleRemoveTimer = null;
+        }, 340);
+      }, 220);
     };
 
     const handleMoveEnd = () => {
-      if (isZooming) return;
+      if (isZoomingRef.current) return;
       if (updateTimeoutId) clearTimeout(updateTimeoutId);
       updateTimeoutId = setTimeout(updateClusters, 50);
     };
 
-    mapInstance.on('zoom', handleZoom);
+    mapInstance.on('zoomstart', handleZoomStart);
     mapInstance.on('zoomend', handleZoomEnd);
     mapInstance.on('moveend', handleMoveEnd);
 
@@ -218,11 +259,12 @@ export function useMapClustering({
       clearTimeout(timeoutId);
       if (updateTimeoutId) clearTimeout(updateTimeoutId);
       if (rafId !== null) cancelAnimationFrame(rafId);
-      mapInstance.off('zoom', handleZoom);
+      clearClusterSettleClass();
+      mapInstance.off('zoomstart', handleZoomStart);
       mapInstance.off('zoomend', handleZoomEnd);
       mapInstance.off('moveend', handleMoveEnd);
     };
-  }, [mapInstance, getFilteredNotes, clusterThreshold]);
+  }, [mapInstance, clusterThreshold, forceSingleNoteIds]);
 
   const sortNotesCallback = useCallback((notes: Note[]) => sortNotes(notes), []);
 

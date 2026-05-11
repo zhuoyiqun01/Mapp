@@ -1,8 +1,13 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
+import { useMap, useMapEvents } from 'react-leaflet';
 import type { Map as LeafletMap, LeafletMouseEvent, DragEndEvent } from 'leaflet';
 import type { Note } from '../../../types';
 import { NoteMarker } from '../markers/NoteMarker';
 import type { Coordinates } from '../../../types';
+import {
+  lngWrapOffsetsForBounds,
+  primaryWrapOffsetForCenter
+} from '../../../utils/map/lngWorldWrap';
 
 export interface ClusterResult {
   notes: Note[];
@@ -50,7 +55,28 @@ function ClusterMarkerLayerInner({
   noteCoordOverrides = {},
   noteStackRank
 }: ClusterMarkerLayerProps) {
-  if (!mapInstance) return null;
+  const map = useMap();
+  const [, bump] = useState(0);
+  const rafRef = useRef<number | null>(null);
+
+  useMapEvents({
+    zoomend: () => bump((n) => n + 1),
+    moveend: () => bump((n) => n + 1),
+    move: () => {
+      if (rafRef.current != null) return;
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
+        bump((n) => n + 1);
+      });
+    }
+  });
+
+  if (!mapInstance || !map) return null;
+
+  const b = map.getBounds();
+  const west = b.getWest();
+  const east = b.getEast();
+  const cLng = map.getCenter().lng;
 
   const zBoost = (note: Note) => (note.isFavorite ? 200 : 0) + (noteStackRank?.get(note.id) ?? 0) * 2;
 
@@ -59,19 +85,27 @@ function ClusterMarkerLayerInner({
     ((selectedNoteIds != null && selectedNoteIds.size > 0 && selectedNoteIds.has(noteId)) ||
       selectedNoteId === noteId);
 
+  const wrapKs = (lng: number) => {
+    const ks = lngWrapOffsetsForBounds(lng, west, east);
+    return ks.length ? ks : [0];
+  };
+
   if (clusteredMarkers.length > 0) {
     return (
       <>
         {clusteredMarkers.map((cluster) => {
           if (cluster.notes.length === 1) {
-            const note = cluster.notes[0];
+            const note = cluster.notes[0]!;
             const override = noteCoordOverrides[note.id];
-            const position = override ? ([override.lat, override.lng] as [number, number]) : cluster.position;
-            return (
+            const lat = override ? override.lat : cluster.position[0]!;
+            const lng = override ? override.lng : cluster.position[1]!;
+            const ks = wrapKs(lng);
+            const primaryK = primaryWrapOffsetForCenter(lng, cLng, ks);
+            return ks.map((k) => (
               <NoteMarker
-                key={note.id}
+                key={`${note.id}~w${k}`}
                 note={note}
-                position={position}
+                position={[lat, lng + 360 * k]}
                 showTextLabels={showTextLabels}
                 pinSize={pinSize}
                 themeColor={themeColor}
@@ -83,23 +117,24 @@ function ClusterMarkerLayerInner({
                 }}
                 onMouseEnter={onMarkerHover ? () => onMarkerHover(note) : undefined}
                 onMouseLeave={onMarkerHover ? () => onMarkerHover(null) : undefined}
-                draggable={pinDraggable(note.id)}
+                draggable={pinDraggable(note.id) && k === primaryK}
                 onDragEnd={onMarkerDragEnd ? (e) => onMarkerDragEnd(note, e) : undefined}
                 onDrag={onMarkerDrag ? (e) => onMarkerDrag(note, e) : undefined}
               />
-            );
+            ));
           } else {
             const clusterKey = cluster.notes.map((n) => n.id).sort().join('-');
-            const note = cluster.notes[0];
             const topNote = [...cluster.notes].sort(
               (a, b) => (noteStackRank?.get(b.id) ?? 0) - (noteStackRank?.get(a.id) ?? 0)
-            )[0];
+            )[0]!;
             const clusterZ = Math.max(...cluster.notes.map((n) => zBoost(n)));
-            return (
+            const [lat, lng] = cluster.position;
+            const ks = wrapKs(lng);
+            return ks.map((k) => (
               <NoteMarker
-                key={`cluster-${clusterKey}`}
+                key={`cluster-${clusterKey}~w${k}`}
                 note={topNote}
-                position={cluster.position}
+                position={[lat, lng + 360 * k]}
                 clusterCount={cluster.notes.length}
                 showTextLabels={showTextLabels}
                 pinSize={pinSize}
@@ -111,7 +146,7 @@ function ClusterMarkerLayerInner({
                   onClusterClick(cluster.notes, e);
                 }}
               />
-            );
+            ));
           }
         })}
       </>
@@ -120,30 +155,36 @@ function ClusterMarkerLayerInner({
 
   return (
     <>
-      {fallbackNotes.map((note) => (
-        <NoteMarker
-          key={note.id}
-          note={note}
-          position={[note.coords.lat, note.coords.lng]}
-          showTextLabels={showTextLabels}
-          pinSize={pinSize}
-          themeColor={themeColor}
-          zIndexOffset={zBoost(note)}
-          onClick={(e) => {
-            e.originalEvent?.stopPropagation();
-            e.originalEvent?.stopImmediatePropagation();
-            onMarkerClick(note, e);
-          }}
-          onMouseEnter={onMarkerHover ? () => onMarkerHover(note) : undefined}
-          onMouseLeave={onMarkerHover ? () => onMarkerHover(null) : undefined}
-          draggable={pinDraggable(note.id)}
-          onDragEnd={onMarkerDragEnd ? (e) => onMarkerDragEnd(note, e) : undefined}
-          onDrag={onMarkerDrag ? (e) => onMarkerDrag(note, e) : undefined}
-        />
-      ))}
+      {fallbackNotes.map((note) => {
+        const override = noteCoordOverrides[note.id];
+        const lat = override?.lat ?? note.coords.lat;
+        const lng = override?.lng ?? note.coords.lng;
+        const ks = wrapKs(lng);
+        const primaryK = primaryWrapOffsetForCenter(lng, cLng, ks);
+        return ks.map((k) => (
+          <NoteMarker
+            key={`${note.id}~w${k}`}
+            note={note}
+            position={[lat, lng + 360 * k]}
+            showTextLabels={showTextLabels}
+            pinSize={pinSize}
+            themeColor={themeColor}
+            zIndexOffset={zBoost(note)}
+            onClick={(e) => {
+              e.originalEvent?.stopPropagation();
+              e.originalEvent?.stopImmediatePropagation();
+              onMarkerClick(note, e);
+            }}
+            onMouseEnter={onMarkerHover ? () => onMarkerHover(note) : undefined}
+            onMouseLeave={onMarkerHover ? () => onMarkerHover(null) : undefined}
+            draggable={pinDraggable(note.id) && k === primaryK}
+            onDragEnd={onMarkerDragEnd ? (e) => onMarkerDragEnd(note, e) : undefined}
+            onDrag={onMarkerDrag ? (e) => onMarkerDrag(note, e) : undefined}
+          />
+        ));
+      })}
     </>
   );
 }
 
-// 明确标注 props 类型，避免 React.memo 推导丢失导致的 TS/IDE 报错
 export const ClusterMarkerLayer = React.memo(ClusterMarkerLayerInner) as React.FC<ClusterMarkerLayerProps>;

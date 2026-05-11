@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import type { Note, Connection, Coordinates } from '../../types';
+import { pairLatLngsForShortMapChord } from '../../utils/map/lngWorldWrap';
 
 interface MapConnectionLinesOverlayProps {
   selectedNoteId: string | null;
@@ -91,18 +92,14 @@ export const MapConnectionLinesOverlay: React.FC<MapConnectionLinesOverlayProps>
       const fromOverride = noteCoordOverrides[fromNote.id];
       const toOverride = noteCoordOverrides[toNote.id];
 
-      const p1 = map.latLngToContainerPoint(
-        L.latLng(
-          fromOverride?.lat ?? fromNote.coords.lat,
-          fromOverride?.lng ?? fromNote.coords.lng
-        )
-      );
-      const p2 = map.latLngToContainerPoint(
-        L.latLng(
-          toOverride?.lat ?? toNote.coords.lat,
-          toOverride?.lng ?? toNote.coords.lng
-        )
-      );
+      const lat1 = fromOverride?.lat ?? fromNote.coords.lat;
+      const lng1 = fromOverride?.lng ?? fromNote.coords.lng;
+      const lat2 = toOverride?.lat ?? toNote.coords.lat;
+      const lng2 = toOverride?.lng ?? toNote.coords.lng;
+      const { from: ll1, to: ll2 } = pairLatLngsForShortMapChord(lat1, lng1, lat2, lng2);
+
+      const p1 = map.latLngToContainerPoint(ll1);
+      const p2 = map.latLngToContainerPoint(ll2);
 
       const dx = p2.x - p1.x;
       const dy = p2.y - p1.y;

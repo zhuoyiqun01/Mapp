@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Settings, Map, SlidersHorizontal, Grid, GitBranch, Table2 } from 'lucide-react';
+import { X, Settings, Map, ChevronDown, Grid, GitBranch, Table2 } from 'lucide-react';
 import { set } from 'idb-keyval';
 import { MAP_STYLE_OPTIONS } from '../constants';
 import type { Project } from '../types';
@@ -10,6 +10,7 @@ import { HelpHint } from './ui/HelpHint';
 import { SettingsCollapsibleSection } from './ui/SettingsCollapsibleSection';
 import { SettingsCompactSlider } from './ui/SettingsCompactSlider';
 import { mapChromeSurfaceStyle, MODAL_BACKDROP_MASK_STYLE } from '../utils/map/mapChromeStyle';
+import { PORTAL_TOOLTIP_Z } from './ui/PortalTooltip';
 
 /** 由打开设置时所在的视图决定默认展开哪一块，其余折叠 */
 export type SettingsContextView = 'map' | 'board' | 'graph' | 'table';
@@ -66,6 +67,67 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   boardVariantToggles
 }) => {
   const [showThemeColorPicker, setShowThemeColorPicker] = useState(false);
+  const [mapBgMenuOpen, setMapBgMenuOpen] = useState(false);
+  const mapBgTriggerRef = useRef<HTMLButtonElement>(null);
+  const mapBgMenuRef = useRef<HTMLDivElement>(null);
+  const [mapBgMenuRect, setMapBgMenuRect] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    maxHeight: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) setMapBgMenuOpen(false);
+  }, [isOpen]);
+
+  useLayoutEffect(() => {
+    if (!mapBgMenuOpen || !mapBgTriggerRef.current) {
+      setMapBgMenuRect(null);
+      return;
+    }
+    const update = () => {
+      const el = mapBgTriggerRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const gap = 6;
+      const pad = 10;
+      const belowTop = r.bottom + gap;
+      const maxHeight = Math.max(120, window.innerHeight - belowTop - pad);
+      setMapBgMenuRect({
+        top: belowTop,
+        left: r.left,
+        width: r.width,
+        maxHeight
+      });
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [mapBgMenuOpen]);
+
+  useEffect(() => {
+    if (!mapBgMenuOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (mapBgTriggerRef.current?.contains(t)) return;
+      if (mapBgMenuRef.current?.contains(t)) return;
+      setMapBgMenuOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMapBgMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [mapBgMenuOpen]);
 
   if (!isOpen) return null;
 
@@ -74,7 +136,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const handleMapStyleSelect = (styleId: string) => {
     onMapStyleChange(styleId);
     set('mapp-map-style', styleId);
+    setMapBgMenuOpen(false);
   };
+
+  const currentMapStyleLabel =
+    MAP_STYLE_OPTIONS.find((s) => s.id === currentMapStyle)?.name ?? currentMapStyle;
 
   const openMapping = settingsContextView === 'map';
   const openBoard = settingsContextView === 'board';
@@ -117,6 +183,27 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </button>
         </div>
 
+        {/* 底图：独立条带 + 下拉（portal 叠在卡片之上，选完收起） */}
+        <div className="shrink-0 border-b border-gray-200/60 px-4 py-2.5">
+          <div className="flex items-center gap-2">
+            <span className="shrink-0 text-xs font-medium text-gray-600">底图背景</span>
+            <button
+              ref={mapBgTriggerRef}
+              type="button"
+              aria-expanded={mapBgMenuOpen}
+              aria-haspopup="listbox"
+              onClick={() => setMapBgMenuOpen((o) => !o)}
+              className="min-w-0 flex flex-1 items-center justify-between gap-2 rounded-lg border border-gray-200/70 bg-white/60 px-2.5 py-1.5 text-left text-xs text-gray-900 shadow-sm transition-colors hover:bg-white/90"
+            >
+              <span className="truncate">{currentMapStyleLabel}</span>
+              <ChevronDown
+                size={16}
+                className={`shrink-0 text-gray-500 transition-transform ${mapBgMenuOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
+          </div>
+        </div>
+
         {/* Content */}
           <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-4 theme-surface-scrollbar">
           <SettingsCollapsibleSection
@@ -126,39 +213,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             themeColor={themeColor}
             hint={
               <HelpHint>
-                底图瓦片风格、地图上的图钉与文字标签大小，以及标记聚合距离。切换底图后会重新加载瓦片；图钉与聚合仅影响地图视图显示，不改变便签数据。
+                底图请在上方「底图背景」中选择；此处为地图上的图钉与文字标签大小，以及标记聚合距离。切换底图后会重新加载瓦片；图钉与聚合仅影响地图视图显示，不改变便签数据。
               </HelpHint>
             }
           >
             <div className="flex flex-col gap-4">
-              <div className="flex flex-col overflow-hidden rounded-lg border border-gray-200/50 divide-y divide-gray-200/40">
-                {MAP_STYLE_OPTIONS.map((style) => (
-                  <button
-                    key={style.id}
-                    type="button"
-                    onClick={() => handleMapStyleSelect(style.id)}
-                    className={`w-full border-0 px-2.5 py-1.5 text-left text-xs transition-colors ${
-                      currentMapStyle === style.id
-                        ? 'font-medium text-gray-900'
-                        : 'text-gray-600 hover:bg-black/[0.03]'
-                    }`}
-                    style={
-                      currentMapStyle === style.id
-                        ? { boxShadow: `inset 3px 0 0 0 ${themeColor}` }
-                        : undefined
-                    }
-                  >
-                    {style.name}
-                  </button>
-                ))}
-              </div>
-
               {pinSize !== undefined &&
               onPinSizeChange &&
               clusterThreshold !== undefined &&
               onClusterThresholdChange ? (
                 <>
-                  <div className="border-t border-gray-200/60 pt-3 text-xs font-medium text-gray-500">地图控件</div>
+                  <div className="text-xs font-medium text-gray-500">地图控件</div>
                   <div className="grid grid-cols-1 gap-x-3 gap-y-3 sm:grid-cols-2">
                     <div className="min-w-0">
                       <SettingsCompactSlider
@@ -220,8 +285,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </div>
                 </>
               ) : (
-                <p className="border-t border-gray-200/60 pt-3 text-xs leading-relaxed text-gray-500">
-                  图钉、标签与聚合滑块仅在<strong>地图视图</strong>中可用；在此仍可切换底图，切换地图后即时生效。
+                <p className="text-xs leading-relaxed text-gray-500">
+                  图钉、标签与聚合滑块仅在<strong>地图视图</strong>中可用；底图可在上方随时切换，进入地图后即时生效。
                 </p>
               )}
             </div>
@@ -321,6 +386,46 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           }}
         />
       )}
+
+      {mapBgMenuOpen && mapBgMenuRect &&
+        createPortal(
+          <div
+            ref={mapBgMenuRef}
+            role="listbox"
+            className="fixed overflow-hidden rounded-lg border border-gray-200/80 bg-white/95 py-1 shadow-xl backdrop-blur-sm theme-surface-scrollbar"
+            style={{
+              zIndex: PORTAL_TOOLTIP_Z,
+              top: mapBgMenuRect.top,
+              left: mapBgMenuRect.left,
+              width: mapBgMenuRect.width,
+              maxHeight: mapBgMenuRect.maxHeight,
+              overflowY: 'auto'
+            }}
+          >
+            {MAP_STYLE_OPTIONS.map((style) => (
+              <button
+                key={style.id}
+                type="button"
+                role="option"
+                aria-selected={currentMapStyle === style.id}
+                onClick={() => handleMapStyleSelect(style.id)}
+                className={`flex w-full border-0 px-2.5 py-1.5 text-left text-xs transition-colors ${
+                  currentMapStyle === style.id
+                    ? 'font-medium text-gray-900'
+                    : 'text-gray-600 hover:bg-black/[0.04]'
+                }`}
+                style={
+                  currentMapStyle === style.id
+                    ? { boxShadow: `inset 3px 0 0 0 ${themeColor}` }
+                    : undefined
+                }
+              >
+                {style.name}
+              </button>
+            ))}
+          </div>,
+          document.body
+        )}
     </>,
     document.body
   );

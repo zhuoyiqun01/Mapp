@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, Palette } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { X } from 'lucide-react';
 import { get, set } from 'idb-keyval';
 import { getThemeChromeForegroundHex } from '../utils/theme/themeChrome';
 import { DEFAULT_MAP_UI_CHROME_BLUR_PX, DEFAULT_MAP_UI_CHROME_OPACITY, mapChromeSurfaceStyle } from '../utils/map/mapChromeStyle';
@@ -11,6 +12,8 @@ interface ThemeColorPickerProps {
   onColorChange: (color: string) => void;
   /** 与设置面板卡片一致的玻璃底 */
   panelChromeStyle?: React.CSSProperties;
+  /** 默认 modal；inline 用于嵌入设置面板内部 */
+  variant?: 'modal' | 'inline';
 }
 
 export const ThemeColorPicker: React.FC<ThemeColorPickerProps> = ({ 
@@ -18,79 +21,85 @@ export const ThemeColorPicker: React.FC<ThemeColorPickerProps> = ({
   onClose, 
   currentColor, 
   onColorChange,
-  panelChromeStyle
+  panelChromeStyle,
+  variant = 'modal'
 }) => {
-  const [hsl, setHsl] = useState({ h: 50, s: 100, l: 50 });
+  const [hsv, setHsv] = useState({ h: 50, s: 100, v: 100 });
   const [hex, setHex] = useState('#FFDD00');
+  const svRef = React.useRef<HTMLDivElement>(null);
+  const draggingRef = React.useRef(false);
 
-  // Convert Hex to HSL
-  function hexToHsl(hex: string): { h: number; s: number; l: number } | null {
+  // Convert Hex to HSV
+  function hexToHsv(hex: string): { h: number; s: number; v: number } | null {
     const rgb = hexToRgb(hex);
     if (!rgb) return null;
-    return rgbToHsl(rgb.r, rgb.g, rgb.b);
+    return rgbToHsv(rgb.r, rgb.g, rgb.b);
   }
 
-  // Convert RGB to HSL
-  function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
-    r /= 255;
-    g /= 255;
-    b /= 255;
+  // Convert RGB to HSV
+  function rgbToHsv(r: number, g: number, b: number): { h: number; s: number; v: number } {
+    const rn = r / 255;
+    const gn = g / 255;
+    const bn = b / 255;
+    const max = Math.max(rn, gn, bn);
+    const min = Math.min(rn, gn, bn);
+    const d = max - min;
 
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    let h = 0, s = 0;
-    const l = (max + min) / 2;
-
-    if (max !== min) {
-      const d = max - min;
-      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-
+    let h = 0;
+    if (d !== 0) {
       switch (max) {
-        case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
-        case g: h = ((b - r) / d + 2) / 6; break;
-        case b: h = ((r - g) / d + 4) / 6; break;
+        case rn:
+          h = (gn - bn) / d + (gn < bn ? 6 : 0);
+          break;
+        case gn:
+          h = (bn - rn) / d + 2;
+          break;
+        case bn:
+          h = (rn - gn) / d + 4;
+          break;
       }
+      h *= 60;
     }
 
+    const s = max === 0 ? 0 : d / max;
+    const v = max;
+
     return {
-      h: Math.round(h * 360),
+      h: Math.round(h),
       s: Math.round(s * 100),
-      l: Math.round(l * 100)
+      v: Math.round(v * 100)
     };
   }
 
-  // Convert HSL to RGB
-  function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: number } {
-    h /= 360;
-    s /= 100;
-    l /= 100;
+  // Convert HSV to RGB
+  function hsvToRgb(h: number, s: number, v: number): { r: number; g: number; b: number } {
+    const sn = clamp(s, 0, 100) / 100;
+    const vn = clamp(v, 0, 100) / 100;
+    const hn = ((h % 360) + 360) % 360;
 
-    let r, g, b;
+    const c = vn * sn;
+    const x = c * (1 - Math.abs(((hn / 60) % 2) - 1));
+    const m = vn - c;
 
-    if (s === 0) {
-      r = g = b = l;
+    let rp = 0, gp = 0, bp = 0;
+    if (hn < 60) {
+      rp = c; gp = x; bp = 0;
+    } else if (hn < 120) {
+      rp = x; gp = c; bp = 0;
+    } else if (hn < 180) {
+      rp = 0; gp = c; bp = x;
+    } else if (hn < 240) {
+      rp = 0; gp = x; bp = c;
+    } else if (hn < 300) {
+      rp = x; gp = 0; bp = c;
     } else {
-      const hue2rgb = (p: number, q: number, t: number) => {
-        if (t < 0) t += 1;
-        if (t > 1) t -= 1;
-        if (t < 1/6) return p + (q - p) * 6 * t;
-        if (t < 1/2) return q;
-        if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
-        return p;
-      };
-
-      const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-      const p = 2 * l - q;
-
-      r = hue2rgb(p, q, h + 1/3);
-      g = hue2rgb(p, q, h);
-      b = hue2rgb(p, q, h - 1/3);
+      rp = c; gp = 0; bp = x;
     }
 
     return {
-      r: Math.round(r * 255),
-      g: Math.round(g * 255),
-      b: Math.round(b * 255)
+      r: Math.round((rp + m) * 255),
+      g: Math.round((gp + m) * 255),
+      b: Math.round((bp + m) * 255)
     };
   }
 
@@ -114,19 +123,19 @@ export const ThemeColorPicker: React.FC<ThemeColorPickerProps> = ({
   useEffect(() => {
     if (currentColor) {
       setHex(currentColor);
-      const hslValue = hexToHsl(currentColor);
-      if (hslValue) {
-        setHsl(hslValue);
+      const hsvValue = hexToHsv(currentColor);
+      if (hsvValue) {
+        setHsv(hsvValue);
       }
     }
   }, [currentColor]);
 
-  // Update hex when HSL changes
+  // Update hex when HSV changes
   useEffect(() => {
-    const rgb = hslToRgb(hsl.h, hsl.s, hsl.l);
+    const rgb = hsvToRgb(hsv.h, hsv.s, hsv.v);
     const newHex = rgbToHex(rgb.r, rgb.g, rgb.b);
     setHex(newHex);
-  }, [hsl]);
+  }, [hsv]);
 
   // Load saved theme color on mount
   useEffect(() => {
@@ -134,17 +143,32 @@ export const ThemeColorPicker: React.FC<ThemeColorPickerProps> = ({
       const saved = await get<string>('mapp-theme-color');
       if (saved) {
         setHex(saved);
-        const hslValue = hexToHsl(saved);
-        if (hslValue) {
-          setHsl(hslValue);
+        const hsvValue = hexToHsv(saved);
+        if (hsvValue) {
+          setHsv(hsvValue);
         }
       }
     };
     loadThemeColor();
   }, []);
 
-  function handleHslChange(channel: 'h' | 's' | 'l', value: number) {
-    setHsl(prev => ({ ...prev, [channel]: value }));
+  function handleHsvChange(channel: 'h' | 's' | 'v', value: number) {
+    setHsv(prev => ({ ...prev, [channel]: value }));
+  }
+
+  function clamp(n: number, min: number, max: number) {
+    return Math.max(min, Math.min(max, n));
+  }
+
+  function updateFromSvClientPoint(clientX: number, clientY: number) {
+    const el = svRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const x = clamp(clientX - rect.left, 0, rect.width);
+    const y = clamp(clientY - rect.top, 0, rect.height);
+    const s = rect.width > 0 ? Math.round((x / rect.width) * 100) : 0;
+    const v = rect.height > 0 ? Math.round(100 - (y / rect.height) * 100) : 0;
+    setHsv((prev) => ({ ...prev, s, v }));
   }
 
   function handleHexChange(raw: string) {
@@ -157,21 +181,21 @@ export const ThemeColorPicker: React.FC<ThemeColorPickerProps> = ({
     const newHex = '#' + cleanValue.toUpperCase();
     setHex(newHex);
     if (cleanValue.length === 6) {
-      const hslValue = hexToHsl(newHex);
-      if (hslValue) {
-        setHsl(hslValue);
+      const hsvValue = hexToHsv(newHex);
+      if (hsvValue) {
+        setHsv(hsvValue);
       }
     }
   }
 
-  /** 预览块背景：完整 6 位 hex 用其本身，否则用当前 HSL 以免非法 CSS 颜色 */
+  /** 预览块背景：完整 6 位 hex 用其本身，否则用当前 HSV 以免非法 CSS 颜色 */
   const previewBackground = useMemo(() => {
     if (/^#[0-9A-Fa-f]{6}$/i.test(hex)) {
       return hex;
     }
-    const { r, g, b } = hslToRgb(hsl.h, hsl.s, hsl.l);
+    const { r, g, b } = hsvToRgb(hsv.h, hsv.s, hsv.v);
     return rgbToHex(r, g, b);
-  }, [hex, hsl.h, hsl.s, hsl.l]);
+  }, [hex, hsv.h, hsv.s, hsv.v]);
 
   const previewChromeFg = useMemo(
     () => getThemeChromeForegroundHex(previewBackground),
@@ -193,21 +217,43 @@ export const ThemeColorPicker: React.FC<ThemeColorPickerProps> = ({
 
   function handleReset() {
     const defaultColor = '#FFDD00';
-    const defaultHsl = hexToHsl(defaultColor);
-    if (defaultHsl) {
-      setHsl(defaultHsl);
+    const defaultHsv = hexToHsv(defaultColor);
+    if (defaultHsv) {
+      setHsv(defaultHsv);
       setHex(defaultColor);
     }
   }
 
-  if (!isOpen) return null;
+  const isInline = variant === 'inline';
+
+  const hueTrackBg = `linear-gradient(to right,
+    hsl(0, 100%, 50%),
+    hsl(60, 100%, 50%),
+    hsl(120, 100%, 50%),
+    hsl(180, 100%, 50%),
+    hsl(240, 100%, 50%),
+    hsl(300, 100%, 50%),
+    hsl(360, 100%, 50%))`;
+
+  const svCursor = {
+    leftPct: clamp(hsv.s, 0, 100),
+    topPct: clamp(100 - hsv.v, 0, 100)
+  };
 
   const cardChrome =
     panelChromeStyle ??
     mapChromeSurfaceStyle(DEFAULT_MAP_UI_CHROME_OPACITY, DEFAULT_MAP_UI_CHROME_BLUR_PX);
 
-  return (
-    <div className="km-theme-color-picker fixed inset-0 z-[6000] min-h-[100dvh] min-h-screen w-full bg-black/50 flex items-center justify-center p-4">
+  if (!isOpen) return null;
+
+  const content = (
+    <div
+      className={`km-theme-color-picker ${
+        isInline
+          ? 'w-full'
+          : 'fixed inset-0 z-[9000] min-h-[100dvh] min-h-screen w-full bg-black/50 flex items-center justify-center p-4'
+      }`}
+    >
       <style>{`
         .km-theme-color-picker input[type="range"] {
           -webkit-appearance: none;
@@ -215,35 +261,63 @@ export const ThemeColorPicker: React.FC<ThemeColorPickerProps> = ({
           background: transparent;
           cursor: pointer;
         }
-        .km-theme-color-picker input[type="range"]::-webkit-slider-thumb {
+
+        /* Hue 滑块：圆形手柄（对齐你截图的样式） */
+        .km-theme-color-picker .km-hue-range::-webkit-slider-thumb {
           -webkit-appearance: none;
           appearance: none;
-          width: 2px;
-          height: 20px;
-          background: #000;
-          border: none;
+          width: 14px;
+          height: 14px;
+          border-radius: 9999px;
+          background: rgba(255,255,255,0.98);
+          border: 2px solid rgba(0,0,0,0.65);
+          box-shadow: 0 1px 6px rgba(0,0,0,0.25);
           cursor: pointer;
         }
-        .km-theme-color-picker input[type="range"]::-moz-range-thumb {
-          width: 2px;
-          height: 20px;
-          background: #000;
-          border: none;
+        .km-theme-color-picker .km-hue-range::-moz-range-thumb {
+          width: 14px;
+          height: 14px;
+          border-radius: 9999px;
+          background: rgba(255,255,255,0.98);
+          border: 2px solid rgba(0,0,0,0.65);
+          box-shadow: 0 1px 6px rgba(0,0,0,0.25);
           cursor: pointer;
+        }
+
+        /* SV 面板：两层渐变（白->透明、黑->透明） */
+        .km-theme-color-picker .km-sv {
+          position: relative;
+          width: 100%;
+          height: 160px;
+          border-radius: 12px;
+          overflow: hidden;
+          cursor: crosshair;
+          touch-action: none;
+        }
+        .km-theme-color-picker .km-sv::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(to right, #fff, rgba(255,255,255,0));
+        }
+        .km-theme-color-picker .km-sv::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(to top, #000, rgba(0,0,0,0));
         }
       `}</style>
       <div
-        className="rounded-xl shadow-2xl w-full max-w-md p-4 animate-in zoom-in-95 border border-gray-200/80"
+        className={`rounded-xl shadow-2xl w-full ${
+          isInline ? 'max-w-none' : 'max-w-md animate-in zoom-in-95'
+        } p-4 border border-gray-200/80`}
         style={cardChrome}
       >
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Palette size={20} className="text-gray-700" />
-            <h2 className="text-xl font-bold text-gray-800">Theme Color</h2>
-          </div>
+        <div className="relative mb-2">
           <button
             onClick={onClose}
-            className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+            className="absolute -top-1 -right-1 p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+            aria-label="关闭"
           >
             <X size={18} className="text-gray-600" />
           </button>
@@ -272,78 +346,55 @@ export const ThemeColorPicker: React.FC<ThemeColorPickerProps> = ({
           </div>
         </div>
 
-        {/* HSL Sliders */}
+        {/* 取色方块 + Hue 条（无文字） */}
         <div className="mb-4">
-          <div className="text-xs font-medium text-gray-600 mb-2">HSL (HSV)</div>
-          
-          {/* Hue Slider */}
-          <div className="mb-3">
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs text-gray-500">Hue (H)</label>
-              <span className="text-xs font-mono text-gray-700">{hsl.h}°</span>
-            </div>
-            <input
-              type="range"
-              min="0"
-              max="360"
-              value={hsl.h}
-              onChange={(e) => handleHslChange('h', parseInt(e.target.value))}
-              className="w-full h-2 rounded-lg appearance-none cursor-pointer"
-              style={{
-                background: `linear-gradient(to right, 
-                  hsl(0, 100%, 50%), 
-                  hsl(60, 100%, 50%), 
-                  hsl(120, 100%, 50%), 
-                  hsl(180, 100%, 50%), 
-                  hsl(240, 100%, 50%), 
-                  hsl(300, 100%, 50%), 
-                  hsl(360, 100%, 50%))`
-              }}
+          <div
+            ref={svRef}
+            className="km-sv mb-3 border border-black/10 shadow-inner"
+            style={{ backgroundColor: `hsl(${hsv.h}, 100%, 50%)` }}
+            role="slider"
+            aria-label="Saturation & Value"
+            tabIndex={0}
+            onPointerDown={(e) => {
+              e.currentTarget.setPointerCapture(e.pointerId);
+              draggingRef.current = true;
+              updateFromSvClientPoint(e.clientX, e.clientY);
+            }}
+            onPointerMove={(e) => {
+              if (!draggingRef.current) return;
+              updateFromSvClientPoint(e.clientX, e.clientY);
+            }}
+            onPointerUp={() => {
+              draggingRef.current = false;
+            }}
+            onPointerCancel={() => {
+              draggingRef.current = false;
+            }}
+            onKeyDown={(e) => {
+              const step = e.shiftKey ? 5 : 1;
+              if (e.key === 'ArrowLeft') setHsv((p) => ({ ...p, s: clamp(p.s - step, 0, 100) }));
+              else if (e.key === 'ArrowRight') setHsv((p) => ({ ...p, s: clamp(p.s + step, 0, 100) }));
+              else if (e.key === 'ArrowUp') setHsv((p) => ({ ...p, v: clamp(p.v + step, 0, 100) }));
+              else if (e.key === 'ArrowDown') setHsv((p) => ({ ...p, v: clamp(p.v - step, 0, 100) }));
+            }}
+          >
+            <div
+              className="absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-black/70 bg-white/95 shadow-[0_1px_6px_rgba(0,0,0,0.25)] pointer-events-none"
+              style={{ left: `${svCursor.leftPct}%`, top: `${svCursor.topPct}%` }}
+              aria-hidden
             />
           </div>
 
-          {/* Saturation Slider */}
-          <div className="mb-3">
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs text-gray-500">Saturation (S)</label>
-              <span className="text-xs font-mono text-gray-700">{hsl.s}%</span>
-            </div>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              value={hsl.s}
-              onChange={(e) => handleHslChange('s', parseInt(e.target.value))}
-              className="w-full h-2 rounded-lg appearance-none cursor-pointer"
-              style={{
-                background: `linear-gradient(to right, 
-                  hsl(${hsl.h}, 0%, ${hsl.l}%), 
-                  hsl(${hsl.h}, 100%, ${hsl.l}%))`
-              }}
-            />
-          </div>
-
-          {/* Lightness Slider */}
-          <div className="mb-3">
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs text-gray-500">Lightness (L)</label>
-              <span className="text-xs font-mono text-gray-700">{hsl.l}%</span>
-            </div>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              value={hsl.l}
-              onChange={(e) => handleHslChange('l', parseInt(e.target.value))}
-              className="w-full h-2 rounded-lg appearance-none cursor-pointer"
-              style={{
-                background: `linear-gradient(to right, 
-                  hsl(${hsl.h}, ${hsl.s}%, 0%), 
-                  hsl(${hsl.h}, ${hsl.s}%, 50%), 
-                  hsl(${hsl.h}, ${hsl.s}%, 100%))`
-              }}
-            />
-          </div>
+          <input
+            type="range"
+            min="0"
+            max="360"
+            value={hsv.h}
+            onChange={(e) => handleHsvChange('h', parseInt(e.target.value))}
+            className="km-hue-range w-full h-3 rounded-full appearance-none cursor-pointer"
+            style={{ background: hueTrackBg }}
+            aria-label="Hue"
+          />
         </div>
 
         {/* Actions */}
@@ -359,8 +410,8 @@ export const ThemeColorPicker: React.FC<ThemeColorPickerProps> = ({
             className="flex-1 py-2 text-sm font-bold rounded-lg shadow-lg transition-colors"
             style={{ backgroundColor: applyBaseBg, color: applyButtonFg }}
             onMouseEnter={(e) => {
-              const darkL = Math.max(0, hsl.l - 10);
-              const darkRgb = hslToRgb(hsl.h, hsl.s, darkL);
+              const darkV = Math.max(0, hsv.v - 10);
+              const darkRgb = hsvToRgb(hsv.h, hsv.s, darkV);
               const darkHex = rgbToHex(darkRgb.r, darkRgb.g, darkRgb.b);
               e.currentTarget.style.backgroundColor = darkHex;
               e.currentTarget.style.color = getThemeChromeForegroundHex(darkHex);
@@ -376,4 +427,11 @@ export const ThemeColorPicker: React.FC<ThemeColorPickerProps> = ({
       </div>
     </div>
   );
+
+  // modal 模式强制挂到 body，避免父级 transform/stacking context 影响 z-index
+  if (!isInline && typeof document !== 'undefined') {
+    return createPortal(content, document.body);
+  }
+
+  return content;
 };

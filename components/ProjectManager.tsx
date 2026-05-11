@@ -1,7 +1,7 @@
-import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Project, Note } from '../types';
-import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check, Upload, Palette, Sparkles, ZoomIn, Copy, RefreshCw } from 'lucide-react';
+import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check, Upload, Palette, Sparkles, ZoomIn, Copy, RefreshCw, Code2 } from 'lucide-react';
 import { generateId, formatDate, exportToJpeg, exportToJpegCentered, compressImageFromBase64 } from '../utils';
 import { loadProject, loadNoteImages, saveProject, loadAllProjects } from '../utils/persistence/storage';
 import { getLastSyncTime, type SyncStatus } from '../utils/persistence/sync';
@@ -249,6 +249,7 @@ const MenuDropdown: React.FC<{
   surfaceStyle: React.CSSProperties;
   fixedPlacementStyle: React.CSSProperties;
   motionOriginClass: 'origin-top' | 'origin-top-right';
+  canDelete?: boolean;
 }> = ({
   project,
   onRename,
@@ -262,7 +263,8 @@ const MenuDropdown: React.FC<{
   onClose,
   surfaceStyle,
   fixedPlacementStyle,
-  motionOriginClass
+  motionOriginClass,
+  canDelete = true
 }) => {
   return (
     <div 
@@ -335,9 +337,18 @@ const MenuDropdown: React.FC<{
           <div className="h-px bg-gray-100 my-1" />
         </>
       )}
-      <button 
-        onClick={(e) => { e.stopPropagation(); onDelete(project.id); onClose(); }}
-        className="w-full text-left px-4 py-2.5 text-sm hover:bg-red-50 text-red-500 flex items-center gap-2"
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!canDelete) return;
+          onDelete(project.id);
+          onClose();
+        }}
+        disabled={!canDelete}
+        className={`w-full text-left px-4 py-2.5 text-sm flex items-center gap-2 ${
+          canDelete ? 'hover:bg-red-50 text-red-500' : 'text-gray-400 cursor-not-allowed'
+        }`}
+        title={!canDelete ? '示例项目：仅开发者维护模式可删除' : undefined}
       >
         <Trash2 size={16} /> Delete Project
       </button>
@@ -385,6 +396,11 @@ interface ProjectManagerProps {
    * 全屏壳「中间态」：只保留项目列表（与主页营销/设置/清理/New Project 等装饰分离），便于与主页之间做共享元素动效。
    */
   transitionListOnly?: boolean;
+  /**
+   * 从主页点进项目：即使 activeProject 已设置、expandToHomeLayout 变为 false，也需要让主页 Hero（START YOUR MAPPING）
+   * 在过渡期保持挂载以便平滑滑出，避免瞬间卸载造成“瞬移”。
+   */
+  showHomeHeroInTransition?: boolean;
   /** 从项目回主页：已清空 current 但仍处于展开宽度过渡尾部，用于与主页共用同一套列表布局、避免瞬切 */
   sidebarExpandingToHome?: boolean;
   /** 仅取消“选中态高亮”（保持可见行收束逻辑不变） */
@@ -396,6 +412,9 @@ interface ProjectManagerProps {
   onEasterEggGravityYChange?: (v: number) => void;
   easterEggMouseConstraintStiffness?: number;
   onEasterEggMouseConstraintStiffnessChange?: (v: number) => void;
+  /** 开发者示例项目维护模式：允许增删示例项目（仅本地 dev 入口切换） */
+  exampleDevMaintenanceMode?: boolean;
+  onExampleDevMaintenanceModeToggle?: () => void;
 }
 
 export const ProjectManager: React.FC<ProjectManagerProps> = ({
@@ -432,6 +451,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   showProjectLoadBar = false,
   projectLoadProgress = 0,
   transitionListOnly = false,
+  showHomeHeroInTransition = false,
   sidebarExpandingToHome = false,
   clearSelectionInTransition = false,
   easterEggMode = false,
@@ -439,8 +459,41 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   easterEggGravityY,
   onEasterEggGravityYChange,
   easterEggMouseConstraintStiffness,
-  onEasterEggMouseConstraintStiffnessChange
+  onEasterEggMouseConstraintStiffnessChange,
+  exampleDevMaintenanceMode = false,
+  onExampleDevMaintenanceModeToggle
 }) => {
+  const devImportInputRef = useRef<HTMLInputElement>(null);
+  const [devImportDragOver, setDevImportDragOver] = useState(false);
+  const homeHeroMeasureRef = useRef<HTMLDivElement | null>(null);
+  const [homeHeroMeasuredMaxH, setHomeHeroMeasuredMaxH] = useState<number>(520);
+  const [renderHomeHeroShell, setRenderHomeHeroShell] = useState(false);
+  const [collapseHomeHeroShell, setCollapseHomeHeroShell] = useState(false);
+  const [homeHeroShellExpanded, setHomeHeroShellExpanded] = useState(false);
+  /** 占位壳高度收完后为 true；占位 DOM 保留 maxHeight:0，不再卸载，避免最后一帧布局上跳 */
+  const [homeHeroCollapsedDone, setHomeHeroCollapsedDone] = useState(true);
+
+  const builtinExampleIds = useMemo(() => {
+    try {
+      const raw = localStorage.getItem('mapp-builtin-example-project-ids');
+      const arr = raw ? (JSON.parse(raw) as unknown) : null;
+      return new Set(Array.isArray(arr) ? (arr.filter((x) => typeof x === 'string') as string[]) : []);
+    } catch {
+      return new Set<string>();
+    }
+  }, []);
+
+  const displayProjects = useMemo(() => {
+    const list = exampleDevMaintenanceMode
+      ? projects.filter((p) => builtinExampleIds.has(p.id))
+      : projects;
+    return [...list].sort((a, b) => {
+      const ax = builtinExampleIds.has(a.id) ? 0 : 1;
+      const bx = builtinExampleIds.has(b.id) ? 0 : 1;
+      if (ax !== bx) return ax - bx; // 示例/只读置顶
+      return (b.createdAt ?? 0) - (a.createdAt ?? 0);
+    });
+  }, [projects, builtinExampleIds, exampleDevMaintenanceMode]);
   // Helper function to calculate darker version of theme color
   const getDarkerColor = (color: string): string => {
     // Remove # if present
@@ -1148,23 +1201,85 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   /** 回主页收尾：已无当前项目但仍在 expand 动画尾部 → 用主页壳与列表布局，只在之后一帧再关 transitionListOnly */
   const finishingReturnToHomeLayout =
     isSidebar && !!sidebarExpandingToHome && !activeProject;
+  /** 占位收完前占布局；收完后壳保留 DOM（maxHeight:0），不再参与 pt-24 / 中间态壳判断 */
+  const homeHeroShellAffectsLayout = renderHomeHeroShell && !homeHeroCollapsedDone;
+
   const useTransitionShell =
-    !!transitionListOnly && !finishingReturnToHomeLayout;
+    !!transitionListOnly &&
+    !finishingReturnToHomeLayout &&
+    !showHomeHeroInTransition &&
+    !homeHeroShellAffectsLayout;
 
   const homeLikeList =
-    (!isSidebar || expandToHomeLayout) &&
+    (!isSidebar || expandToHomeLayout || homeHeroShellAffectsLayout) &&
     (!transitionListOnly || finishingReturnToHomeLayout);
   const compactProjectList =
     (isSidebar && !expandToHomeLayout) ||
     (transitionListOnly && !finishingReturnToHomeLayout);
 
+  /** 主页 Hero / CTA：过渡态不卸载，靠平移动画出入场，避免瞬移 */
+  const showHomeHeroShell = !isSidebar || expandToHomeLayout || showHomeHeroInTransition;
+  const homeHeroAnimateOut = !!transitionListOnly && !finishingReturnToHomeLayout;
+  /** 视觉层面的“主页壳”：当占位壳还在收缩/展开时，继续使用主页的 padding 与布局，避免顶部间距瞬间归零 */
+  const expandToHomeLayoutVisual =
+    expandToHomeLayout || showHomeHeroInTransition || homeHeroShellAffectsLayout;
+
+  /**
+   * 侧栏「紧凑列表」里 pt-28 是为顶部 Home/设置/关闭 留空；
+   * 从主页进项目时上方仍有 Hero 占位在收缩，若同时切到 pt-28，会与 mt-8 差一截，列表会整段向下跳。
+   * 占位卸掉后再用 pt-28。
+   */
+  const listCompactTopToolbarPadding =
+    compactProjectList && (!renderHomeHeroShell || homeHeroCollapsedDone);
+
+  useEffect(() => {
+    if (showHomeHeroShell) {
+      setRenderHomeHeroShell(true);
+      setCollapseHomeHeroShell(false);
+      setHomeHeroShellExpanded(false);
+      setHomeHeroCollapsedDone(false);
+      return;
+    }
+    // 从“显示”到“隐藏”：标题/CTA 立刻隐藏，占位壳收高度到 0 后保留 DOM，避免卸载占位导致最后一小段上跳
+    setHomeHeroShellExpanded(false);
+    if (renderHomeHeroShell) {
+      setCollapseHomeHeroShell(true);
+      setHomeHeroCollapsedDone(false);
+      const ms = Math.round(PROJECT_OPEN_SLIDE_DURATION_S * 1000);
+      const id = window.setTimeout(() => {
+        setHomeHeroCollapsedDone(true);
+      }, ms + 100);
+      return () => window.clearTimeout(id);
+    }
+    setHomeHeroCollapsedDone(true);
+  }, [showHomeHeroShell, renderHomeHeroShell]);
+
+  useLayoutEffect(() => {
+    if (!renderHomeHeroShell || collapseHomeHeroShell || homeHeroCollapsedDone) return;
+    const el = homeHeroMeasureRef.current;
+    if (!el) return;
+    // 读一次实际高度，作为 maxHeight 动画目标值（避免从/到 auto）
+    const next = Math.max(0, Math.round(el.scrollHeight));
+    if (next > 0 && Math.abs(next - homeHeroMeasuredMaxH) > 2) {
+      setHomeHeroMeasuredMaxH(next);
+    }
+  }, [
+    renderHomeHeroShell,
+    collapseHomeHeroShell,
+    homeHeroCollapsedDone,
+    homeLikeList,
+    compactProjectList,
+    transitionListOnly,
+    easterEggMode
+  ]);
+
   const containerClass = useTransitionShell
     ? 'h-full w-full min-h-0 overflow-hidden flex flex-col relative'
-    : expandToHomeLayout
+    : expandToHomeLayoutVisual
       ? isSidebar
         ? activeProject
-          ? 'h-full w-full min-h-0 flex flex-col items-center justify-start pt-24 pb-0 p-4 relative shadow-2xl border-r'
-          : 'h-full w-full min-h-0 flex flex-col items-center justify-start pt-24 pb-0 p-4 relative'
+          ? 'h-full w-full min-h-0 flex flex-col items-center justify-start pt-24 pb-0 relative shadow-2xl border-r'
+          : 'h-full w-full min-h-0 flex flex-col items-center justify-start pt-24 pb-0 relative'
         : 'h-full w-full min-h-0 flex flex-col items-center justify-start pt-24 pb-0 p-4 relative'
       : isSidebar
         ? 'h-full w-full shadow-2xl flex flex-col border-r overflow-hidden'
@@ -1222,7 +1337,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         onHomeCleanupMenuToggle &&
         onHomeCleanupOrphanedData && (
           <>
-            <div className="pointer-events-auto absolute top-4 right-4 z-[2010]">
+            <div className="pointer-events-auto absolute top-4 right-10 z-[2010]">
               <button
                 type="button"
                 onClick={() => onHomeCleanupMenuToggle()}
@@ -1332,6 +1447,19 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                   <Sparkles size={22} strokeWidth={2} aria-hidden />
                 </button>
               ) : null}
+              {onExampleDevMaintenanceModeToggle &&
+              typeof window !== 'undefined' &&
+              (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ? (
+                <button
+                  type="button"
+                  onClick={() => onExampleDevMaintenanceModeToggle()}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl text-theme-chrome-fg transition-colors"
+                  style={{ backgroundColor: exampleDevMaintenanceMode ? themeColorDark : themeColor }}
+                  title="dev"
+                >
+                  <Code2 size={22} strokeWidth={2} aria-hidden />
+                </button>
+              ) : null}
             </div>
           ) : null}
           {showHomeSettings &&
@@ -1395,7 +1523,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         <button
           type="button"
           onClick={onCloseSidebar}
-          className="pointer-events-auto absolute top-3 right-4 z-[2010] flex h-10 w-10 items-center justify-center rounded-xl text-theme-chrome-fg transition-colors"
+          className="pointer-events-auto absolute top-3 right-10 z-[2010] flex h-10 w-10 items-center justify-center rounded-xl text-theme-chrome-fg transition-colors"
           style={{ backgroundColor: themeColor }}
           title="关闭"
           onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = themeColorDark)}
@@ -1439,7 +1567,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                 </button>
               )}
           </div>
-          <div className="absolute top-4 right-4 z-[2000] flex items-center gap-2">
+          <div className="absolute top-4 right-10 z-[2000] flex items-center gap-2">
             {activeProject && syncStatus === 'idle' && getLastSyncTime() && (
               <div
                 className="flex items-center justify-center w-10 h-10 rounded-xl text-theme-chrome-fg transition-colors cursor-help"
@@ -1476,44 +1604,139 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         </>
       )}
 
-      {/* 顶部 Hero：始终占位，彩蛋模式下用透明内容占位，避免列表在切换时先上跳 */}
-      {homeLikeList ? (
-        <div className="relative z-[5] flex w-full shrink-0 flex-col items-center overflow-visible pointer-events-none">
-          <h1
-            className={titleClass}
-            style={easterEggMode ? { visibility: 'hidden' } : undefined}
-          >
-            <span>START</span>
-            <span>YOUR</span>
-            <span>MAPPING</span>
-          </h1>
-        </div>
-      ) : null}
-
-      {!transitionListOnly && homeLikeList ? (
+      {/* 顶部 Hero/CTA：先收缩高度到 0 再卸载，避免进入项目时布局瞬变 */}
+      {renderHomeHeroShell ? (
         <MotionDiv
-          className="relative z-[6] flex w-full shrink-0 flex-col items-center overflow-visible"
+          className="w-full shrink-0"
           initial={false}
-          animate={easterEggMode ? { y: '200vh', opacity: 0 } : { y: 0, opacity: 1 }}
+          animate={{
+            maxHeight: collapseHomeHeroShell ? 0 : homeHeroMeasuredMaxH,
+            opacity: collapseHomeHeroShell ? 0 : 1
+          }}
           transition={{
             duration: PROJECT_OPEN_SLIDE_DURATION_S,
             ease: PROJECT_OPEN_SLIDE_EASE
           }}
-          style={{ willChange: 'transform, opacity', pointerEvents: easterEggMode ? 'none' : 'auto' }}
+          onAnimationComplete={() => {
+            if (collapseHomeHeroShell) {
+              setHomeHeroCollapsedDone(true);
+            } else {
+              // 只在“展开到位”时允许标题/CTA入场，避免高度没到位就开始出现造成卡顿/抖动
+              setHomeHeroShellExpanded(true);
+            }
+          }}
+          style={{ overflow: 'hidden', willChange: 'max-height, opacity' }}
         >
-          <button
-            type="button"
-            onClick={() => setIsCreating(true)}
-            className="mt-8 px-8 py-4 text-black rounded-full font-bold text-lg shadow-xl border border-white/50 hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
-            style={{
-              ...mapChromeSurface,
-              ...(newProjectHover ? { backgroundColor: mapChromeHoverBg } : {})
-            }}
-            onMouseEnter={() => setNewProjectHover(true)}
-            onMouseLeave={() => setNewProjectHover(false)}
-          >
-            <Plus size={24} /> New Project
-          </button>
+          <div ref={homeHeroMeasureRef}>
+            <MotionDiv
+              className="relative z-[5] flex w-full shrink-0 flex-col items-center overflow-visible pointer-events-none"
+              initial={false}
+              animate={
+                easterEggMode
+                  ? { opacity: 0 }
+                  : !homeHeroShellExpanded || homeHeroAnimateOut
+                    ? { opacity: 0 }
+                    : { opacity: 1 }
+              }
+              transition={{
+                duration: PROJECT_OPEN_SLIDE_DURATION_S,
+                ease: PROJECT_OPEN_SLIDE_EASE
+              }}
+              style={{ willChange: 'opacity' }}
+            >
+              <h1
+                className={titleClass}
+                style={easterEggMode ? { visibility: 'hidden' } : undefined}
+              >
+                <span>START</span>
+                <span>YOUR</span>
+                <span>MAPPING</span>
+              </h1>
+            </MotionDiv>
+
+            <MotionDiv
+              className="relative z-[6] flex w-full shrink-0 flex-col items-center overflow-visible"
+              initial={false}
+              animate={
+                easterEggMode
+                  ? { y: '200vh', opacity: 0 }
+                  : !homeHeroShellExpanded || homeHeroAnimateOut
+                    ? { opacity: 0 }
+                    : { opacity: 1 }
+              }
+              transition={{
+                duration: PROJECT_OPEN_SLIDE_DURATION_S,
+                ease: PROJECT_OPEN_SLIDE_EASE
+              }}
+              style={{
+                willChange: 'transform, opacity',
+                pointerEvents: easterEggMode || homeHeroAnimateOut ? 'none' : 'auto'
+              }}
+            >
+              {/* dev 维护模式：上传/拖拽区域替换 New Project；两者同尺寸同圆角 */}
+              <div className="mt-8 w-full max-w-md px-4">
+                {exampleDevMaintenanceMode ? (
+                  <div
+                    className="w-full h-16 rounded-xl border-2 border-dashed shadow-lg transition-colors cursor-pointer flex items-center justify-center"
+                    style={{
+                      ...mapChromeSurface,
+                      borderColor: devImportDragOver ? themeColor : 'rgba(255,255,255,0.35)'
+                    }}
+                    onClick={() => devImportInputRef.current?.click()}
+                    onDragEnter={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setDevImportDragOver(true);
+                    }}
+                    onDragLeave={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setDevImportDragOver(false);
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setDevImportDragOver(false);
+                      const f = e.dataTransfer.files?.[0];
+                      if (f) void handleImportProject(f);
+                    }}
+                    title="拖拽 JSON 到此处导入为项目"
+                  >
+                    <Upload size={22} strokeWidth={2} className="text-black" aria-hidden />
+                    <input
+                      ref={devImportInputRef}
+                      type="file"
+                      accept=".json,application/json"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) void handleImportProject(f);
+                        e.target.value = '';
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIsCreating(true)}
+                    className="w-full h-16 rounded-xl border border-white/50 shadow-lg transition-colors flex items-center justify-center"
+                    style={{
+                      ...mapChromeSurface,
+                      ...(newProjectHover ? { backgroundColor: mapChromeHoverBg } : {})
+                    }}
+                    onMouseEnter={() => setNewProjectHover(true)}
+                    onMouseLeave={() => setNewProjectHover(false)}
+                  >
+                    <Plus size={22} strokeWidth={2} className="text-black" aria-hidden />
+                  </button>
+                )}
+              </div>
+            </MotionDiv>
+          </div>
         </MotionDiv>
       ) : null}
 
@@ -1523,16 +1746,22 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           duration: PROJECT_OPEN_SLIDE_DURATION_S,
           ease: PROJECT_OPEN_SLIDE_EASE
         }}
-        animate={easterEggMode ? { y: '200vh', opacity: 0 } : { y: 0, opacity: 1 }}
+        animate={
+          easterEggMode
+            ? { y: '200vh', opacity: 0 }
+            : // 不再对列表做 y 补偿：Hero 占位已有 maxHeight 收缩，且 compact 时 pt 与占位联动；
+              // 叠加 y 会与布局变化同向/反向交错，出现「先下再上」的错觉。
+              { y: 0, opacity: 1 }
+        }
         className={
           isSidebar
           ? `min-h-0 flex-1 w-full max-w-md mx-auto overflow-y-auto overscroll-contain ${
               transitionListOnly ? 'scrollbar-hide' : 'theme-surface-scrollbar'
-            } px-4 ${compactProjectList ? 'pt-28 pb-4' : 'mt-8 pb-8'}`
+            } px-4 ${listCompactTopToolbarPadding ? 'pt-28 pb-4' : 'mt-8 pb-8'}`
             : compactProjectList
             ? `flex-1 overflow-y-auto overscroll-contain ${
                 transitionListOnly ? 'scrollbar-hide' : 'theme-surface-scrollbar'
-              } w-full px-4 pb-4 ${transitionListOnly ? 'pt-14' : 'pt-28'}`
+              } w-full px-4 pb-4 ${listCompactTopToolbarPadding ? 'pt-28' : 'mt-8'}`
               : 'min-h-0 flex-1 w-full max-w-md mt-8 overflow-y-auto overscroll-contain theme-surface-scrollbar bg-transparent p-4 pb-8'
         }
         style={{
@@ -1567,7 +1796,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         }}
       >
         <div className="flex flex-col gap-3">
-          {projects.map(p => {
+          {displayProjects.map(p => {
             // 仅在「项目 -> 主页」中间态取消选中高亮；收束可见行的逻辑仍使用原 currentProjectId。
             const isCurrentOpen =
               !clearSelectionInTransition &&
@@ -1669,11 +1898,27 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                   </div>
                 ) : (
                   <>
-                    <div
-                      className="font-bold text-lg leading-tight"
-                      style={onGlassPanel ? { color: '#000' } : undefined}
-                    >
-                      {p.name}
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="font-bold text-lg leading-tight"
+                        style={onGlassPanel ? { color: '#000' } : undefined}
+                      >
+                        {p.name}
+                      </div>
+                      {builtinExampleIds.has(p.id) ? (
+                        <span
+                          className="shrink-0 rounded-lg px-2 py-0.5 text-[10px] font-bold text-gray-800 border border-white/40"
+                          style={{
+                            ...mapChromeSurface,
+                            backgroundColor: 'rgba(255,255,255,0.35)',
+                            backdropFilter: mapChromeSurface.backdropFilter as any,
+                            WebkitBackdropFilter: (mapChromeSurface as any).WebkitBackdropFilter
+                          }}
+                          title="只读示例项目"
+                        >
+                          只读
+                        </span>
+                      ) : null}
                     </div>
                     <div
                       className={`text-xs flex items-center gap-1 mt-1 ${
@@ -1688,27 +1933,47 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
               </div>
 
               <div className="relative z-[1]">
-                <button 
-                  type="button"
-                  data-pm-more-btn
-                  onClick={(e) => { 
-                    e.stopPropagation(); 
-                    setOpenMenuId(openMenuId === p.id ? null : p.id); 
-                  }}
-                  className={`p-2 rounded-full transition-colors ${
-                    onGlassPanel
-                      ? 'text-gray-900/90 hover:bg-black/[0.06]'
-                      : 'text-theme-chrome-fg opacity-80 hover:opacity-100 hover:bg-white/10'
-                  }`}
-                >
-                  <MoreHorizontal size={20} />
-                </button>
+                {builtinExampleIds.has(p.id) ? (
+                  exampleDevMaintenanceMode ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteProject(p.id);
+                      }}
+                      className={`p-2 rounded-full transition-colors ${
+                        onGlassPanel
+                          ? 'text-red-600 hover:bg-red-500/10'
+                          : 'text-theme-chrome-fg/80 hover:text-red-500 hover:bg-white/10'
+                      }`}
+                      title="删除示例项目"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  ) : null
+                ) : (
+                  <button 
+                    type="button"
+                    data-pm-more-btn
+                    onClick={(e) => { 
+                      e.stopPropagation(); 
+                      setOpenMenuId(openMenuId === p.id ? null : p.id); 
+                    }}
+                    className={`p-2 rounded-full transition-colors ${
+                      onGlassPanel
+                        ? 'text-gray-900/90 hover:bg-black/[0.06]'
+                        : 'text-theme-chrome-fg opacity-80 hover:opacity-100 hover:bg-white/10'
+                    }`}
+                  >
+                    <MoreHorizontal size={20} />
+                  </button>
+                )}
               </div>
             </MotionDiv>
             );
           })}
           
-          {projects.length === 0 && (homeLikeList || transitionListOnly) && (
+          {displayProjects.length === 0 && (homeLikeList || transitionListOnly) && (
              <div className="text-center py-8 italic opacity-60 text-theme-chrome-fg">No projects yet. Start one!</div>
           )}
         </div>
@@ -1999,6 +2264,10 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                   </button>
                 </div>
               ) : projectMoreAnchor ? (
+                (() => {
+                  const isBuiltinExample = builtinExampleIds.has(pm.id);
+                  const canDelete = !isBuiltinExample || exampleDevMaintenanceMode;
+                  return (
                 <MenuDropdown
                   project={pm}
                   onRename={handleRename}
@@ -2019,7 +2288,10 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                     vh
                   )}
                   motionOriginClass={compactProjectList ? 'origin-top' : 'origin-top-right'}
+                  canDelete={canDelete}
                 />
+                  );
+                })()
               ) : null}
             </>,
             document.body

@@ -1,0 +1,41 @@
+{
+  "version": "1.0",
+  "project": {
+    "id": "builtin-starter-placeholder",
+    "name": "上海",
+    "type": "map",
+    "createdAt": 0,
+    "notes": [
+      {
+        "id": "n1",
+        "createdAt": 1,
+        "coords": { "lat": 31.2304, "lng": 121.4737 },
+        "emoji": "📍",
+        "text": "外滩\n上海地标，可拖到地图任意位置。",
+        "fontSize": 3,
+        "images": [],
+        "tags": [],
+        "variant": "standard",
+        "boardX": 120,
+        "boardY": 120
+      },
+      {
+        "id": "n2",
+        "createdAt": 2,
+        "coords": { "lat": 31.2397, "lng": 121.4998 },
+        "emoji": "🗺️",
+        "text": "陆家嘴\n第二条示例便签。",
+        "fontSize": 3,
+        "images": [],
+        "tags": [{ "id": "t1", "label": "示例标签", "color": "#60a5fa" }],
+        "variant": "standard",
+        "boardX": 420,
+        "boardY": 120
+      }
+    ],
+    "frames": [],
+    "connections": [],
+    "themeColor": "#FFDD00",
+    "version": 1
+  }
+}

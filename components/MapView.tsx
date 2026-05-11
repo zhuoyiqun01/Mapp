@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, GeoJSON, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
+import '../utils/map/registerLeafletSmoothWheelZoom';
 import { set } from 'idb-keyval';
 
 import { Note, Coordinates, Project, Frame, Connection, type GraphLayerState } from '../types';
@@ -11,7 +12,7 @@ import {
   sortNotesByLayerStack
 } from '../utils/layer/unifiedNoteLayer';
 import { ProjectNotesLayerPanel } from './layer/ProjectNotesLayerPanel';
-import { MAP_TILE_URL, MAP_TILE_URL_FALLBACK, MAP_SATELLITE_URL, MAP_ATTRIBUTION, THEME_COLOR, THEME_COLOR_DARK, MAP_STYLE_OPTIONS } from '../constants';
+import { MAP_TILE_URL, MAP_TILE_URL_FALLBACK, MAP_SATELLITE_URL, MAP_ATTRIBUTION, THEME_COLOR, THEME_COLOR_DARK, MAP_STYLE_OPTIONS, PROJECT_OPEN_SLIDE_DURATION_S } from '../constants';
 import { useMapPosition } from '@/components/hooks/useMapPosition';
 import { useGeolocation } from '@/components/hooks/useGeolocation';
 import { useImageImport } from '@/components/hooks/useImageImport';
@@ -25,6 +26,7 @@ import { useNotePositioning } from '@/components/hooks/useNotePositioning';
 import { useDataImport } from '@/components/hooks/useDataImport';
 import { useFileDrop } from '@/components/hooks/useFileDrop';
 import { useCsvImport } from '@/components/hooks/useCsvImport';
+import { MapWorldMinZoom } from './map/MapWorldMinZoom';
 import { MapLongPressHandler } from './map/MapLongPressHandler';
 import { MapNavigationHandler } from './map/MapNavigationHandler';
 import { TextLabelsLayer } from './map/TextLabelsLayer';
@@ -306,6 +308,39 @@ export const MapView: React.FC<MapViewProps> = ({
   }, []);
 
   const { mapInstance, mapRefCallback } = useMapInitialization();
+  const mapShellRef = useRef<HTMLDivElement | null>(null);
+
+  /** 侧栏宽度动画 / 容器尺寸变化后 Leaflet 需 invalidateSize，否则会偏左、与侧栏相对关系错位 */
+  useEffect(() => {
+    if (!mapInstance) return;
+    const map = mapInstance;
+    const shell = mapShellRef.current;
+    const inv = () => {
+      try {
+        map.invalidateSize({ animate: false });
+      } catch {
+        /* noop */
+      }
+    };
+    inv();
+    const tShort = window.setTimeout(inv, 60);
+    const tSidebarDone = window.setTimeout(
+      inv,
+      Math.round(PROJECT_OPEN_SLIDE_DURATION_S * 1000) + 80
+    );
+    const tLate = window.setTimeout(inv, 450);
+    let ro: ResizeObserver | undefined;
+    if (shell && typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => inv());
+      ro.observe(shell);
+    }
+    return () => {
+      window.clearTimeout(tShort);
+      window.clearTimeout(tSidebarDone);
+      window.clearTimeout(tLate);
+      ro?.disconnect();
+    };
+  }, [mapInstance, project.id]);
 
   // Marker clustering related state (reserved for future use)
   
@@ -528,7 +563,7 @@ export const MapView: React.FC<MapViewProps> = ({
   // Map position management hook
   const { initialMapPosition, handleMapPositionChange } = useMapPosition({
     isMapMode: true,
-    projectId,
+    projectId: project.id,
     navigateToCoords,
     mapNotes: mapGeoNotes,
     currentLocation,
@@ -1059,6 +1094,7 @@ export const MapView: React.FC<MapViewProps> = ({
   return (
     <div
       id="map-view-container"
+      ref={mapShellRef}
       className={`relative w-full h-full z-0 bg-gray-100 ${rootProps.className}`}
       style={rootProps.style}
       onDragEnter={rootProps.onDragEnter}
@@ -1102,13 +1138,15 @@ export const MapView: React.FC<MapViewProps> = ({
         </div>
       )}
       <MapContainer 
-        key={projectId || 'no-project'}
+        key={project.id}
         center={initialMapPosition?.center || defaultCenter}
         zoom={initialMapPosition?.zoom ?? 16}
-        minZoom={6}
         maxZoom={19}
-        zoomSnap={0.1}
-        zoomDelta={0.1}
+        zoomSnap={0}
+        zoomDelta={0.5}
+        scrollWheelZoom={false}
+        smoothWheelZoom={true}
+        smoothSensitivity={1.5}
         crs={L.CRS.EPSG3857}
         style={{
           height: '100%',
@@ -1121,6 +1159,7 @@ export const MapView: React.FC<MapViewProps> = ({
         doubleClickZoom={false}
         boxZoom={false}
       >
+        <MapWorldMinZoom />
         <MapNavigationHandler coords={navigateToCoords} onComplete={onNavigateComplete} />
         <MapPositionTracker onPositionChange={handleMapPositionChange} />
         <MapClickHandler onClick={handleMapClickInternal} />
@@ -1141,6 +1180,8 @@ export const MapView: React.FC<MapViewProps> = ({
           maxZoom={19}
           tileSize={256}
           zoomOffset={0}
+          updateWhenZooming={false}
+          keepBuffer={4}
         />
         
         <MapLongPressHandler onLongPress={handleLongPress} isPreviewMode={!isUIVisible} />
@@ -1426,7 +1467,7 @@ export const MapView: React.FC<MapViewProps> = ({
                           panelChromeStyle={mapChromeSurface}
                           variant="dock"
                           dockAlign="start"
-                          projectId={projectId ?? ''}
+                          projectId={project.id}
                           merged={mergedMapProjectLayers}
                           layerGroupStandard={graphLayerStandard}
                           onLayerGroupStandardChange={handleMapLayerStandardChange}

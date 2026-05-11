@@ -1,5 +1,5 @@
 import React from 'react';
-import { SlidersHorizontal, AlertTriangle } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 import { ThemeColorSettingRow } from './ThemeColorSettingRow';
 import { HelpHint } from './ui/HelpHint';
 import { PortalTooltip } from './ui/PortalTooltip';
@@ -19,8 +19,6 @@ export interface AppearanceSettingsBlockProps {
   onEasterEggGravityYChange?: (v: number) => void;
   easterEggMouseConstraintStiffness?: number;
   onEasterEggMouseConstraintStiffnessChange?: (v: number) => void;
-  /** 为 false 时不渲染顶部「界面外观」标题行（由外层折叠区块展示标题） */
-  showSectionHeading?: boolean;
 }
 
 /** 设置中与主页「设置」共用的「界面外观」表单（主题色、面板透明度、模糊） */
@@ -34,20 +32,9 @@ export const AppearanceSettingsBlock: React.FC<AppearanceSettingsBlockProps> = (
   easterEggGravityY,
   onEasterEggGravityYChange,
   easterEggMouseConstraintStiffness,
-  onEasterEggMouseConstraintStiffnessChange,
-  showSectionHeading = true
+  onEasterEggMouseConstraintStiffnessChange
 }) => (
   <div>
-    {showSectionHeading ? (
-      <div className="mb-2 flex items-center gap-1.5">
-        <SlidersHorizontal size={16} className="shrink-0 text-gray-600" />
-        <h3 className="text-sm font-bold text-gray-800">界面外观</h3>
-        <HelpHint>
-          统一调整应用中的主题强调色，以及地图与相关面板的玻璃效果（白底区域透明度与背景模糊）。进入项目后地图浮层会立即套用。
-        </HelpHint>
-      </div>
-    ) : null}
-
     <div className="space-y-3 pl-0.5">
       <ThemeColorSettingRow themeColor={themeColor} onRequestEdit={onRequestThemeEdit} />
 

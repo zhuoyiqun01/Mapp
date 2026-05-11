@@ -1,5 +1,4 @@
 import React from 'react';
-import { Palette } from 'lucide-react';
 import { HelpHint } from './ui/HelpHint';
 
 interface ThemeColorSettingRowProps {
@@ -14,7 +13,6 @@ export const ThemeColorSettingRow: React.FC<ThemeColorSettingRowProps> = ({
 }) => (
   <div>
     <div className="mb-1.5 flex items-center gap-1">
-      <Palette size={14} className="shrink-0 text-gray-500" />
       <span className="text-xs font-medium text-gray-600">主题色</span>
       <HelpHint>
         用于地图图钉、收藏标记、主要按钮与边框等强调色；部分导出与预览也会沿用当前主题色。

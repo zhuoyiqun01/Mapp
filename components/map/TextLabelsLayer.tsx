@@ -1,7 +1,8 @@
-import React from 'react';
-import { Marker, Popup } from 'react-leaflet';
+import React, { useRef, useState } from 'react';
+import { Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import type { Note, Coordinates } from '../../types';
 import { DivIcon } from 'leaflet';
+import { lngWrapOffsetsForBounds } from '../../utils/map/lngWorldWrap';
 
 interface TextLabelsLayerProps {
   notes: Note[];
@@ -100,6 +101,21 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
   noteCoordOverrides = {},
   onLabelDoubleClickEdit
 }) => {
+  const map = useMap();
+  const [, bump] = useState(0);
+  const rafRef = useRef<number | null>(null);
+  useMapEvents({
+    zoomend: () => bump((n) => n + 1),
+    moveend: () => bump((n) => n + 1),
+    move: () => {
+      if (rafRef.current != null) return;
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
+        bump((n) => n + 1);
+      });
+    }
+  });
+
   // 如果当前是“连线高亮模式”，忽略全局 showTextLabels 开关，只根据给定的 ID 集合渲染 label
   const isConnectionHighlightMode =
     Array.isArray(connectionHighlightNoteIds) && connectionHighlightNoteIds.length > 0;
@@ -167,14 +183,17 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
   // 如果处于连线高亮模式：只渲染给定 ID 集合对应点位的 label，且不显示 cluster labels 等其他元素
   if (isConnectionHighlightMode) {
     const idSet = new Set(connectionHighlightNoteIds);
+    const bb = map.getBounds();
+    const west = bb.getWest();
+    const east = bb.getEast();
 
     return (
       <>
         {notes
           .filter(note => idSet.has(note.id))
-          .map(note => {
+          .flatMap(note => {
             const text = getLabelText(note.text || '');
-            if (!text) return null;
+            if (!text) return [];
             const timeText = getTimeText(note);
 
             const isFavorite = note.isFavorite === true;
@@ -202,8 +221,11 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
               isFavorite
             );
 
-            const icon = new DivIcon({
-              html: `
+            const ks = lngWrapOffsetsForBounds(lng, west, east);
+            const ksSafe = ks.length ? ks : [0];
+            return ksSafe.map((k) => {
+              const icon = new DivIcon({
+                html: `
                 <div style="
                   background: white;
                   color: ${isFavorite ? themeColor : 'black'};
@@ -239,34 +261,33 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
                   </div>
                 </div>
             `,
-              className: 'custom-text-label',
-              // 不预估宽度：左侧对齐即可，避免按钮被推到右边缘
-              iconSize: [0, labelHeight],
-              // 左侧端点对齐：x 为 0，y 为 label 高度（加一点偏移让它落在 pin 上方）
-              iconAnchor: [0, labelHeight + (isFavorite ? 10 : 5)]
-            });
+                className: 'custom-text-label',
+                iconSize: [0, labelHeight],
+                iconAnchor: [0, labelHeight + (isFavorite ? 10 : 5)]
+              });
 
-            return (
-              <Marker
-                key={`connection-text-${note.id}`}
-                position={[lat, lng]}
-                icon={icon}
-                interactive={true}
-                zIndexOffset={zOff}
-                eventHandlers={{
-                  mousedown: (e) => {
-                    e.originalEvent?.stopPropagation();
-                    e.originalEvent?.stopImmediatePropagation();
-                  },
-                  dblclick: (e) => {
-                    e.originalEvent?.stopPropagation();
-                    e.originalEvent?.stopImmediatePropagation();
-                    if (!isSelected || !onLabelDoubleClickEdit) return;
-                    onLabelDoubleClickEdit(note.id);
-                  }
-                }}
-              />
-            );
+              return (
+                <Marker
+                  key={`connection-text-${note.id}-w${k}`}
+                  position={[lat, lng + 360 * k]}
+                  icon={icon}
+                  interactive={true}
+                  zIndexOffset={zOff}
+                  eventHandlers={{
+                    mousedown: (e) => {
+                      e.originalEvent?.stopPropagation();
+                      e.originalEvent?.stopImmediatePropagation();
+                    },
+                    dblclick: (e) => {
+                      e.originalEvent?.stopPropagation();
+                      e.originalEvent?.stopImmediatePropagation();
+                      if (!isSelected || !onLabelDoubleClickEdit) return;
+                      onLabelDoubleClickEdit(note.id);
+                    }
+                  }}
+                />
+              );
+            });
           })}
       </>
     );
@@ -282,15 +303,14 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
         const timeFontSize = Math.max(8, Math.floor(fontSize * 0.75));
         const itemHeight = fontSize + timeFontSize + 16;
         const totalHeight = preSelectedNotes.length * itemHeight;
-        
-        return (
-          <Marker
-            position={[pos.lat, pos.lng]}
-            interactive={true}
-            zIndexOffset={1000}
-            icon={new DivIcon({
-              className: 'pre-selected-labels-container',
-              html: `
+        const bPre = map.getBounds();
+        const ksPre = lngWrapOffsetsForBounds(pos.lng, bPre.getWest(), bPre.getEast());
+        const ksPreSafe = ksPre.length ? ksPre : [0];
+
+        const makePreSelectedIcon = () =>
+          new DivIcon({
+            className: 'pre-selected-labels-container',
+            html: `
                 <div style="display: flex; flex-direction: column; gap: 4px; align-items: flex-start;">
                   ${preSelectedNotes.map((note, idx) => {
                     let text =
@@ -366,97 +386,112 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
                   }).join('')}
                 </div>
               `,
-              iconSize: [0, totalHeight],
-              iconAnchor: [0, totalHeight / 2]
-            })}
-            eventHandlers={{
-              // 使用 mousedown 让单击立即触发，而不是依赖 Leaflet 对 click 的处理
-              mousedown: (e) => {
-                e.originalEvent.stopPropagation();
-                e.originalEvent.stopImmediatePropagation();
-                const target = e.originalEvent.target as HTMLElement;
-                const noteId =
-                  target.getAttribute('data-note-id') ||
-                  target.closest('.pre-selected-label-item')?.getAttribute('data-note-id');
+            iconSize: [0, totalHeight],
+            iconAnchor: [0, totalHeight / 2]
+          });
 
-                if (noteId && onSelectNote) {
-                  onSelectNote(noteId);
-                } else if (onClearSelection) {
-                  onClearSelection();
-                }
-              },
-              dblclick: (e) => {
-                e.originalEvent.stopPropagation();
-                e.originalEvent.stopImmediatePropagation();
-                if (!onLabelDoubleClickEdit) return;
-                const target = e.originalEvent.target as HTMLElement;
-                const noteId =
-                  target.getAttribute('data-note-id') ||
-                  target.closest('.pre-selected-label-item')?.getAttribute('data-note-id');
-                // 仅编辑模式传入 onLabelDoubleClickEdit：双击展开列表中的该行打开编辑器
-                if (noteId) onLabelDoubleClickEdit(noteId);
-              }
-            }}
-          />
+        return (
+          <>
+            {ksPreSafe.map((k) => (
+              <Marker
+                key={`pre-selected-stack-w${k}`}
+                position={[pos.lat, pos.lng + 360 * k]}
+                interactive={true}
+                zIndexOffset={1000}
+                icon={makePreSelectedIcon()}
+                eventHandlers={{
+                  mousedown: (e) => {
+                    e.originalEvent.stopPropagation();
+                    e.originalEvent.stopImmediatePropagation();
+                    const target = e.originalEvent.target as HTMLElement;
+                    const noteId =
+                      target.getAttribute('data-note-id') ||
+                      target.closest('.pre-selected-label-item')?.getAttribute('data-note-id');
+
+                    if (noteId && onSelectNote) {
+                      onSelectNote(noteId);
+                    } else if (onClearSelection) {
+                      onClearSelection();
+                    }
+                  },
+                  dblclick: (e) => {
+                    e.originalEvent.stopPropagation();
+                    e.originalEvent.stopImmediatePropagation();
+                    if (!onLabelDoubleClickEdit) return;
+                    const target = e.originalEvent.target as HTMLElement;
+                    const noteId =
+                      target.getAttribute('data-note-id') ||
+                      target.closest('.pre-selected-label-item')?.getAttribute('data-note-id');
+                    if (noteId) onLabelDoubleClickEdit(noteId);
+                  }
+                }}
+              />
+            ))}
+          </>
         );
       })()}
 
       {/* Individual marker labels */}
-      {notes
-        .filter(note => {
-          if (isPreviewMode) {
-            // If pre-selecting from a cluster, hide normal labels
+      {(() => {
+        const wb = map.getBounds();
+        const west = wb.getWest();
+        const east = wb.getEast();
+        return notes
+          .filter(note => {
+            if (isPreviewMode) {
+              if (preSelectedNotes) return false;
+              if (selectedNoteId && note.id === selectedNoteId && note.text?.trim()) return true;
+              if (hoveredNoteId && note.id === hoveredNoteId && note.text?.trim()) return true;
+              return showTextLabels && note.variant === 'standard' && note.text?.trim() && visibleIndividualNoteIds.has(note.id);
+            }
             if (preSelectedNotes) return false;
-            if (selectedNoteId && note.id === selectedNoteId && note.text?.trim()) return true;
-            if (hoveredNoteId && note.id === hoveredNoteId && note.text?.trim()) return true;
-            return showTextLabels && note.variant === 'standard' && note.text?.trim() && visibleIndividualNoteIds.has(note.id);
-          }
-          // 普通地图模式下，如果当前有 preSelectedNotes（来自某个点/簇的展开），就隐藏全局 labels，只保留展开的那一组
-          if (preSelectedNotes) return false;
-          const baseOk = note.variant === 'standard' && note.text?.trim();
-          const isHovered = hoveredNoteId != null && note.id === hoveredNoteId;
-          if (isHovered) return baseOk && visibleIndividualNoteIds.has(note.id);
-          const isSelected = isNoteShownAsSelectedLabel(
-            false,
-            note.id,
-            selectedNoteId,
-            selectedNoteIds
-          );
-          if (isSelected) return baseOk;
-          return showTextLabels && baseOk && visibleIndividualNoteIds.has(note.id);
-        })
-        .map(note => {
-          const text = getLabelText(note.text || '');
-          const timeText = getTimeText(note);
+            const baseOk = note.variant === 'standard' && note.text?.trim();
+            const isHovered = hoveredNoteId != null && note.id === hoveredNoteId;
+            if (isHovered) return baseOk && visibleIndividualNoteIds.has(note.id);
+            const isSelected = isNoteShownAsSelectedLabel(
+              false,
+              note.id,
+              selectedNoteId,
+              selectedNoteIds
+            );
+            if (isSelected) return baseOk;
+            return showTextLabels && baseOk && visibleIndividualNoteIds.has(note.id);
+          })
+          .flatMap(note => {
+            const text = getLabelText(note.text || '');
+            const timeText = getTimeText(note);
 
-          const isFavorite = note.isFavorite === true;
-          const scale = isFavorite ? 1.5 : 1; // Slightly scale favorite labels, but not as much as pins to avoid clutter
-          const fontSize = 10 * labelSize * scale;
-          const paddingY = 2 * scale;
-          const paddingX = paddingY;
-          const timeFontSize = Math.max(8, Math.floor(fontSize * 0.75));
-          const labelHeight = paddingY * 2 + fontSize + timeFontSize + 6;
-        const override = noteCoordOverrides[note.id];
-        const lat = override?.lat ?? note.coords.lat;
-        const lng = override?.lng ?? note.coords.lng;
+            const isFavorite = note.isFavorite === true;
+            const scale = isFavorite ? 1.5 : 1;
+            const fontSize = 10 * labelSize * scale;
+            const paddingY = 2 * scale;
+            const paddingX = paddingY;
+            const timeFontSize = Math.max(8, Math.floor(fontSize * 0.75));
+            const labelHeight = paddingY * 2 + fontSize + timeFontSize + 6;
+            const override = noteCoordOverrides[note.id];
+            const lat = override?.lat ?? note.coords.lat;
+            const lng = override?.lng ?? note.coords.lng;
 
-          const isSelected = isNoteShownAsSelectedLabel(
-            isPreviewMode,
-            note.id,
-            selectedNoteId,
-            selectedNoteIds
-          );
-          const labelPointerInteractive = !isPreviewMode && isSelected;
-          const zOff = textLabelZIndexOffset(
-            hoveredNoteId,
-            selectedNoteId,
-            selectedNoteIds,
-            note.id,
-            isFavorite
-          );
+            const isSelected = isNoteShownAsSelectedLabel(
+              isPreviewMode,
+              note.id,
+              selectedNoteId,
+              selectedNoteIds
+            );
+            const labelPointerInteractive = !isPreviewMode && isSelected;
+            const zOff = textLabelZIndexOffset(
+              hoveredNoteId,
+              selectedNoteId,
+              selectedNoteIds,
+              note.id,
+              isFavorite
+            );
 
-          const icon = new DivIcon({
-            html: `
+            const ks = lngWrapOffsetsForBounds(lng, west, east);
+            const ksSafe = ks.length ? ks : [0];
+            return ksSafe.map((k) => {
+              const icon = new DivIcon({
+                html: `
                 <div style="
                   background: white;
                   color: ${isFavorite ? themeColor : 'black'};
@@ -491,35 +526,35 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
                   </div>
                 </div>
             `,
-            className: 'custom-text-label',
-            iconSize: [0, labelHeight],
-            // 左侧端点对齐：marker 坐标为 label 左下角上方一点
-            iconAnchor: [0, labelHeight + (isFavorite ? 10 : 5)] // Position above marker
-          });
+                className: 'custom-text-label',
+                iconSize: [0, labelHeight],
+                iconAnchor: [0, labelHeight + (isFavorite ? 10 : 5)]
+              });
 
-          return (
-            <Marker
-              key={`text-${note.id}`}
-              position={[lat, lng]}
-              icon={icon}
-              // 保持可交互，避免 react-leaflet 在 interactive 条件切换时不绑定事件
-              interactive={true}
-              zIndexOffset={zOff}
-              eventHandlers={{
-                mousedown: (e) => {
-                  e.originalEvent?.stopPropagation();
-                  e.originalEvent?.stopImmediatePropagation();
-                },
-                dblclick: (e) => {
-                  e.originalEvent?.stopPropagation();
-                  e.originalEvent?.stopImmediatePropagation();
-                  if (!isSelected || !onLabelDoubleClickEdit) return;
-                  onLabelDoubleClickEdit(note.id);
-                }
-              }}
-            />
-          );
-        })}
+              return (
+                <Marker
+                  key={`text-${note.id}-w${k}`}
+                  position={[lat, lng + 360 * k]}
+                  icon={icon}
+                  interactive={true}
+                  zIndexOffset={zOff}
+                  eventHandlers={{
+                    mousedown: (e) => {
+                      e.originalEvent?.stopPropagation();
+                      e.originalEvent?.stopImmediatePropagation();
+                    },
+                    dblclick: (e) => {
+                      e.originalEvent?.stopPropagation();
+                      e.originalEvent?.stopImmediatePropagation();
+                      if (!isSelected || !onLabelDoubleClickEdit) return;
+                      onLabelDoubleClickEdit(note.id);
+                    }
+                  }}
+                />
+              );
+            });
+          });
+      })()}
 
       {/* Cluster labels */}
       {(
@@ -532,19 +567,28 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
           (!selectedNoteIds || selectedNoteIds.size === 0) &&
           !hoveredNoteId &&
           !preSelectedNotes)
-      ) && clusterLabels.map((clusterLabel, index) => {
-        const text = clusterLabel.text;
-        const timeText = clusterLabel.timeText;
-        const isFavorite = clusterLabel.isFavorite;
-        const scale = isFavorite ? 1.5 : 1; 
-        const fontSize = 10 * labelSize * scale;
-        const paddingX = 8 * scale;
-        const paddingY = 2 * scale;
-        const timeFontSize = Math.max(8, Math.floor(fontSize * 0.75));
-        const labelHeight = paddingY * 2 + fontSize + timeFontSize + 6;
+      ) &&
+        (() => {
+          const wb = map.getBounds();
+          const west = wb.getWest();
+          const east = wb.getEast();
+          return clusterLabels.flatMap((clusterLabel, index) => {
+            const [lat, lng] = clusterLabel.position;
+            const ks = lngWrapOffsetsForBounds(lng, west, east);
+            const ksSafe = ks.length ? ks : [0];
+            const text = clusterLabel.text;
+            const timeText = clusterLabel.timeText;
+            const isFavorite = clusterLabel.isFavorite;
+            const scale = isFavorite ? 1.5 : 1;
+            const fontSize = 10 * labelSize * scale;
+            const paddingX = 8 * scale;
+            const paddingY = 2 * scale;
+            const timeFontSize = Math.max(8, Math.floor(fontSize * 0.75));
+            const labelHeight = paddingY * 2 + fontSize + timeFontSize + 6;
 
-        const icon = new DivIcon({
-          html: `
+            return ksSafe.map((k) => {
+              const icon = new DivIcon({
+                html: `
                 <div style="
                   background: white;
                   color: ${isFavorite ? themeColor : 'black'};
@@ -568,21 +612,23 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
                   </div>
                 </div>
           `,
-          className: 'custom-text-label',
-          iconSize: [0, labelHeight],
-          iconAnchor: [0, labelHeight + (isFavorite ? 10 : 5)] // 左侧端点对齐
-        });
+                className: 'custom-text-label',
+                iconSize: [0, labelHeight],
+                iconAnchor: [0, labelHeight + (isFavorite ? 10 : 5)]
+              });
 
-        return (
-          <Marker
-            key={`cluster-text-${index}`}
-            position={clusterLabel.position}
-            icon={icon}
-            interactive={false}
-            zIndexOffset={isFavorite ? 300 : 50}
-          />
-        );
-      })}
+              return (
+                <Marker
+                  key={`cluster-text-${index}-w${k}`}
+                  position={[lat, lng + 360 * k]}
+                  icon={icon}
+                  interactive={false}
+                  zIndexOffset={isFavorite ? 300 : 50}
+                />
+              );
+            });
+          });
+        })()}
     </>
   );
 };

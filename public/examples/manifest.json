@@ -1,0 +1,9 @@
+[
+  {
+    "id": "starter-board",
+    "title": "上海",
+    "description": "少量便签，演示地图坐标与看板位置。可随意删改。",
+    "file": "starter-board.json",
+    "order": 0
+  }
+]
