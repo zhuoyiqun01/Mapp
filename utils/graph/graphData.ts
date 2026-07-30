@@ -1129,6 +1129,79 @@ export function getGraphStylesheet(
   ];
 }
 
+/**
+ * Hover / 选中（及关系链高亮）节点与连线的 label 保持屏幕像素尺寸，不随 cy.zoom 放大缩小。
+ * Cytoscape 字号按模型坐标渲染，故用 `期望屏上 px / zoom` 写入样式。
+ */
+export function applyGraphHighlightLabelScreenSize(
+  cy: Core,
+  sizingPartial?: Partial<GraphStylesheetSizing>
+): void {
+  if (!cy || cy.destroyed?.()) return;
+  const sizing = mergeGraphSizing(sizingPartial);
+  const z = graphSizingCss('#000000', sizing);
+  const zoom = Math.max(0.08, cy.zoom());
+  const snum = (n: number) => Math.round((n / zoom) * 1000) / 1000;
+  const spx = (n: number) => `${snum(n)}px`;
+
+  const nodeHi =
+    'node.focus-nh, node.focus-edge-endpoint, node.focus-core, node.focus-hover';
+  const nodeHiFav =
+    'node.focus-nh[favorite = "yes"], node.focus-edge-endpoint[favorite = "yes"], node.focus-core[favorite = "yes"], node.focus-hover[favorite = "yes"]';
+  const edgeHi =
+    'edge.focus-e, edge.focus-edge-hover, edge.focus-edge-selected';
+  const edgeHiVpSrc =
+    'edge.focus-e.edge-lbl-vp-src, edge.focus-edge-hover.edge-lbl-vp-src, edge.focus-edge-selected.edge-lbl-vp-src';
+  const edgeHiVpTgt =
+    'edge.focus-e.edge-lbl-vp-tgt, edge.focus-edge-hover.edge-lbl-vp-tgt, edge.focus-edge-selected.edge-lbl-vp-tgt';
+
+  // Cytoscape 类型对 padding/font-size 字符串/数字要求不一致，这里用宽断言。
+  (cy.style() as any)
+    .selector(nodeHi)
+    .style({
+      'font-size': snum(z.nf),
+      'text-background-padding': spx(z.pad),
+      'text-border-width': snum(z.txtBorder),
+      'text-margin-y': snum(z.marginY)
+    } as Record<string, string | number>)
+    .selector(nodeHiFav)
+    .style({
+      'font-size': snum(z.favNf),
+      'text-background-padding': spx(z.padFav),
+      'text-border-width': snum(z.txtBorderHiFav),
+      'text-margin-y': snum(z.marginYFav)
+    } as Record<string, string | number>)
+    .selector('node.focus-core')
+    .style({
+      'text-margin-y': snum(z.marginYCore)
+    } as Record<string, string | number>)
+    .selector('node.focus-core[favorite = "yes"]')
+    .style({
+      'text-margin-y': snum(z.marginYFavCore)
+    } as Record<string, string | number>)
+    .selector(edgeHi)
+    .style({
+      'font-size': snum(z.edgeFont),
+      'text-outline-width': snum(z.edgeOutlineHighlight),
+      'text-margin-y': snum(-z.edgeMarginY)
+    } as Record<string, string | number>)
+    .selector(edgeHiVpSrc)
+    .style({
+      'font-size': snum(z.edgeFont),
+      'text-outline-width': snum(z.edgeOutlineHighlight),
+      'source-text-offset': snum(z.vpEdgeOff),
+      'source-text-margin-y': snum(-z.edgeMarginY)
+    } as Record<string, string | number>)
+    .selector(edgeHiVpTgt)
+    .style({
+      'font-size': snum(z.edgeFont),
+      'text-outline-width': snum(z.edgeOutlineHighlight),
+      'target-text-offset': snum(z.vpEdgeOff),
+      'target-text-margin-y': snum(-z.edgeMarginY)
+    } as Record<string, string | number>)
+    .update();
+}
+
 /** 导出页悬停/预览用（与 NotePreviewCard 数据源一致） */
 export interface GraphNotePreview {
   emoji: string;

@@ -66,8 +66,19 @@ export const MapConnectionLinesOverlay: React.FC<MapConnectionLinesOverlayProps>
   const [, setUpdate] = useState(0);
 
   useMapEvents({
-    move: () => setUpdate(n => n + 1),
-    zoom: () => setUpdate(n => n + 1)
+    // Drag / native pan
+    move: () => {
+      if (map._mappSmoothZooming || map._animatingZoom) return;
+      setUpdate((n) => n + 1);
+    },
+    zoom: () => {
+      if (map._mappSmoothZooming || map._animatingZoom) return;
+      setUpdate((n) => n + 1);
+    },
+    // Smooth zoom: follow zoomanim so SVG stays locked to pins without React thrash on `move`
+    zoomanim: () => setUpdate((n) => n + 1),
+    zoomend: () => setUpdate((n) => n + 1),
+    moveend: () => setUpdate((n) => n + 1)
   });
 
   if (!map) return null;

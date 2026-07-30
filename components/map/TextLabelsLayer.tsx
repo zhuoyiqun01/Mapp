@@ -108,6 +108,7 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
     zoomend: () => bump((n) => n + 1),
     moveend: () => bump((n) => n + 1),
     move: () => {
+      if (map._mappSmoothZooming || map._animatingZoom) return;
       if (rafRef.current != null) return;
       rafRef.current = requestAnimationFrame(() => {
         rafRef.current = null;

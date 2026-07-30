@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, GeoJSON, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
-import '../utils/map/registerLeafletSmoothWheelZoom';
 import { set } from 'idb-keyval';
 
 import { Note, Coordinates, Project, Frame, Connection, type GraphLayerState } from '../types';
@@ -27,6 +26,7 @@ import { useDataImport } from '@/components/hooks/useDataImport';
 import { useFileDrop } from '@/components/hooks/useFileDrop';
 import { useCsvImport } from '@/components/hooks/useCsvImport';
 import { MapWorldMinZoom } from './map/MapWorldMinZoom';
+import { MapSmoothZoom } from './map/MapSmoothZoom';
 import { MapLongPressHandler } from './map/MapLongPressHandler';
 import { MapNavigationHandler } from './map/MapNavigationHandler';
 import { TextLabelsLayer } from './map/TextLabelsLayer';
@@ -1145,8 +1145,7 @@ export const MapView: React.FC<MapViewProps> = ({
         zoomSnap={0}
         zoomDelta={0.5}
         scrollWheelZoom={false}
-        smoothWheelZoom={true}
-        smoothSensitivity={1.5}
+        touchZoom={false}
         crs={L.CRS.EPSG3857}
         style={{
           height: '100%',
@@ -1159,6 +1158,7 @@ export const MapView: React.FC<MapViewProps> = ({
         doubleClickZoom={false}
         boxZoom={false}
       >
+        <MapSmoothZoom sensitivity={1.5} inertia />
         <MapWorldMinZoom />
         <MapNavigationHandler coords={navigateToCoords} onComplete={onNavigateComplete} />
         <MapPositionTracker onPositionChange={handleMapPositionChange} />
@@ -1535,18 +1535,16 @@ export const MapView: React.FC<MapViewProps> = ({
           </div>
         )}
 
-        {mapGeoNotes.length === 0 && (
-          <div className="absolute top-24 left-0 right-0 z-[400] pointer-events-none flex justify-center">
-             <div className="relative">
-                <div
-                    className="px-4 py-2 rounded-full shadow-lg text-sm text-gray-600 animate-bounce whitespace-nowrap border border-gray-100/80"
-                    style={mapChromeSurface}
-                >
-                    Long press anywhere to pin
-                </div>
-             </div>
+        <div className="absolute top-24 left-0 right-0 z-[400] pointer-events-none flex justify-center">
+          <div className="relative">
+            <div
+              className="px-4 py-2 rounded-full shadow-lg text-sm text-gray-600 animate-bounce whitespace-nowrap border border-gray-100/80"
+              style={mapChromeSurface}
+            >
+              Long press anywhere to pin
+            </div>
           </div>
-        )}
+        </div>
 
       </MapContainer>
 

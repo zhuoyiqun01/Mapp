@@ -63,6 +63,8 @@ function ClusterMarkerLayerInner({
     zoomend: () => bump((n) => n + 1),
     moveend: () => bump((n) => n + 1),
     move: () => {
+      // During smooth CSS zoom, Leaflet markers follow zoomanim — don't remount via React.
+      if (map._mappSmoothZooming || map._animatingZoom) return;
       if (rafRef.current != null) return;
       rafRef.current = requestAnimationFrame(() => {
         rafRef.current = null;

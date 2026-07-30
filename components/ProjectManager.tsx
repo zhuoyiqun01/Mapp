@@ -5,6 +5,7 @@ import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Downl
 import { generateId, formatDate, exportToJpeg, exportToJpegCentered, compressImageFromBase64 } from '../utils';
 import { loadProject, loadNoteImages, saveProject, loadAllProjects } from '../utils/persistence/storage';
 import { getLastSyncTime, type SyncStatus } from '../utils/persistence/sync';
+import { downloadMappVizJson } from '../utils/export/mappVizJson';
 import { AnimatePresence } from 'framer-motion';
 import {
   DEFAULT_THEME_COLOR,
@@ -241,6 +242,7 @@ const MenuDropdown: React.FC<{
   onDuplicate: (project: Project) => void;
   onExportData: (project: Project) => void;
   onExportFullProject: (project: Project) => void;
+  onExportMappViz: (project: Project) => void;
   onCompressImages: (project: Project) => void;
   onCheckData?: () => Promise<void>;
   onCleanupBrokenReferences?: (project: Project) => Promise<void>;
@@ -256,6 +258,7 @@ const MenuDropdown: React.FC<{
   onDuplicate,
   onExportData,
   onExportFullProject,
+  onExportMappViz,
   onCompressImages,
   onCheckData,
   onCleanupBrokenReferences,
@@ -300,6 +303,13 @@ const MenuDropdown: React.FC<{
         className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
       >
         <Download size={16} /> Export Full Project (JSON)
+      </button>
+      <div className="h-px bg-gray-100 my-1" />
+      <button
+        onClick={() => { onExportMappViz(project); onClose(); }}
+        className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+      >
+        <Download size={16} /> Export Bibliometrics (.viz.json)
       </button>
       <div className="h-px bg-gray-100 my-1" />
       <button 
@@ -797,6 +807,21 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     } catch (error) {
       console.error('导出失败:', error);
       alert('导出项目失败');
+    }
+  };
+
+  const handleExportMappViz = (project: Project) => {
+    try {
+      if (!(project.notes || []).length) {
+        alert('该项目没有便签可导出');
+        setOpenMenuId(null);
+        return;
+      }
+      downloadMappVizJson(project);
+      setOpenMenuId(null);
+    } catch (error) {
+      console.error('导出 viz.json 失败:', error);
+      alert('导出 Bibliometrics 格式失败');
     }
   };
 
@@ -2243,6 +2268,17 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                   <button
                     type="button"
                     onClick={() => {
+                      handleExportMappViz(pm);
+                      setOpenMenuId(null);
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                  >
+                    <Download size={16} /> Export Bibliometrics (.viz.json)
+                  </button>
+                  <div className="h-px bg-gray-100 my-1" />
+                  <button
+                    type="button"
+                    onClick={() => {
                       handleCompressImages(pm);
                       setOpenMenuId(null);
                     }}
@@ -2274,6 +2310,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                   onDuplicate={handleDuplicateProject}
                   onExportData={handleExportData}
                   onExportFullProject={handleExportFullProject}
+                  onExportMappViz={handleExportMappViz}
                   onCompressImages={handleCompressImages}
                   onCheckData={onCheckData}
                   onCleanupBrokenReferences={onCleanupBrokenReferences}

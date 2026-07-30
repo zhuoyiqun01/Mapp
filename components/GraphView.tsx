@@ -11,9 +11,11 @@ import {
   buildGraphExportPayload,
   DEFAULT_GRAPH_STYLESHEET_SIZING,
   getGraphStylesheet,
-  graphNodeStructureKey
+  graphNodeStructureKey,
+  applyGraphHighlightLabelScreenSize
 } from '../utils/graph/graphData';
 import { buildStandaloneGraphHtml, downloadTextFile } from '../utils/graph/graphExportHtml';
+import { downloadMappVizJson } from '../utils/export/mappVizJson';
 import { attachBoardlikeWheelZoom, createAppGraphCy } from '../utils/graph/graphRuntime';
 import {
   applyGraphCircleLayout,
@@ -199,6 +201,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
       edgeWeight: Math.min(4, Math.max(0.1, Math.round(edgeWeight * 10) / 10))
     };
   }, [project.graphNodeSize, project.graphLabelFontPx, project.graphEdgeWeight]);
+  const graphStylesheetSizingRef = useRef(graphStylesheetSizing);
+  graphStylesheetSizingRef.current = graphStylesheetSizing;
 
   const handleQuickGraphStyleChange = useCallback(
     (patch: { nodeSize?: number; labelSize?: number; edgeWeight?: number }) => {
@@ -955,10 +959,24 @@ export const GraphView: React.FC<GraphViewProps> = ({
 
     const detachWheel = attachBoardlikeWheelZoom(cy);
 
+    let labelSizeRaf: number | null = null;
+    const syncHighlightLabelSize = () => {
+      if (labelSizeRaf != null) return;
+      labelSizeRaf = requestAnimationFrame(() => {
+        labelSizeRaf = null;
+        if (cy.destroyed()) return;
+        applyGraphHighlightLabelScreenSize(cy, graphStylesheetSizingRef.current);
+      });
+    };
+    cy.on('viewport', syncHighlightLabelSize);
+    applyGraphHighlightLabelScreenSize(cy, graphStylesheetSizingRef.current);
+
     const detachRo = attachGraphResizeObserver(cy, el);
     scheduleGraphResizeAndFit(cy);
 
     return () => {
+      if (labelSizeRaf != null) cancelAnimationFrame(labelSizeRaf);
+      cy.removeListener('viewport', syncHighlightLabelSize);
       detachWheel();
       detachRo();
       unbindRef.current?.();
@@ -997,6 +1015,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
     });
 
     updateGraphStylesheet(cy, getGraphStylesheet(themeColor, graphStylesheetSizing));
+    applyGraphHighlightLabelScreenSize(cy, graphStylesheetSizing);
     const haloPaint = mapChromeHaloFillAndBorder(mapUiChromeOpacity, mapUiChromeBlurPx);
     cy.batch(() => {
       cy.nodes('.frame-cluster-halo').forEach((n) => {
@@ -1274,12 +1293,21 @@ export const GraphView: React.FC<GraphViewProps> = ({
     downloadGraphPayloadJson(payload, safe);
   }, [project, themeColor]);
 
+  const exportMappViz = useCallback(() => {
+    if (!(project.notes || []).length) {
+      window.alert('该项目没有便签可导出');
+      return;
+    }
+    downloadMappVizJson(project);
+  }, [project]);
+
   const graphDownloadItems = useMemo(
     () => [
       { id: 'html', label: '导出独立演示网页', onSelect: () => exportStandaloneHtml() },
-      { id: 'json', label: '导出 JSON 数据', onSelect: () => exportJson() }
+      { id: 'json', label: '导出 JSON 数据', onSelect: () => exportJson() },
+      { id: 'viz', label: '导出 Bibliometrics (.viz.json)', onSelect: () => exportMappViz() }
     ],
-    [exportStandaloneHtml, exportJson]
+    [exportStandaloneHtml, exportJson, exportMappViz]
   );
 
   useEffect(() => {
