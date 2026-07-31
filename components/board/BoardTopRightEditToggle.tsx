@@ -1,6 +1,7 @@
 import React from 'react';
 import { Check, Pencil } from 'lucide-react';
 import { ChromeIconButton } from '../ui/ChromeIconButton';
+import { PortalTooltip } from '../ui/PortalTooltip';
 
 type Props = {
   isUIVisible: boolean;
@@ -59,31 +60,33 @@ export const BoardTopRightEditToggle: React.FC<Props> = ({
           chromeHoverBackground={chromeHoverBackground}
           nonChromeIdleHover="imperative-gray100"
           onClick={() => onEnterEditMode()}
-          title="进入编辑模式"
+          tooltip="编辑"
         >
           <Pencil size={18} className="sm:w-5 sm:h-5" />
         </ChromeIconButton>
       ) : (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            e.preventDefault();
-            onExitEditMode();
-          }}
-          onPointerDown={(e) => e.stopPropagation()}
-          className="flex h-10 sm:h-12 items-center gap-1 sm:gap-2 px-2 sm:px-3 text-theme-chrome-fg rounded-xl shadow-lg font-bold"
-          style={{ backgroundColor: themeColor }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = darkenHex(themeColor);
-          }}
-          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = themeColor)}
-        >
-          <Check size={18} className="sm:w-5 sm:h-5" />
-          <span className="hidden sm:inline">Done</span>
-        </button>
+        <PortalTooltip content="完成" compact>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              onExitEditMode();
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            className="flex h-10 sm:h-12 items-center gap-1 sm:gap-2 px-2 sm:px-3 text-theme-chrome-fg rounded-xl shadow-lg font-bold"
+            style={{ backgroundColor: themeColor }}
+            aria-label="完成"
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = darkenHex(themeColor);
+            }}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = themeColor)}
+          >
+            <Check size={18} className="sm:w-5 sm:h-5" />
+            <span className="hidden sm:inline">Done</span>
+          </button>
+        </PortalTooltip>
       )}
     </div>
   );
 };
-

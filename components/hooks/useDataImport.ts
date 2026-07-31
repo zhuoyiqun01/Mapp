@@ -2,8 +2,12 @@ import { useCallback } from 'react';
 import type { Note, Project } from '../../types';
 import {
   buildNewNotesFromProjectJsonRaws,
-  parseProjectJsonNotesPayload
+  parseProjectJsonNotesPayloadResult
 } from '../../utils/import/projectDataImport';
+import {
+  formatImportErrorMessage,
+  formatUnexpectedImportError
+} from '../../utils/import/importErrorFormat';
 
 interface UseDataImportProps {
   project: Project;
@@ -19,9 +23,9 @@ export function useDataImport({ project, onUpdateProject }: UseDataImportProps) 
       }
       try {
         const text = await file.text();
-        const parsed = parseProjectJsonNotesPayload(text);
-        if (!parsed) {
-          alert('无效的项目 JSON：需要包含 project.notes 数组');
+        const parsed = parseProjectJsonNotesPayloadResult(text);
+        if (parsed.ok === false) {
+          alert(formatImportErrorMessage(parsed.error, file.name));
           return;
         }
 
@@ -29,7 +33,16 @@ export function useDataImport({ project, onUpdateProject }: UseDataImportProps) 
         const newNotes = buildNewNotesFromProjectJsonRaws(parsed.rawNotes, existingNotes);
 
         if (newNotes.length === 0) {
-          alert('没有可导入的新便签（可能全部重复或文件为空）');
+          alert(
+            formatImportErrorMessage(
+              {
+                title: '没有可导入的新便签',
+                location: 'project.notes',
+                detail: '可能全部与已有数据重复，或 notes 数组为空'
+              },
+              file.name
+            )
+          );
           return;
         }
 
@@ -44,7 +57,7 @@ export function useDataImport({ project, onUpdateProject }: UseDataImportProps) 
         }
       } catch (error) {
         console.error('Failed to import data:', error);
-        alert('导入失败，请检查文件格式。');
+        alert(formatUnexpectedImportError(error, file.name));
       }
     },
     [project, onUpdateProject]

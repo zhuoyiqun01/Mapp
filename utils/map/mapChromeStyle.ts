@@ -24,6 +24,13 @@ export function mapChromeMenuBackdropStyle(blurPx: number): CSSProperties {
 export const DEFAULT_MAP_UI_CHROME_OPACITY = 0.9;
 export const DEFAULT_MAP_UI_CHROME_BLUR_PX = 8;
 
+/**
+ * 全局玻璃浮层外壳 class（圆角 / 阴影 / 描边）。
+ * 与 ChromeIconButton、ChromeLabeledSlider 一致；底色+模糊用 `mapChromeSurfaceStyle`。
+ */
+export const MAP_CHROME_SURFACE_SHELL_CLASS =
+  'rounded-lg shadow-lg border border-gray-100/80';
+
 export function mapChromeSurfaceStyle(opacity: number, blurPx: number): CSSProperties {
   const o = Math.min(1, Math.max(0, opacity));
   const b = Math.min(48, Math.max(0, blurPx));
@@ -38,7 +45,26 @@ export function mapChromeSurfaceStyle(opacity: number, blurPx: number): CSSPrope
   return style;
 }
 
-/** 图谱 frameCluster 圆形底衬：填充与 mapChromeSurfaceStyle 一致，描边随不透明度略提亮 */
+/**
+ * Leaflet DivIcon 等内联 HTML 用：与 `mapChromeSurfaceStyle` + `MAP_CHROME_SURFACE_SHELL_CLASS` 等价
+ *（圆角 / 阴影 / 细描边 / 半透明白底 / backdrop）。
+ */
+export function mapChromeSurfaceInlineCss(opacity: number, blurPx: number): string {
+  const o = Math.min(1, Math.max(0, opacity));
+  const b = Math.min(48, Math.max(0, blurPx));
+  const parts = [
+    `background-color:rgba(255,255,255,${o})`,
+    'border:1px solid rgba(243,244,246,0.8)',
+    'border-radius:0.5rem',
+    'box-shadow:0 10px 15px -3px rgba(0,0,0,0.1),0 4px 6px -4px rgba(0,0,0,0.1)'
+  ];
+  if (b > 0) {
+    parts.push(`backdrop-filter:blur(${b}px)`, `-webkit-backdrop-filter:blur(${b}px)`);
+  }
+  return parts.join(';');
+}
+
+/** 图谱圆形底衬：填充与 mapChromeSurfaceStyle 一致，描边随不透明度略提亮 */
 export function mapChromeHaloFillAndBorder(opacity: number, blurPx: number): { fill: string; border: string } {
   const surface = mapChromeSurfaceStyle(opacity, blurPx);
   const fill =
@@ -48,6 +74,29 @@ export function mapChromeHaloFillAndBorder(opacity: number, blurPx: number): { f
   const o = Math.min(1, Math.max(0, opacity));
   const border = `rgba(255, 255, 255, ${Math.min(1, o + 0.1)})`;
   return { fill, border };
+}
+
+/**
+ * Canvas / Cytoscape 用的玻璃面拆分色：
+ * Cytoscape 的 `*-color` 只取 RGB，透明度必须写在独立的 `*-opacity` 上
+ *（否则 rgba 里的 alpha 会被丢掉，看起来像实心白底）。
+ * 边框对齐 ChromeIconButton：`border-gray-100/80`。
+ */
+export function mapChromeCanvasPaint(opacity: number): {
+  fillColor: string;
+  fillOpacity: number;
+  borderColor: string;
+  borderOpacity: number;
+  borderWidth: number;
+} {
+  const o = Math.min(1, Math.max(0, opacity));
+  return {
+    fillColor: '#ffffff',
+    fillOpacity: o,
+    borderColor: '#f3f4f6',
+    borderOpacity: 0.8,
+    borderWidth: 1
+  };
 }
 
 export function mapChromeHoverBackground(opacity: number): string {

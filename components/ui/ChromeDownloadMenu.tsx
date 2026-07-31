@@ -46,7 +46,7 @@ export const ChromeDownloadMenu: React.FC<ChromeDownloadMenuProps> = ({
         chromeSurfaceStyle={chromeSurfaceStyle}
         chromeHoverBackground={chromeHoverBackground}
         nonChromeIdleHover="imperative-gray100"
-        title={title}
+        tooltip={title}
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="menu"

@@ -16,6 +16,10 @@ interface MapControlsProps {
   showTextLabels: boolean;
   setShowTextLabels: (show: boolean) => void;
   onOpenSettings: () => void;
+  /** 设置按钮是否处于打开态（高亮） */
+  settingsOpen?: boolean;
+  /** 锚定设置下拉面板 */
+  settingsButtonRef?: React.RefObject<HTMLButtonElement | null>;
 }
 
 export const MapControls: React.FC<MapControlsProps> = ({
@@ -27,7 +31,9 @@ export const MapControls: React.FC<MapControlsProps> = ({
   chromeHoverBackground,
   showTextLabels,
   setShowTextLabels,
-  onOpenSettings
+  onOpenSettings,
+  settingsOpen = false,
+  settingsButtonRef
 }) => {
   const neutralStyle = chromeSurfaceStyle;
   const neutralHover = chromeHoverBackground;
@@ -99,13 +105,16 @@ export const MapControls: React.FC<MapControlsProps> = ({
       {/* First Row: Main Controls */}
       {/* 要求：设置按钮在左上角工具栏最左侧（第一个） */}
       <ChromeIconButton
+        ref={settingsButtonRef}
         themeColor={themeColor}
         chromeSurfaceStyle={neutralStyle}
         chromeHoverBackground={neutralHover}
         nonChromeIdleHover="imperative-gray100"
+        active={settingsOpen}
+        pressThemeFlash
         onClick={() => onOpenSettings()}
         onPointerMove={(e) => e.stopPropagation()}
-        title="设置"
+        tooltip="设置"
       >
         <Settings size={18} className="sm:w-5 sm:h-5" />
       </ChromeIconButton>
@@ -119,7 +128,7 @@ export const MapControls: React.FC<MapControlsProps> = ({
           active={showLocateMenu}
           onClick={() => setShowLocateMenu(!showLocateMenu)}
           onPointerMove={(e) => e.stopPropagation()}
-          title="定位"
+          tooltip="定位"
         >
           <Locate size={18} className="sm:w-5 sm:h-5" />
         </ChromeIconButton>
@@ -185,7 +194,7 @@ export const MapControls: React.FC<MapControlsProps> = ({
         active={showTextLabels}
         onClick={() => setShowTextLabels(!showTextLabels)}
         onPointerMove={(e) => e.stopPropagation()}
-        title={showTextLabels ? '隐藏 label' : 'label'}
+        tooltip={showTextLabels ? '隐藏标签' : '标签'}
       >
         <Type size={18} className="sm:w-5 sm:h-5" />
       </ChromeIconButton>

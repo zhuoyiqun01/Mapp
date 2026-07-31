@@ -39,7 +39,6 @@ import { NotePreviewCard } from './map/overlays/NotePreviewCard';
 import { MapLocationErrorBanner } from './map/overlays/MapLocationErrorBanner';
 import { MapImportMenuModal } from './map/overlays/MapImportMenuModal';
 import { MapTopRightEditToggle } from './map/overlays/MapTopRightEditToggle';
-import { MapToolbarSliders } from './map/overlays/MapToolbarSliders';
 import { MapPreviewTopRightToolbar } from './map/overlays/MapPreviewTopRightToolbar';
 import { type EditInspectorPanelProps, type InspectorGroupContext } from './map/overlays/MapEditInspectorPanel';
 import { useRegisterEditInspector } from './editInspector/EditInspectorProvider';
@@ -449,6 +448,7 @@ export const MapView: React.FC<MapViewProps> = ({
 
   // Settings panel
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
+  const settingsButtonRef = useRef<HTMLButtonElement>(null);
 
   // Location error retry tracking
   const [hasRetriedLocation, setHasRetriedLocation] = useState(false);
@@ -1269,6 +1269,8 @@ export const MapView: React.FC<MapViewProps> = ({
           connectionHighlightNoteIds={connectionHighlightNoteIds}
           hoveredNoteId={hoveredNoteId}
           noteCoordOverrides={noteCoordOverrides}
+          mapUiChromeOpacity={mapUiChromeOpacity}
+          mapUiChromeBlurPx={mapUiChromeBlurPx}
           onLabelDoubleClickEdit={
             isUIVisible && isMapToolbarEditMode ? handleEditNoteFromLabel : undefined
           }
@@ -1284,7 +1286,7 @@ export const MapView: React.FC<MapViewProps> = ({
           }}
         />
 
-        {/* 选中某个点后的连线：用屏幕坐标覆盖层绘制，与地图同步缩放，避免抖动 */}
+        {/* 选中点连线：Leaflet 图层（与 pin 同 zoomanim），pane 低于节点 label */}
         <MapConnectionLinesOverlay
           selectedNoteId={selectedNoteId}
           selectedNoteIds={selectedNoteIds}
@@ -1423,7 +1425,7 @@ export const MapView: React.FC<MapViewProps> = ({
         {isUIVisible && (
           <div
             data-allow-context-menu
-            className={`fixed top-2 sm:top-4 left-2 sm:left-4 z-[500] flex flex-col gap-2 pointer-events-none ${
+            className={`fixed top-2 sm:top-4 ui-workspace-left z-[500] flex flex-col gap-2 pointer-events-none ${
               isMapToolbarEditMode
                 ? 'right-2 sm:right-4 lg:right-[calc(20rem+0.75rem)]'
                 : 'right-2 sm:right-4'
@@ -1444,11 +1446,19 @@ export const MapView: React.FC<MapViewProps> = ({
                     chromeHoverBackground={mapChromeHoverBg}
                     showTextLabels={showTextLabels}
                     setShowTextLabels={setShowTextLabels}
-                    onOpenSettings={() => setShowSettingsPanel(true)}
+                    settingsOpen={showSettingsPanel}
+                    settingsButtonRef={settingsButtonRef}
+                    onOpenSettings={() => {
+                      setShowSettingsPanel((v) => !v);
+                      setShowFrameLayerPanel(false);
+                    }}
                   />
                   <MapLayerControl
                     showPanel={showFrameLayerPanel}
-                    onTogglePanel={() => setShowFrameLayerPanel(!showFrameLayerPanel)}
+                    onTogglePanel={() => {
+                      setShowFrameLayerPanel(!showFrameLayerPanel);
+                      setShowSettingsPanel(false);
+                    }}
                     themeColor={themeColor}
                     chromeSurfaceStyle={mapChromeSurface}
                     chromeHoverBackground={mapChromeHoverBg}
@@ -1519,19 +1529,6 @@ export const MapView: React.FC<MapViewProps> = ({
                 </div>
               </div>
 
-              {isMapToolbarEditMode && (
-                <MapToolbarSliders
-                  pinSize={pinSize}
-                  setPinSize={setPinSize}
-                  labelSize={labelSize}
-                  setLabelSize={setLabelSize}
-                  clusterThreshold={clusterThreshold}
-                  setClusterThreshold={setClusterThreshold}
-                  themeColor={themeColor}
-                  chromeSurfaceStyle={mapChromeSurface}
-                  mapInstance={mapInstance}
-                />
-              )}
           </div>
         )}
 
@@ -1673,6 +1670,7 @@ export const MapView: React.FC<MapViewProps> = ({
       <SettingsPanel
         isOpen={showSettingsPanel}
         onClose={() => setShowSettingsPanel(false)}
+        anchorRef={settingsButtonRef}
         settingsContextView="map"
         themeColor={themeColor}
         onThemeColorChange={(color) => {

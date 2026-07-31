@@ -1,4 +1,5 @@
 import React from 'react';
+import { PortalTooltip } from './PortalTooltip';
 
 export interface ChromeIconButtonProps
   extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'style'> {
@@ -18,6 +19,11 @@ export interface ChromeIconButtonProps
    * - none：仅背景类名，无悬停变色（如搜索按钮仅保留 scale 动画）
    */
   nonChromeIdleHover?: 'tailwind' | 'imperative-gray100' | 'none';
+  /**
+   * 悬停 / 移动端长按显示的短中文名（PortalTooltip）。
+   * 传入后不再使用原生 title，以免双提示。
+   */
+  tooltip?: string;
 }
 
 const baseClass =
@@ -36,6 +42,9 @@ export const ChromeIconButton = React.forwardRef<HTMLButtonElement, ChromeIconBu
       activeVariant = 'theme',
       pressThemeFlash = false,
       nonChromeIdleHover = 'tailwind',
+      tooltip,
+      title,
+      'aria-label': ariaLabel,
       className = '',
       children,
       onClick,
@@ -75,12 +84,16 @@ export const ChromeIconButton = React.forwardRef<HTMLButtonElement, ChromeIconBu
         ? undefined
         : ch || undefined;
 
-    return (
+    const label = ariaLabel || tooltip || (typeof title === 'string' ? title : undefined);
+
+    const button = (
       <button
         ref={ref}
         type={type}
         className={`${baseClass} ${idleSurfaceClass} ${className}`.trim()}
         style={surfaceStyle}
+        title={tooltip ? undefined : title}
+        aria-label={label}
         onClick={(e) => {
           e.stopPropagation();
           onClick?.(e);
@@ -125,6 +138,13 @@ export const ChromeIconButton = React.forwardRef<HTMLButtonElement, ChromeIconBu
       >
         {children}
       </button>
+    );
+
+    if (!tooltip) return button;
+    return (
+      <PortalTooltip content={tooltip} compact>
+        {button}
+      </PortalTooltip>
     );
   }
 );

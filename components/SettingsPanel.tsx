@@ -1,24 +1,29 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Settings, Map, ChevronDown, Grid, GitBranch, Table2 } from 'lucide-react';
+import { X, Settings, Map, Grid, GitBranch, Table2, ChevronDown } from 'lucide-react';
 import { set } from 'idb-keyval';
 import { MAP_STYLE_OPTIONS } from '../constants';
 import type { Project } from '../types';
 import { GraphStyleSettingsBlock } from './GraphStyleSettingsBlock';
 import { ThemeColorPicker } from './ThemeColorPicker';
 import { HelpHint } from './ui/HelpHint';
-import { SettingsCollapsibleSection } from './ui/SettingsCollapsibleSection';
 import { SettingsCompactSlider } from './ui/SettingsCompactSlider';
-import { mapChromeSurfaceStyle, MODAL_BACKDROP_MASK_STYLE } from '../utils/map/mapChromeStyle';
+import { mapChromeSurfaceStyle } from '../utils/map/mapChromeStyle';
 import { PORTAL_TOOLTIP_Z } from './ui/PortalTooltip';
 
-/** 由打开设置时所在的视图决定默认展开哪一块，其余折叠 */
+/** 由打开设置时所在的视图决定只展示哪一块 */
 export type SettingsContextView = 'map' | 'board' | 'graph' | 'table';
+
+const PANEL_WIDTH = 320;
+const PANEL_GAP = 8;
+const PANEL_PAD = 8;
 
 interface SettingsPanelProps {
   isOpen: boolean;
   onClose: () => void;
-  /** 当前一级视图：决定各折叠区块初始展开状态 */
+  /** 锚定到左上角设置按钮；面板在其下方左对齐展开 */
+  anchorRef: RefObject<HTMLElement | null>;
+  /** 当前一级视图：仅渲染该视图相关设置 */
   settingsContextView: SettingsContextView;
   themeColor: string;
   onThemeColorChange?: (color: string) => void | Promise<void>;
@@ -47,13 +52,12 @@ interface SettingsPanelProps {
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   isOpen,
   onClose,
+  anchorRef,
   settingsContextView,
   themeColor,
   onThemeColorChange,
   mapUiChromeOpacity,
-  onMapUiChromeOpacityChange,
   mapUiChromeBlurPx,
-  onMapUiChromeBlurPxChange,
   currentMapStyle,
   onMapStyleChange,
   pinSize,
@@ -66,10 +70,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onGraphProjectPatch,
   boardVariantToggles
 }) => {
+  const panelRef = useRef<HTMLDivElement>(null);
   const [showThemeColorPicker, setShowThemeColorPicker] = useState(false);
   const [mapBgMenuOpen, setMapBgMenuOpen] = useState(false);
   const mapBgTriggerRef = useRef<HTMLButtonElement>(null);
   const mapBgMenuRef = useRef<HTMLDivElement>(null);
+  const [panelRect, setPanelRect] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    maxHeight: number;
+  } | null>(null);
   const [mapBgMenuRect, setMapBgMenuRect] = useState<{
     top: number;
     left: number;
@@ -78,8 +89,36 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   } | null>(null);
 
   useEffect(() => {
-    if (!isOpen) setMapBgMenuOpen(false);
+    if (!isOpen) {
+      setMapBgMenuOpen(false);
+      setShowThemeColorPicker(false);
+    }
   }, [isOpen]);
+
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      setPanelRect(null);
+      return;
+    }
+    const update = () => {
+      const el = anchorRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const width = Math.min(PANEL_WIDTH, window.innerWidth - PANEL_PAD * 2);
+      let left = r.left;
+      left = Math.max(PANEL_PAD, Math.min(left, window.innerWidth - width - PANEL_PAD));
+      const top = r.bottom + PANEL_GAP;
+      const maxHeight = Math.max(160, window.innerHeight - top - PANEL_PAD);
+      setPanelRect({ top, left, width, maxHeight });
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [isOpen, anchorRef]);
 
   useLayoutEffect(() => {
     if (!mapBgMenuOpen || !mapBgTriggerRef.current) {
@@ -111,15 +150,19 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   }, [mapBgMenuOpen]);
 
   useEffect(() => {
-    if (!mapBgMenuOpen) return;
+    if (!isOpen) return;
     const onPointerDown = (e: PointerEvent) => {
       const t = e.target as Node;
-      if (mapBgTriggerRef.current?.contains(t)) return;
+      if (anchorRef.current?.contains(t)) return;
+      if (panelRef.current?.contains(t)) return;
       if (mapBgMenuRef.current?.contains(t)) return;
-      setMapBgMenuOpen(false);
+      onClose();
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMapBgMenuOpen(false);
+      if (e.key === 'Escape') {
+        if (mapBgMenuOpen) setMapBgMenuOpen(false);
+        else onClose();
+      }
     };
     document.addEventListener('pointerdown', onPointerDown, true);
     document.addEventListener('keydown', onKeyDown);
@@ -127,11 +170,21 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       document.removeEventListener('pointerdown', onPointerDown, true);
       document.removeEventListener('keydown', onKeyDown);
     };
+  }, [isOpen, onClose, anchorRef, mapBgMenuOpen]);
+
+  useEffect(() => {
+    if (!mapBgMenuOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (mapBgTriggerRef.current?.contains(t)) return;
+      if (mapBgMenuRef.current?.contains(t)) return;
+      setMapBgMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => document.removeEventListener('pointerdown', onPointerDown, true);
   }, [mapBgMenuOpen]);
 
-  if (!isOpen) return null;
-
-  if (typeof document === 'undefined') return null;
+  if (!isOpen || typeof document === 'undefined' || !panelRect) return null;
 
   const handleMapStyleSelect = (styleId: string) => {
     onMapStyleChange(styleId);
@@ -142,168 +195,148 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const currentMapStyleLabel =
     MAP_STYLE_OPTIONS.find((s) => s.id === currentMapStyle)?.name ?? currentMapStyle;
 
-  const openMapping = settingsContextView === 'map';
-  const openBoard = settingsContextView === 'board';
-  const openGraph = settingsContextView === 'graph';
-  const openTable = settingsContextView === 'table';
-
   const settingsCardChrome = mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx);
+
+  const viewMeta =
+    settingsContextView === 'map'
+      ? { title: 'Mapping Style', icon: <Map size={18} /> }
+      : settingsContextView === 'board'
+        ? { title: 'Board Style', icon: <Grid size={18} /> }
+        : settingsContextView === 'graph'
+          ? { title: 'Graph Style', icon: <GitBranch size={18} /> }
+          : { title: 'Table Style', icon: <Table2 size={18} /> };
 
   return createPortal(
     <>
-      {/* 挂到 body，避免被地图父级 stacking/overflow 裁切导致底部未遮罩（黑块） */}
       <div
-        className="fixed inset-0 z-[5000] min-h-[100dvh] min-h-screen w-full"
-        style={MODAL_BACKDROP_MASK_STYLE}
-        onClick={onClose}
-        onPointerDown={(e) => e.stopPropagation()}
-        aria-hidden
-      />
-
-      {/* Settings Card */}
-      <div
+        ref={panelRef}
         data-allow-context-menu
-        className="fixed top-1/2 left-3 right-3 z-[5001] mx-auto w-full max-w-md sm:max-w-lg sm:left-4 sm:right-4 -translate-y-1/2 transform"
+        data-graph-top-left-panel
+        role="dialog"
+        aria-label="设置"
+        className="fixed z-[5001] overflow-hidden rounded-xl border border-gray-200/80 shadow-xl flex flex-col"
+        style={{
+          top: panelRect.top,
+          left: panelRect.left,
+          width: panelRect.width,
+          maxHeight: panelRect.maxHeight,
+          ...settingsCardChrome
+        }}
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
       >
-        <div
-          className="rounded-xl shadow-2xl flex flex-col max-h-[min(85dvh,85vh)] overflow-hidden border border-gray-200/80"
-          style={settingsCardChrome}
-        >
-        {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 shrink-0">
-          <div className="flex items-center gap-2">
-              <Settings size={20} className="text-gray-700" />
-              <h2 className="text-xl font-semibold text-gray-900">Settings</h2>
+        <div className="flex items-center justify-between px-3 py-2.5 shrink-0 border-b border-gray-200/60">
+          <div className="flex items-center gap-2 min-w-0">
+            <Settings size={18} className="text-gray-700 shrink-0" />
+            <h2 className="text-sm font-semibold text-gray-900 truncate">{viewMeta.title}</h2>
           </div>
           <button
+            type="button"
             onClick={onClose}
-              className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+            className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors shrink-0"
+            aria-label="关闭设置"
           >
-              <X size={20} className="text-gray-600" />
+            <X size={18} className="text-gray-600" />
           </button>
         </div>
 
-        {/* 底图：独立条带 + 下拉（portal 叠在卡片之上，选完收起） */}
-        <div className="shrink-0 border-b border-gray-200/60 px-4 py-2.5">
-          <div className="flex items-center gap-2">
-            <span className="shrink-0 text-xs font-medium text-gray-600">底图背景</span>
-            <button
-              ref={mapBgTriggerRef}
-              type="button"
-              aria-expanded={mapBgMenuOpen}
-              aria-haspopup="listbox"
-              onClick={() => setMapBgMenuOpen((o) => !o)}
-              className="min-w-0 flex flex-1 items-center justify-between gap-2 rounded-lg border border-gray-200/70 bg-white/60 px-2.5 py-1.5 text-left text-xs text-gray-900 shadow-sm transition-colors hover:bg-white/90"
-            >
-              <span className="truncate">{currentMapStyleLabel}</span>
-              <ChevronDown
-                size={16}
-                className={`shrink-0 text-gray-500 transition-transform ${mapBgMenuOpen ? 'rotate-180' : ''}`}
-              />
-            </button>
+        {settingsContextView === 'map' ? (
+          <div className="shrink-0 border-b border-gray-200/60 px-3 py-2.5">
+            <div className="flex items-center gap-2">
+              <span className="shrink-0 text-xs font-medium text-gray-600">底图背景</span>
+              <button
+                ref={mapBgTriggerRef}
+                type="button"
+                aria-expanded={mapBgMenuOpen}
+                aria-haspopup="listbox"
+                onClick={() => setMapBgMenuOpen((o) => !o)}
+                className="min-w-0 flex flex-1 items-center justify-between gap-2 rounded-lg border border-gray-200/70 bg-white/60 px-2.5 py-1.5 text-left text-xs text-gray-900 shadow-sm transition-colors hover:bg-white/90"
+              >
+                <span className="truncate">{currentMapStyleLabel}</span>
+                <ChevronDown
+                  size={16}
+                  className={`shrink-0 text-gray-500 transition-transform ${mapBgMenuOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+            </div>
           </div>
-        </div>
+        ) : null}
 
-        {/* Content */}
-          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-4 theme-surface-scrollbar">
-          <SettingsCollapsibleSection
-            title="Mapping Style"
-            icon={<Map size={18} />}
-            defaultOpen={openMapping}
-            themeColor={themeColor}
-            hint={
-              <HelpHint>
-                底图请在上方「底图背景」中选择；此处为地图上的图钉与文字标签大小，以及标记聚合距离。切换底图后会重新加载瓦片；图钉与聚合仅影响地图视图显示，不改变便签数据。
-              </HelpHint>
-            }
-          >
-            <div className="flex flex-col gap-4">
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-3 theme-surface-scrollbar">
+          {settingsContextView === 'map' ? (
+            <div className="flex flex-col gap-3">
+              <div className="flex items-start gap-1.5 text-xs text-gray-500">
+                <span className="mt-0.5 shrink-0 text-gray-700">{viewMeta.icon}</span>
+                <HelpHint>
+                  底图请在上方「底图背景」中选择；此处为地图上的图钉与文字标签大小，以及标记聚合距离。
+                </HelpHint>
+              </div>
               {pinSize !== undefined &&
               onPinSizeChange &&
               clusterThreshold !== undefined &&
               onClusterThresholdChange ? (
-                <>
-                  <div className="text-xs font-medium text-gray-500">地图控件</div>
-                  <div className="grid grid-cols-1 gap-x-3 gap-y-3 sm:grid-cols-2">
-                    <div className="min-w-0">
-                      <SettingsCompactSlider
-                        label="Pin Size"
-                        hint={
-                          <HelpHint>缩放地图上每个便签定位图钉（水滴标）的显示大小，便于在密集区域点选。</HelpHint>
-                        }
-                        themeColor={themeColor}
-                        value={pinSize}
-                        min={0.5}
-                        max={2}
-                        step={0.1}
-                        onChange={onPinSizeChange}
-                        formatValue={(v) => `${v.toFixed(1)}x`}
-                        minCaption="0.5x"
-                        maxCaption="2.0x"
-                      />
-                    </div>
-
-                    {labelSize !== undefined && onLabelSizeChange ? (
-                      <div className="min-w-0">
-                        <SettingsCompactSlider
-                          label="Label Size"
-                          hint={
-                            <HelpHint>缩放地图上便签标题等文字标签的整体字号与占用范围；与图钉大小相互独立。</HelpHint>
-                          }
-                          themeColor={themeColor}
-                          value={labelSize}
-                          min={0.5}
-                          max={2}
-                          step={0.1}
-                          onChange={onLabelSizeChange}
-                          formatValue={(v) => `${v.toFixed(1)}x`}
-                          minCaption="0.5x"
-                          maxCaption="2.0x"
-                        />
-                      </div>
-                    ) : null}
-
-                    <div className="min-w-0">
-                      <SettingsCompactSlider
-                        label="Cluster Threshold"
-                        hint={
-                          <HelpHint>
-                            两个便签在屏幕上的距离小于该像素阈值时，会合并显示为带数字的聚合标记；数值越大越容易聚成一团，地图缩放后也会重新计算。
-                          </HelpHint>
-                        }
-                        themeColor={themeColor}
-                        value={clusterThreshold}
-                        min={1}
-                        max={100}
-                        step={5}
-                        onChange={onClusterThresholdChange}
-                        formatValue={(v) => `${v}px`}
-                        minCaption="1px"
-                        maxCaption="100px"
-                      />
-                    </div>
-                  </div>
-                </>
+                <div className="grid grid-cols-1 gap-3">
+                  <SettingsCompactSlider
+                    label="Pin Size"
+                    hint={
+                      <HelpHint>缩放地图上每个便签定位图钉（水滴标）的显示大小，便于在密集区域点选。</HelpHint>
+                    }
+                    themeColor={themeColor}
+                    value={pinSize}
+                    min={0.5}
+                    max={2}
+                    step={0.1}
+                    onChange={onPinSizeChange}
+                    formatValue={(v) => `${v.toFixed(1)}x`}
+                    minCaption="0.5x"
+                    maxCaption="2.0x"
+                  />
+                  {labelSize !== undefined && onLabelSizeChange ? (
+                    <SettingsCompactSlider
+                      label="Label Size"
+                      hint={
+                        <HelpHint>缩放地图上便签标题等文字标签的整体字号与占用范围；与图钉大小相互独立。</HelpHint>
+                      }
+                      themeColor={themeColor}
+                      value={labelSize}
+                      min={0.5}
+                      max={2}
+                      step={0.1}
+                      onChange={onLabelSizeChange}
+                      formatValue={(v) => `${v.toFixed(1)}x`}
+                      minCaption="0.5x"
+                      maxCaption="2.0x"
+                    />
+                  ) : null}
+                  <SettingsCompactSlider
+                    label="Cluster Threshold"
+                    hint={
+                      <HelpHint>
+                        两个便签在屏幕上的距离小于该像素阈值时，会合并显示为带数字的聚合标记；数值越大越容易聚成一团。
+                      </HelpHint>
+                    }
+                    themeColor={themeColor}
+                    value={clusterThreshold}
+                    min={1}
+                    max={100}
+                    step={5}
+                    onChange={onClusterThresholdChange}
+                    formatValue={(v) => `${v}px`}
+                    minCaption="1px"
+                    maxCaption="100px"
+                  />
+                </div>
               ) : (
-                <p className="text-xs leading-relaxed text-gray-500">
-                  图钉、标签与聚合滑块仅在<strong>地图视图</strong>中可用；底图可在上方随时切换，进入地图后即时生效。
-                </p>
+                <p className="text-xs leading-relaxed text-gray-500">地图控件参数暂不可用。</p>
               )}
             </div>
-          </SettingsCollapsibleSection>
+          ) : null}
 
-          <SettingsCollapsibleSection
-            title="Board Style"
-            icon={<Grid size={18} />}
-            defaultOpen={openBoard}
-            themeColor={themeColor}
-          >
-            {boardVariantToggles ? (
-              <>
-                <p className="py-1 text-xs leading-relaxed text-gray-500">
-                  显示类型（便签 / 图片）
-                </p>
-                <div className="grid grid-cols-2 gap-x-3 gap-y-2 mt-2">
+          {settingsContextView === 'board' ? (
+            boardVariantToggles ? (
+              <div className="flex flex-col gap-2">
+                <p className="text-xs leading-relaxed text-gray-500">显示类型（便签 / 图片）</p>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-2">
                   <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                     <input
                       type="checkbox"
@@ -335,21 +368,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     <span>图片</span>
                   </label>
                 </div>
-              </>
+              </div>
             ) : (
-              <p className="py-2 text-xs leading-relaxed text-gray-500">
-                看板视图相关样式将放在此处，敬请期待。
-              </p>
-            )}
-          </SettingsCollapsibleSection>
+              <p className="py-2 text-xs leading-relaxed text-gray-500">看板视图相关样式将放在此处，敬请期待。</p>
+            )
+          ) : null}
 
-          <SettingsCollapsibleSection
-            title="Graph Style"
-            icon={<GitBranch size={18} />}
-            defaultOpen={openGraph}
-            themeColor={themeColor}
-          >
-            {graphProject && onGraphProjectPatch ? (
+          {settingsContextView === 'graph' ? (
+            graphProject && onGraphProjectPatch ? (
               <GraphStyleSettingsBlock
                 themeColor={themeColor}
                 project={graphProject}
@@ -359,22 +385,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               <p className="py-2 text-xs leading-relaxed text-gray-500">
                 当前无法写入图谱样式（未打开项目或缺少保存接口）。
               </p>
-            )}
-          </SettingsCollapsibleSection>
+            )
+          ) : null}
 
-          <SettingsCollapsibleSection
-            title="Table Style"
-            icon={<Table2 size={18} />}
-            defaultOpen={openTable}
-            themeColor={themeColor}
-          >
+          {settingsContextView === 'table' ? (
             <p className="py-2 text-xs leading-relaxed text-gray-500">表格视图相关样式将放在此处，敬请期待。</p>
-          </SettingsCollapsibleSection>
-          </div>
+          ) : null}
         </div>
       </div>
 
-      {/* Theme Color Picker Modal */}
       {showThemeColorPicker && (
         <ThemeColorPicker
           isOpen={showThemeColorPicker}
@@ -387,7 +406,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         />
       )}
 
-      {mapBgMenuOpen && mapBgMenuRect &&
+      {mapBgMenuOpen &&
+        mapBgMenuRect &&
         createPortal(
           <div
             ref={mapBgMenuRef}

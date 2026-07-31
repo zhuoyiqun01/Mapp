@@ -1,11 +1,18 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Project, Note } from '../types';
-import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, LayoutGrid, X, Home, Cloud, Edit2, Check, Upload, Palette, Sparkles, ZoomIn, Copy, RefreshCw, Code2 } from 'lucide-react';
+import { Project, Note, ProjectKind } from '../types';
+import { Plus, MoreHorizontal, Trash2, Map as MapIcon, Image as ImageIcon, Download, Camera, LayoutGrid, X, Home, Cloud, Edit2, Check, Upload, Palette, Sparkles, ZoomIn, Copy, RefreshCw, Code2, GitBranch } from 'lucide-react';
 import { generateId, formatDate, exportToJpeg, exportToJpegCentered, compressImageFromBase64 } from '../utils';
 import { loadProject, loadNoteImages, saveProject, loadAllProjects } from '../utils/persistence/storage';
 import { getLastSyncTime, type SyncStatus } from '../utils/persistence/sync';
 import { downloadMappVizJson } from '../utils/export/mappVizJson';
+import { projectKindLabel, isProjectKind, sanitizeProjectKind } from '../utils/projectKind';
+import {
+  formatImportErrorMessage,
+  formatJsonParseFailure,
+  formatUnexpectedImportError,
+  validateFullProjectImportPayload
+} from '../utils/import/importErrorFormat';
 import { AnimatePresence } from 'framer-motion';
 import {
   DEFAULT_THEME_COLOR,
@@ -525,11 +532,14 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   const mapChromeHoverBg = mapChromeHoverBackground(mapUiChromeOpacity);
   const [isCreating, setIsCreating] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectKind, setNewProjectKind] = useState<ProjectKind>('mapping');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingProjectName, setEditingProjectName] = useState('');
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [isImportingFromData, setIsImportingFromData] = useState(false);
+  /** 导入失败时展示带位置说明的弹窗 */
+  const [importErrorMessage, setImportErrorMessage] = useState<string | null>(null);
   const importFileInputRef = React.useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [showThemeColorPicker, setShowThemeColorPicker] = useState(false);
@@ -551,6 +561,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       id: generateId(),
       name: newProjectName,
       type: 'map',
+      projectKind: newProjectKind,
       createdAt: Date.now(),
       notes: []
     };
@@ -558,6 +569,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     onCreateProject(newProject);
     setIsCreating(false);
     setNewProjectName('');
+    setNewProjectKind('mapping');
     
     // If in sidebar mode, close sidebar after creation
     if (isSidebar && onCloseSidebar) {
@@ -683,6 +695,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         id: generateId(),
         name: `${project.name} (Copy)`,
         type: 'map',
+        projectKind: sanitizeProjectKind(fullProject.projectKind),
         createdAt: Date.now(),
         notes: fullProject.notes.map(note => ({
           ...note,
@@ -696,7 +709,18 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         connections: fullProject.connections?.map(conn => ({
           ...conn,
           id: generateId()
-        }))
+        })),
+        themeColor: fullProject.themeColor,
+        backgroundOpacity: fullProject.backgroundOpacity,
+        graphLayers: fullProject.graphLayers,
+        graphLayerStandard: fullProject.graphLayerStandard,
+        graphFrameLayers: fullProject.graphFrameLayers,
+        graphNodeSize: fullProject.graphNodeSize,
+        graphLabelFontPx: fullProject.graphLabelFontPx,
+        graphEdgeWeight: fullProject.graphEdgeWeight,
+        graphEdgeLabelFontPx: fullProject.graphEdgeLabelFontPx,
+        graphEdgeCurve: fullProject.graphEdgeCurve,
+        graphDefaultLayoutMode: fullProject.graphDefaultLayoutMode
       };
 
       onDuplicateProject(duplicatedProject);
@@ -781,11 +805,23 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           id: fullProject.id,
           name: fullProject.name,
           type: fullProject.type,
+          projectKind: sanitizeProjectKind(fullProject.projectKind),
           backgroundImage: fullProject.backgroundImage,
           createdAt: fullProject.createdAt,
           notes: fullProject.notes || [],
           frames: fullProject.frames || [],
-          connections: fullProject.connections || []
+          connections: fullProject.connections || [],
+          themeColor: fullProject.themeColor,
+          backgroundOpacity: fullProject.backgroundOpacity,
+          graphLayers: fullProject.graphLayers,
+          graphLayerStandard: fullProject.graphLayerStandard,
+          graphFrameLayers: fullProject.graphFrameLayers,
+          graphNodeSize: fullProject.graphNodeSize,
+          graphLabelFontPx: fullProject.graphLabelFontPx,
+          graphEdgeWeight: fullProject.graphEdgeWeight,
+          graphEdgeLabelFontPx: fullProject.graphEdgeLabelFontPx,
+          graphEdgeCurve: fullProject.graphEdgeCurve,
+          graphDefaultLayoutMode: fullProject.graphDefaultLayoutMode
         }
       };
       
@@ -917,18 +953,31 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   };
 
   // Import project from JSON data（merge 必须用参数传入：拖放时 setState 异步，不能依赖 isImportingFromData）
+  const reportImportError = (message: string) => {
+    setImportErrorMessage(message);
+  };
+
   const handleImportProject = async (file: File, options?: { merge?: boolean }) => {
     const mergeIntoCurrent = !!(options?.merge && activeProject);
     try {
       const text = await file.text();
-      const data = JSON.parse(text);
-      
-      if (!data.project || !data.project.name) {
-        alert('Invalid project file format');
+      let data: unknown;
+      try {
+        data = JSON.parse(text);
+      } catch (parseErr) {
+        reportImportError(
+          formatImportErrorMessage(formatJsonParseFailure(text, parseErr), file.name)
+        );
         return;
       }
 
-      const importedProject = data.project;
+      const structureErr = validateFullProjectImportPayload(data);
+      if (structureErr) {
+        reportImportError(formatImportErrorMessage(structureErr, file.name));
+        return;
+      }
+
+      const importedProject = (data as { project: Project }).project;
       
       // Generate new ID to avoid conflicts
       const newProjectId = generateId();
@@ -936,10 +985,22 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         id: newProjectId,
         name: `${importedProject.name} (Imported)`,
         type: 'map',
+        projectKind: sanitizeProjectKind(importedProject.projectKind),
         createdAt: Date.now(),
         notes: importedProject.notes || [],
         frames: importedProject.frames || [],
-        connections: importedProject.connections || []
+        connections: importedProject.connections || [],
+        themeColor: importedProject.themeColor,
+        backgroundOpacity: importedProject.backgroundOpacity,
+        graphLayers: importedProject.graphLayers,
+        graphLayerStandard: importedProject.graphLayerStandard,
+        graphFrameLayers: importedProject.graphFrameLayers,
+        graphNodeSize: importedProject.graphNodeSize,
+        graphLabelFontPx: importedProject.graphLabelFontPx,
+        graphEdgeWeight: importedProject.graphEdgeWeight,
+        graphEdgeLabelFontPx: importedProject.graphEdgeLabelFontPx,
+        graphEdgeCurve: importedProject.graphEdgeCurve,
+        graphDefaultLayoutMode: importedProject.graphDefaultLayoutMode
       };
 
       // If importing into existing project (merge mode)
@@ -1112,7 +1173,16 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
           console.log('Project saved successfully');
         } catch (error) {
           console.error('Error saving project:', error);
-          alert('Failed to save imported project: ' + (error instanceof Error ? error.message : 'Unknown error'));
+          reportImportError(
+            formatImportErrorMessage(
+              {
+                title: '保存导入项目失败',
+                location: 'IndexedDB / saveProject',
+                detail: error instanceof Error ? error.message : 'Unknown error'
+              },
+              file.name
+            )
+          );
           return;
         }
         
@@ -1167,7 +1237,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       }
     } catch (error) {
       console.error('Failed to import project:', error);
-      alert('Failed to import project. Please check the file format.');
+      reportImportError(formatUnexpectedImportError(error, file.name));
     }
   };
 
@@ -1529,10 +1599,14 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                           onMapUiChromeOpacityChange={onMapUiChromeOpacityChange}
                           mapUiChromeBlurPx={mapUiChromeBlurPx}
                           onMapUiChromeBlurPxChange={onMapUiChromeBlurPxChange}
-                          easterEggGravityY={easterEggGravityY}
-                          onEasterEggGravityYChange={onEasterEggGravityYChange}
-                          easterEggMouseConstraintStiffness={easterEggMouseConstraintStiffness}
-                          onEasterEggMouseConstraintStiffnessChange={onEasterEggMouseConstraintStiffnessChange}
+                          {...(!isSidebar || expandToHomeLayout
+                            ? {
+                                easterEggGravityY,
+                                onEasterEggGravityYChange,
+                                easterEggMouseConstraintStiffness,
+                                onEasterEggMouseConstraintStiffnessChange
+                              }
+                            : {})}
                         />
                       ) : null}
                     </div>
@@ -1613,7 +1687,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                 onMouseLeave={(e) => e.currentTarget.style.backgroundColor = themeColor}
                 title="Export Current View"
               >
-                <Download size={24} />
+                <Camera size={24} />
               </button>
             )}
             <button 
@@ -1930,6 +2004,14 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                       >
                         {p.name}
                       </div>
+                      {isProjectKind(p.projectKind) ? (
+                        <span
+                          className="shrink-0 rounded-lg px-2 py-0.5 text-[10px] font-bold text-gray-700 border border-gray-200/80 bg-white/50"
+                          title={p.projectKind === 'graph' ? 'Graph 项目' : 'Mapping 项目'}
+                        >
+                          {projectKindLabel(p.projectKind)}
+                        </span>
+                      ) : null}
                       {builtinExampleIds.has(p.id) ? (
                         <span
                           className="shrink-0 rounded-lg px-2 py-0.5 text-[10px] font-bold text-gray-800 border border-white/40"
@@ -1950,7 +2032,11 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                         onGlassPanel ? 'text-black/40' : 'text-theme-chrome-fg opacity-40'
                       }`}
                     >
-                      <MapIcon size={12} />
+                      {p.projectKind === 'graph' ? (
+                        <GitBranch size={12} />
+                      ) : (
+                        <MapIcon size={12} />
+                      )}
                       {formatDate(p.createdAt)}
                     </div>
                   </>
@@ -2093,13 +2179,54 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                   onBlur={(e) => e.currentTarget.style.boxShadow = ''}
                 />
               </div>
-
+              <div>
+                <label className="block text-sm font-bold text-gray-600 mb-2">项目类型</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewProjectKind('mapping')}
+                    className={`flex flex-col items-start gap-1 rounded-xl border px-3 py-3 text-left transition-all ${
+                      newProjectKind === 'mapping'
+                        ? 'border-transparent text-theme-chrome-fg shadow-md'
+                        : 'border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100'
+                    }`}
+                    style={newProjectKind === 'mapping' ? { backgroundColor: themeColor } : undefined}
+                  >
+                    <span className="flex items-center gap-1.5 text-sm font-bold">
+                      <MapIcon size={16} /> Mapping
+                    </span>
+                    <span className={`text-[11px] ${newProjectKind === 'mapping' ? 'opacity-80' : 'text-gray-500'}`}>
+                      地图 · 看板 · 表格
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewProjectKind('graph')}
+                    className={`flex flex-col items-start gap-1 rounded-xl border px-3 py-3 text-left transition-all ${
+                      newProjectKind === 'graph'
+                        ? 'border-transparent text-theme-chrome-fg shadow-md'
+                        : 'border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100'
+                    }`}
+                    style={newProjectKind === 'graph' ? { backgroundColor: themeColor } : undefined}
+                  >
+                    <span className="flex items-center gap-1.5 text-sm font-bold">
+                      <GitBranch size={16} /> Graph
+                    </span>
+                    <span className={`text-[11px] ${newProjectKind === 'graph' ? 'opacity-80' : 'text-gray-500'}`}>
+                      图谱 · 看板 · 表格
+                    </span>
+                  </button>
+                </div>
+              </div>
             </div>
 
 
             <div className="flex gap-3 mt-8">
               <button 
-                onClick={() => setIsCreating(false)} 
+                onClick={() => {
+                  setIsCreating(false);
+                  setNewProjectKind('mapping');
+                }} 
                 className="flex-1 py-3 text-gray-500 font-bold hover:bg-gray-100 rounded-xl"
               >
                 Cancel
@@ -2161,6 +2288,32 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                 Select File
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Import error：带出错位置；允许选中复制 */}
+      {importErrorMessage && (
+        <div className="fixed inset-0 z-[3100] bg-black/50 flex items-center justify-center p-4">
+          <div
+            className="import-error-selectable rounded-3xl shadow-2xl w-full max-w-lg p-6 border border-red-200/80 bg-white"
+            role="alertdialog"
+            aria-labelledby="import-error-title"
+          >
+            <h2 id="import-error-title" className="text-xl font-black text-gray-900 mb-3">
+              导入失败
+            </h2>
+            <pre className="text-sm text-gray-700 whitespace-pre-wrap break-words font-sans leading-relaxed bg-red-50/80 border border-red-100 rounded-xl p-4 max-h-[50vh] overflow-auto cursor-text">
+              {importErrorMessage}
+            </pre>
+            <button
+              type="button"
+              className="mt-5 w-full py-3 font-bold rounded-xl text-theme-chrome-fg shadow-lg"
+              style={{ backgroundColor: themeColor }}
+              onClick={() => setImportErrorMessage(null)}
+            >
+              知道了
+            </button>
           </div>
         </div>
       )}

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useMap, useMapEvents } from 'react-leaflet';
+import React, { useMemo, useState } from 'react';
+import { Marker, Pane, Polyline, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import type { Note, Connection, Coordinates } from '../../types';
 import { pairLatLngsForShortMapChord } from '../../utils/map/lngWorldWrap';
@@ -12,45 +12,81 @@ interface MapConnectionLinesOverlayProps {
   notes: Note[];
   themeColor: string;
   noteCoordOverrides?: Record<string, Coordinates>;
-  // 用于端点偏移与 label 字号
   pinSize?: number;
   labelSize?: number;
 }
 
+/** 低于 markerPane(600)/label，高于 overlayPane(400) */
+const CONNECTION_PANE = 'map-connection-lines';
+const CONNECTION_PANE_Z = 450;
+
 function mapPinSize(sliderValue: number): number {
-  // 保持与 `NoteMarker` 一致：sliderValue -> marker 的缩放因子
-  return (sliderValue - 0.5) * (1.2 - 0.2) / (2.0 - 0.5) + 0.2;
+  return ((sliderValue - 0.5) * (1.2 - 0.2)) / (2.0 - 0.5) + 0.2;
 }
 
-function arrowPolygonPoints(
-  tipX: number,
-  tipY: number,
-  dirX: number,
-  dirY: number,
-  size: number
-): string {
-  // 在 SVG 坐标系下绘制一个“尖三角”箭头。
-  // dirX/dirY 必须是单位向量，size 为大概的箭头尺寸（像素）。
-  const tipBackDist = size * 0.9;
-  const sideWidth = size * 0.45;
-
-  const baseCx = tipX - dirX * tipBackDist;
-  const baseCy = tipY - dirY * tipBackDist;
-
-  const perpX = -dirY;
-  const perpY = dirX;
-
-  const leftX = baseCx + perpX * sideWidth;
-  const leftY = baseCy + perpY * sideWidth;
-  const rightX = baseCx - perpX * sideWidth;
-  const rightY = baseCy - perpY * sideWidth;
-
-  return `${tipX},${tipY} ${leftX},${leftY} ${rightX},${rightY}`;
+function unitBearing(dx: number, dy: number): { ux: number; uy: number; len: number } {
+  const len = Math.hypot(dx, dy);
+  if (!Number.isFinite(len) || len <= 0.001) return { ux: 0, uy: 0, len: 0 };
+  return { ux: dx / len, uy: dy / len, len };
 }
+
+function arrowIconHtml(themeColor: string, angleDeg: number, size: number): string {
+  const s = Math.max(6, size);
+  return `<div style="
+    width:${s}px;height:${s}px;
+    transform:rotate(${angleDeg}deg);
+    transform-origin:50% 50%;
+    display:flex;align-items:center;justify-content:center;
+    pointer-events:none;
+  ">
+    <svg width="${s}" height="${s}" viewBox="0 0 12 12" overflow="visible">
+      <polygon
+        points="10,6 2,2.5 2,9.5"
+        fill="none"
+        stroke="${themeColor}"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        opacity="0.95"
+      />
+    </svg>
+  </div>`;
+}
+
+function edgeLabelIconHtml(text: string, themeColor: string, fontPx: number, angleDeg: number): string {
+  const escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+  return `<div style="
+    transform:translate(-50%,-50%) rotate(${angleDeg}deg);
+    transform-origin:50% 50%;
+    color:${themeColor};
+    font-size:${fontPx}px;
+    font-weight:700;
+    white-space:nowrap;
+    pointer-events:none;
+    user-select:none;
+    text-shadow:
+      -1.5px -1.5px 0 #fff,
+       1.5px -1.5px 0 #fff,
+      -1.5px  1.5px 0 #fff,
+       1.5px  1.5px 0 #fff;
+  ">${escaped}</div>`;
+}
+
+type ConnVisual = {
+  id: string;
+  positions: [L.LatLng, L.LatLng];
+  fromArrow?: { latlng: L.LatLng; angle: number; size: number };
+  toArrow?: { latlng: L.LatLng; angle: number; size: number };
+  label?: { latlng: L.LatLng; text: string; angle: number };
+};
 
 /**
- * 在屏幕坐标系下绘制连线，与地图一起缩放，避免 Polyline 在缩放时的抖动。
- * 覆盖在 map 之上，使用 map.latLngToContainerPoint 将经纬度转为容器像素坐标后画 SVG 线。
+ * 选中点相关连线：与 pin/label 一样走 Leaflet 图层 + zoomanim，
+ * 避免屏幕 SVG 覆盖层在平滑缩放时相对节点晃动；pane 低于节点 label。
  */
 export const MapConnectionLinesOverlay: React.FC<MapConnectionLinesOverlayProps> = ({
   selectedNoteId,
@@ -63,217 +99,195 @@ export const MapConnectionLinesOverlay: React.FC<MapConnectionLinesOverlayProps>
   labelSize = 1.0
 }) => {
   const map = useMap();
-  const [, setUpdate] = useState(0);
+  /** 视图落定后递增，用于按当前缩放重算像素端点缩进 */
+  const [viewEpoch, setViewEpoch] = useState(0);
 
   useMapEvents({
-    // Drag / native pan
-    move: () => {
-      if (map._mappSmoothZooming || map._animatingZoom) return;
-      setUpdate((n) => n + 1);
-    },
-    zoom: () => {
-      if (map._mappSmoothZooming || map._animatingZoom) return;
-      setUpdate((n) => n + 1);
-    },
-    // Smooth zoom: follow zoomanim so SVG stays locked to pins without React thrash on `move`
-    zoomanim: () => setUpdate((n) => n + 1),
-    zoomend: () => setUpdate((n) => n + 1),
-    moveend: () => setUpdate((n) => n + 1)
+    zoomend: () => setViewEpoch((n) => n + 1),
+    moveend: () => setViewEpoch((n) => n + 1),
+    viewreset: () => setViewEpoch((n) => n + 1)
   });
 
-  if (!map) return null;
+  const noteById = useMemo(() => {
+    const m = new Map<string, Note>();
+    notes.forEach((n) => m.set(n.id, n));
+    return m;
+  }, [notes]);
 
-  const activeEndpoints = new Set<string>();
-  if (selectedNoteIds && selectedNoteIds.size > 0) {
-    selectedNoteIds.forEach((id) => activeEndpoints.add(id));
-  } else if (selectedNoteId) {
-    activeEndpoints.add(selectedNoteId);
-  }
-  if (activeEndpoints.size === 0) return null;
+  const activeEndpoints = useMemo(() => {
+    const s = new Set<string>();
+    if (selectedNoteIds && selectedNoteIds.size > 0) {
+      selectedNoteIds.forEach((id) => s.add(id));
+    } else if (selectedNoteId) {
+      s.add(selectedNoteId);
+    }
+    return s;
+  }, [selectedNoteId, selectedNoteIds]);
 
-  const connectionVisuals = connections
-    .filter(
-      (conn) => activeEndpoints.has(conn.fromNoteId) || activeEndpoints.has(conn.toNoteId)
-    )
-    .map(conn => {
-      const fromNote = notes.find(n => n.id === conn.fromNoteId);
-      const toNote = notes.find(n => n.id === conn.toNoteId);
-      if (!fromNote || !toNote) return null;
+  const visuals = useMemo((): ConnVisual[] => {
+    if (activeEndpoints.size === 0) return [];
+
+    const mappedPinScale = mapPinSize(pinSize);
+    const baseSize = 40;
+    const out: ConnVisual[] = [];
+
+    for (const conn of connections) {
+      if (!activeEndpoints.has(conn.fromNoteId) && !activeEndpoints.has(conn.toNoteId)) continue;
+      const fromNote = noteById.get(conn.fromNoteId);
+      const toNote = noteById.get(conn.toNoteId);
+      if (!fromNote || !toNote) continue;
 
       const fromOverride = noteCoordOverrides[fromNote.id];
       const toOverride = noteCoordOverrides[toNote.id];
-
       const lat1 = fromOverride?.lat ?? fromNote.coords.lat;
       const lng1 = fromOverride?.lng ?? fromNote.coords.lng;
       const lat2 = toOverride?.lat ?? toNote.coords.lat;
       const lng2 = toOverride?.lng ?? toNote.coords.lng;
       const { from: ll1, to: ll2 } = pairLatLngsForShortMapChord(lat1, lng1, lat2, lng2);
 
-      const p1 = map.latLngToContainerPoint(ll1);
-      const p2 = map.latLngToContainerPoint(ll2);
+      const p1 = map.latLngToLayerPoint(ll1);
+      const p2 = map.latLngToLayerPoint(ll2);
+      const { ux, uy, len } = unitBearing(p2.x - p1.x, p2.y - p1.y);
+      if (len <= 0) continue;
 
-      const dx = p2.x - p1.x;
-      const dy = p2.y - p1.y;
-      const len = Math.hypot(dx, dy);
-      if (!Number.isFinite(len) || len <= 0.001) return null;
-
-      const ux = dx / len;
-      const uy = dy / len;
-
-      // 用 marker 尺寸估算端点偏移，避免端点/文字压到 pin 上
-      const mappedPinScale = mapPinSize(pinSize);
-      const baseSize = 40;
       const fromScale = (fromNote.isFavorite ? 2 : 1) * mappedPinScale;
       const toScale = (toNote.isFavorite ? 2 : 1) * mappedPinScale;
       const fromMarkerSize = baseSize * fromScale;
       const toMarkerSize = baseSize * toScale;
-
       const maxOffset = Math.max(0, len / 2 - 1);
       const offsetFrom = Math.min(maxOffset, fromMarkerSize * 0.35 + 8);
       const offsetTo = Math.min(maxOffset, toMarkerSize * 0.35 + 8);
 
-      const x1 = p1.x + ux * offsetFrom;
-      const y1 = p1.y + uy * offsetFrom;
-      const x2 = p2.x - ux * offsetTo;
-      const y2 = p2.y - uy * offsetTo;
+      const startPt = L.point(p1.x + ux * offsetFrom, p1.y + uy * offsetFrom);
+      const endPt = L.point(p2.x - ux * offsetTo, p2.y - uy * offsetTo);
+      const startLl = map.layerPointToLatLng(startPt);
+      const endLl = map.layerPointToLatLng(endPt);
 
-      // 端点箭头样式（优先使用 fromArrow/toArrow，新数据；没有时由旧的 arrow 推导）
       const derivedFromArrow: 'arrow' | 'none' =
-        conn.fromArrow != null
-          ? conn.fromArrow
-          : conn.arrow === 'reverse'
-            ? 'arrow'
-            : 'none';
+        conn.fromArrow != null ? conn.fromArrow : conn.arrow === 'reverse' ? 'arrow' : 'none';
       const derivedToArrow: 'arrow' | 'none' =
-        conn.toArrow != null
-          ? conn.toArrow
-          : conn.arrow === 'forward'
-            ? 'arrow'
-            : 'none';
+        conn.toArrow != null ? conn.toArrow : conn.arrow === 'forward' ? 'arrow' : 'none';
 
-      // label 在连线中点，并沿连线旋转；同时“更朝上”的那一侧偏移
-      const mx = (x1 + x2) / 2;
-      const my = (y1 + y2) / 2;
-      const px = -uy;
-      const py = ux;
+      const endpointRadius = Math.max(
+        3,
+        Math.min(6, (fromMarkerSize * 0.08 + toMarkerSize * 0.08) / 2)
+      );
+      const arrowSize = Math.max(6, endpointRadius * 1.9);
+      const toAngle = (Math.atan2(uy, ux) * 180) / Math.PI;
+      const fromAngle = toAngle + 180;
 
       const labelText = (conn.label ?? '').trim();
-      const showLabel = labelText.length > 0;
+      let label: ConnVisual['label'];
+      if (labelText) {
+        const mid = L.point((startPt.x + endPt.x) / 2, (startPt.y + endPt.y) / 2);
+        const px = -uy;
+        const py = ux;
+        const perpOffset = 12 * labelSize;
+        const candA = L.point(mid.x + px * perpOffset, mid.y + py * perpOffset);
+        const candB = L.point(mid.x - px * perpOffset, mid.y - py * perpOffset);
+        const prefer = candA.y < candB.y ? candA : candB;
+        let angle = toAngle;
+        if (angle > 90) angle -= 180;
+        if (angle < -90) angle += 180;
+        label = {
+          latlng: map.layerPointToLatLng(prefer),
+          text: labelText,
+          angle
+        };
+      }
 
-      const perpOffset = 12 * labelSize; // 文本与连线的法向距离
-      const candA = { lx: mx + px * perpOffset, ly: my + py * perpOffset }; // perp 的一侧
-      const candB = { lx: mx - px * perpOffset, ly: my - py * perpOffset }; // 另一侧
-      const prefer = candA.ly < candB.ly ? candA : candB; // y 小 -> 更靠上
-
-      // 文字沿连线旋转，并尽量保持“正向可读”（极端情况朝右）
-      let angle = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
-      if (angle > 90) angle -= 180;
-      if (angle < -90) angle += 180;
-
-      const endpointRadius = Math.max(3, Math.min(6, (fromMarkerSize * 0.08 + toMarkerSize * 0.08) / 2));
-      const arrowSize = Math.max(6, endpointRadius * 1.9);
-
-      return {
+      out.push({
         id: conn.id,
-        x1, y1, x2, y2,
-        mx, my,
-        labelText,
-        showLabel,
-        labelX: prefer.lx,
-        labelY: prefer.ly,
-        labelAngle: angle,
-        endpointRadius,
-        ux,
-        uy,
-        derivedFromArrow,
-        derivedToArrow,
-        arrowSize
-      };
-    })
-    .filter((v): v is NonNullable<typeof v> => v !== null);
+        positions: [startLl, endLl],
+        fromArrow:
+          derivedFromArrow === 'arrow'
+            ? { latlng: startLl, angle: fromAngle, size: arrowSize }
+            : undefined,
+        toArrow:
+          derivedToArrow === 'arrow'
+            ? { latlng: endLl, angle: toAngle, size: arrowSize }
+            : undefined,
+        label
+      });
+    }
+    return out;
+  }, [
+    activeEndpoints,
+    connections,
+    noteById,
+    noteCoordOverrides,
+    pinSize,
+    labelSize,
+    map,
+    viewEpoch
+  ]);
 
-  if (connectionVisuals.length === 0) return null;
+  if (activeEndpoints.size === 0) {
+    return <Pane name={CONNECTION_PANE} style={{ zIndex: CONNECTION_PANE_Z }} />;
+  }
 
-  const size = map.getSize();
-  if (!size || size.x <= 0 || size.y <= 0) return null;
+  const fontPx = 12 * labelSize;
 
   return (
-    <div
-      className="leaflet-connection-lines-overlay"
-      style={{
-        position: 'absolute',
-        left: 0,
-        top: 0,
-        width: size.x,
-        height: size.y,
-        pointerEvents: 'none',
-        zIndex: 120
-      }}
-    >
-      <svg
-        width={size.x}
-        height={size.y}
-        style={{ display: 'block', overflow: 'visible' }}
-      >
-        {connectionVisuals.map(v => (
-          <g key={v.id}>
-            {/* 连线 */}
-            <line
-              x1={v.x1}
-              y1={v.y1}
-              x2={v.x2}
-              y2={v.y2}
-              stroke={themeColor}
-              strokeWidth={2}
-              strokeOpacity={0.9}
+    <Pane name={CONNECTION_PANE} style={{ zIndex: CONNECTION_PANE_Z }}>
+      {visuals.map((v) => (
+        <React.Fragment key={v.id}>
+          <Polyline
+            positions={v.positions}
+            pathOptions={{
+              color: themeColor,
+              weight: 2,
+              opacity: 0.9,
+              lineCap: 'round',
+              lineJoin: 'round',
+              interactive: false
+            }}
+            pane={CONNECTION_PANE}
+          />
+          {v.toArrow ? (
+            <Marker
+              position={v.toArrow.latlng}
+              interactive={false}
+              pane={CONNECTION_PANE}
+              zIndexOffset={0}
+              icon={L.divIcon({
+                className: 'map-connection-arrow',
+                html: arrowIconHtml(themeColor, v.toArrow.angle, v.toArrow.size),
+                iconSize: [v.toArrow.size, v.toArrow.size],
+                iconAnchor: [v.toArrow.size / 2, v.toArrow.size / 2]
+              })}
             />
-
-            {/* 两端箭头（根据数据样式），不添加白色描边 */}
-            {v.derivedToArrow === 'arrow' && (
-              <polygon
-                points={arrowPolygonPoints(v.x2, v.y2, v.ux, v.uy, v.arrowSize)}
-                fill="none"
-                stroke={themeColor}
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                opacity={0.95}
-              />
-            )}
-            {v.derivedFromArrow === 'arrow' && (
-              <polygon
-                points={arrowPolygonPoints(v.x1, v.y1, -v.ux, -v.uy, v.arrowSize)}
-                fill="none"
-                stroke={themeColor}
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                opacity={0.95}
-              />
-            )}
-
-            {/* 连线 label（空则隐藏），中点渲染并沿连线旋转 */}
-            {v.showLabel && (
-              <text
-                x={v.labelX}
-                y={v.labelY}
-                textAnchor="middle"
-                dominantBaseline="middle"
-                fill={themeColor}
-                fontSize={12 * labelSize}
-                fontWeight={700}
-                style={{ pointerEvents: 'none', userSelect: 'none' }}
-                transform={`rotate(${v.labelAngle} ${v.labelX} ${v.labelY})`}
-                paintOrder="stroke"
-                stroke="white"
-                strokeWidth={4}
-              >
-                {v.labelText}
-              </text>
-            )}
-          </g>
-        ))}
-      </svg>
-    </div>
+          ) : null}
+          {v.fromArrow ? (
+            <Marker
+              position={v.fromArrow.latlng}
+              interactive={false}
+              pane={CONNECTION_PANE}
+              zIndexOffset={0}
+              icon={L.divIcon({
+                className: 'map-connection-arrow',
+                html: arrowIconHtml(themeColor, v.fromArrow.angle, v.fromArrow.size),
+                iconSize: [v.fromArrow.size, v.fromArrow.size],
+                iconAnchor: [v.fromArrow.size / 2, v.fromArrow.size / 2]
+              })}
+            />
+          ) : null}
+          {v.label ? (
+            <Marker
+              position={v.label.latlng}
+              interactive={false}
+              pane={CONNECTION_PANE}
+              zIndexOffset={1}
+              icon={L.divIcon({
+                className: 'map-connection-edge-label',
+                html: edgeLabelIconHtml(v.label.text, themeColor, fontPx, v.label.angle),
+                iconSize: [0, 0],
+                iconAnchor: [0, 0]
+              })}
+            />
+          ) : null}
+        </React.Fragment>
+      ))}
+    </Pane>
   );
 };

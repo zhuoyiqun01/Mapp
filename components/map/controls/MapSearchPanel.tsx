@@ -61,7 +61,7 @@ export const MapSearchPanel: React.FC<MapSearchPanelProps> = ({
       nonChromeIdleHover="none"
       className="transition-all hover:scale-105 active:scale-95"
       onClick={onToggle}
-      title="搜索"
+      tooltip="检索"
     >
       <Search size={18} className="sm:w-5 sm:h-5" />
     </ChromeIconButton>

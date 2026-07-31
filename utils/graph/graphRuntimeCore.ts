@@ -1,12 +1,14 @@
 import cytoscape, { type Core, type ElementDefinition, type NodeSingular } from 'cytoscape';
 import {
   DEFAULT_MAP_UI_CHROME_BLUR_PX,
-  DEFAULT_MAP_UI_CHROME_OPACITY,
-  mapChromeHaloFillAndBorder
+  DEFAULT_MAP_UI_CHROME_OPACITY
 } from '../map/mapChromeStyle';
-import type { GraphExportPayload } from './graphData';
-import type { Frame, GraphLayerState, Note } from '../../types';
-import { groupTagsByHierarchyPrefix } from '../layer/tagHierarchy';
+import { GRAPH_FOCUS_CORE_NODE_SCALE, DEFAULT_GRAPH_TIME_AXIS_WEIGHT_BIAS, type GraphExportPayload } from './graphData';
+import type { GraphLayerState, Note } from '../../types';
+import {
+  compareTagLayerKeysForAutoOrder,
+  defaultWeightForTagLayer
+} from '../layer/layerRegistry';
 // Cytoscape 的 style stylesheet 类型导出在当前工具链下不稳定，这里用宽类型避免无关的类型检查阻塞。
 type Stylesheet = any;
 
@@ -47,17 +49,6 @@ function graphLayerWeightNorm(wgt: number): number {
   return (clampGraphLayerWeight(wgt) - GRAPH_LAYER_WEIGHT_MIN) / GRAPH_LAYER_WEIGHT_SPAN;
 }
 
-/**
- * frameCluster 簇内：标签权重→「靠圆心程度」的非线形。
- * 与 LayerRegistry / 圆环约定一致：权重越大越靠近簇心；指数 >1 时高权重更贴圆心、对比更强。
- */
-const FRAME_CLUSTER_TAG_WEIGHT_TO_CENTER_EXP = 1.85;
-
-function frameClusterTagWeightCenterFactor(norm01: number): number {
-  const u = Math.min(1, Math.max(0, norm01));
-  return Math.pow(u, FRAME_CLUSTER_TAG_WEIGHT_TO_CENTER_EXP);
-}
-
 /** 稳定字符串哈希：用于给每个标签组分配固定相位，避免全组重叠在同一角度。 */
 function stableAngleSeed(input: string): number {
   let h = 2166136261;
@@ -80,7 +71,7 @@ function getGraphLayerCandidateKeys(n: NodeSingular, standard: GraphLayerGroupSt
   const arr =
     Array.isArray(raw)
       ? raw
-      : // 兼容旧导出/历史数据：仅有首帧归属字段
+      : // 兼容旧导出/历史数据：仅有首簇归属字段
         [n.data('frameGroup')];
   return arr.map((x) => String(x ?? '').trim()).filter((x) => x !== '');
 }
@@ -97,10 +88,10 @@ function getGraphLayerEffectiveGroupKey(
   }
 
   const candidates = getGraphLayerCandidateKeys(n, standard);
-  // 没有帧候选：归属空组（后续由 hidden 控制显示/隐藏）
+  // 没有簇候选：归属空组（后续由 hidden 控制显示/隐藏）
   if (candidates.length === 0) return '';
 
-  // 逐个跳过已隐藏的帧：取第一个“未隐藏”的归属帧
+  // 逐个跳过已隐藏的簇：取第一个“未隐藏”的归属簇
   for (const id of candidates) {
     if (!hiddenSet.has(id)) return id;
   }
@@ -125,63 +116,88 @@ export function applyGraphLayerNodeVisibility(
         if (lh === true || lh === 'yes' || lh === 1) disp = 'none';
       }
       node.style('display', disp);
-      if (disp === 'element') {
-        const z = Number(node.data('stackZ'));
-        if (Number.isFinite(z)) node.style('z-index', z);
-      }
     });
   });
+  applyGraphNodeStackZIndex(cy);
 }
 
-/**
- * 便签节点是否属于 frameCluster「临时只看」选中的帧（与看板 filterFrameIds：任一 groupId 命中即算）
- */
-function graphNoteMatchesFrameClusterPeek(n: NodeSingular, peek: Set<string>): boolean {
-  if (peek.size === 0) return true;
-  const raw = n.data('frameGroups') as unknown;
-  const arr = Array.isArray(raw) ? raw : [n.data('frameGroup')];
-  const ids = arr.map((x) => String(x ?? '').trim()).filter((x) => x !== '');
-  if (ids.length === 0) return peek.has('');
-  return ids.some((id) => peek.has(id));
-}
-
-/**
- * frameCluster：点击簇标题「临时只看」时弱化其它簇节点/边/底衬（与看板 frame 标题过滤一致）。
- * `peek === null` 或空集时清除弱化。
- */
-export function applyGraphFrameClusterPeekHighlight(cy: Core, peek: Set<string> | null | undefined): void {
-  const active = peek && peek.size > 0 ? new Set([...peek].map((k) => String(k))) : null;
-
+/** 标签层与簇层同时生效：任一层隐藏则节点隐藏；选中高亮的邻居临时强制显示 */
+export function applyGraphDualLayerNodeVisibility(
+  cy: Core,
+  tagHidden: string[],
+  frameHidden: string[],
+  tagVisibilityLogic: 'and' | 'or' = 'or'
+): void {
+  const tagSet = new Set(tagHidden.map((h) => String(h).trim()));
+  const frameSet = new Set(frameHidden.map((h) => String(h).trim()));
+  const logic = tagVisibilityLogic === 'and' ? 'and' : 'or';
   cy.batch(() => {
-    cy.nodes().forEach((n) => {
-      n.removeClass('graph-frame-peek-dim');
-      n.removeClass('graph-frame-peek-focus');
-    });
-    cy.edges().forEach((e) => {
-      e.removeClass('graph-frame-peek-dim');
-    });
-
-    if (!active) return;
-
-    cy.nodes().forEach((n) => {
-      if (n.hasClass('frame-cluster-halo') || n.hasClass('frame-cluster-label')) {
-        const k = n.data('clusterFrameKey');
-        const keyStr = k !== undefined && k !== null ? String(k) : '';
-        if (active.has(keyStr)) n.addClass('graph-frame-peek-focus');
-        else n.addClass('graph-frame-peek-dim');
-        return;
+    cy.nodes().forEach((node) => {
+      if (node.hasClass('frame-cluster-halo') || node.hasClass('frame-cluster-label')) return;
+      const rawLabels = node.data('tagLabels');
+      const tagLabels: string[] = Array.isArray(rawLabels)
+        ? rawLabels.map((x) => String(x).trim()).filter(Boolean)
+        : [];
+      let tagBlocked: boolean;
+      if (tagLabels.length === 0) {
+        tagBlocked = tagSet.has(GRAPH_UNTAGGED_TAG_GROUP);
+      } else if (logic === 'and') {
+        // 且：只要有一个标签隐藏就隐藏节点
+        tagBlocked = tagLabels.some((l) => tagSet.has(l));
+      } else {
+        // 或：只要有一个标签显示就显示节点
+        tagBlocked = tagLabels.every((l) => tagSet.has(l));
       }
-      if (!graphNoteMatchesFrameClusterPeek(n, active)) {
-        n.addClass('graph-frame-peek-dim');
+      const frameKey = getGraphLayerEffectiveGroupKey(node, 'frame', frameSet);
+      let disp: 'none' | 'element' =
+        tagBlocked || frameSet.has(frameKey) ? 'none' : 'element';
+      if (disp === 'element') {
+        const lh = node.data('layerItemHidden');
+        if (lh === true || lh === 'yes' || lh === 1) disp = 'none';
       }
+      // 选中关系链高亮：临时显示本应隐藏的相连节点（筛选取消勾选后会去掉 class 并回到隐藏）
+      if (
+        disp === 'none' &&
+        (node.hasClass('focus-core') ||
+          node.hasClass('focus-nh') ||
+          node.hasClass('focus-edge-endpoint'))
+      ) {
+        disp = 'element';
+      }
+      node.style('display', disp);
     });
+  });
+  applyGraphNodeStackZIndex(cy);
+}
 
-    cy.edges().forEach((e) => {
-      const s = e.source();
-      const t = e.target();
-      if (!graphNoteMatchesFrameClusterPeek(s, active) || !graphNoteMatchesFrameClusterPeek(t, active)) {
-        e.addClass('graph-frame-peek-dim');
-      }
+/**
+ * 便签叠放序写在元素 bypass `z-index` 上，会盖过样式表。
+ * 高亮节点抬到 top 并大幅抬升 z；未高亮保持 auto，让高亮连线（top）能盖过它们。
+ */
+const GRAPH_Z_BOOST = {
+  nh: 100_000,
+  endpoint: 110_000,
+  core: 120_000,
+  hover: 130_000
+} as const;
+
+export function applyGraphNodeStackZIndex(cy: Core): void {
+  if (!cy || cy.destroyed?.()) return;
+  cy.batch(() => {
+    cy.nodes().forEach((node) => {
+      if (node.hasClass('frame-cluster-halo') || node.hasClass('frame-cluster-label')) return;
+      const base = Number(node.data('stackZ'));
+      const stack = Number.isFinite(base) ? base : 2;
+      let boost = 0;
+      if (node.hasClass('focus-hover')) boost = GRAPH_Z_BOOST.hover;
+      else if (node.hasClass('focus-core')) boost = GRAPH_Z_BOOST.core;
+      else if (node.hasClass('focus-edge-endpoint')) boost = GRAPH_Z_BOOST.endpoint;
+      else if (node.hasClass('focus-nh')) boost = GRAPH_Z_BOOST.nh;
+      // bypass 同步 compound：避免仅改 z-index 时仍停在错误层
+      node.style({
+        'z-compound-depth': boost > 0 ? 'top' : 'auto',
+        'z-index': stack + boost
+      });
     });
   });
 }
@@ -721,7 +737,7 @@ export function buildGraphCoseLayoutOptions(
   const safeOverrides = { ...(overrides ?? {}) };
   if ('stop' in safeOverrides) delete safeOverrides.stop;
   return {
-    name: 'cose-bilkent',
+    name: 'fcose',
     animate: true,
     padding: 40,
     idealEdgeLength: (edge: any) => {
@@ -779,17 +795,19 @@ export function buildGraphCoseLayoutOptions(
       return Math.round(GRAPH_COSE_REPULSION_MIN + (1 - c) * (GRAPH_COSE_REPULSION_MAX - GRAPH_COSE_REPULSION_MIN));
     },
     stop: () => {
-      if (enableCrossingPostProcess || enableLeftFlowPostProcess) {
-        requestAnimationFrame(() => {
-          if (!isCyActive(cy)) return;
+      requestAnimationFrame(() => {
+        if (!isCyActive(cy)) return;
+        syncGraphEdgeCurveDistances(cy);
+        if (enableCrossingPostProcess || enableLeftFlowPostProcess) {
           if (enableLeftFlowPostProcess) runGraphCoseLeftFlowPostProcess(cy);
           if (enableCrossingPostProcess) runGraphCoseCrossingPostProcess(cy);
+          syncGraphEdgeCurveDistances(cy);
           requestAnimationFrame(() => {
             if (!isCyActive(cy)) return;
             cy.resize();
           });
-        });
-      }
+        }
+      });
       userStop?.();
     },
     ...safeOverrides
@@ -801,14 +819,14 @@ export function runGraphCoseLayout(cy: Core): void {
     cy.layout(buildGraphCoseLayoutOptions(cy) as any).run();
   } catch {
     // 防御：若第三方布局在某些数据组合下拒绝函数型 idealEdgeLength，回退到稳定默认值。
-    cy.layout({ name: 'cose-bilkent', animate: true, padding: 40 } as any).run();
+    cy.layout({ name: 'fcose', animate: true, padding: 40 } as any).run();
   }
 }
 
 /**
  * 圆环布局。
- * 传入合并后的 `graphLayers` 时：按标签组权重分配半径（越大越靠近圆心），不再接 cose（避免破坏环形）。
- * 未传时：使用 cytoscape 内置圆环，并可选用短时 cose-bilkent 微调。
+ * 传入合并后的 `graphLayers` 时：按标签组权重分配半径（越大越靠近圆心），不再接力导（避免破坏环形）。
+ * 未传时：使用 cytoscape 内置圆环，并可选用短时 fcose 微调。
  */
 export function applyGraphCircleLayout(
   cy: Core,
@@ -830,7 +848,8 @@ export function applyGraphCircleLayout(
       randomize: false,
       animate: true,
       fit: true,
-      quality: 'draft',
+      // fCoSE：randomize:false 时须用 proof（增量精修）
+      quality: 'proof',
       numIter: 600,
       nodeDimensionsIncludeLabels: true
     }) as any).run();
@@ -838,9 +857,31 @@ export function applyGraphCircleLayout(
   circleLayout.run();
 }
 
+/**
+ * 切到力导前移除历史簇装饰节点（若有），避免 fcose 把 halo/label 当真实节点算力。
+ */
+export function prepareGraphForForceLayout(cy: Core): void {
+  cy.batch(() => {
+    cy.nodes('.frame-cluster-label').remove();
+    cy.nodes('.frame-cluster-halo').remove();
+  });
+}
+
+/** 是否已有可用的现有布局坐标（用于增量 fcose，从当前位置动画导向力导结果） */
+function graphForceLayoutHasSeedPositions(cy: Core): boolean {
+  const nodes = cy.nodes().filter((n) => {
+    if (n.style('display') === 'none') return false;
+    if (n.hasClass('frame-cluster-label') || n.hasClass('frame-cluster-halo')) return false;
+    return true;
+  });
+  if (nodes.length < 2) return false;
+  const bb = nodes.boundingBox({ includeLabels: false });
+  return Number.isFinite(bb.w) && Number.isFinite(bb.h) && (bb.w > 48 || bb.h > 48);
+}
+
 export function applyGraphLayout(
   cy: Core,
-  name: 'cose-bilkent' | 'circle',
+  name: 'fcose' | 'circle',
   circleRefineWithForce = true,
   graphLayers: GraphLayerState | null = null,
   standard: GraphLayerGroupStandard = 'tag'
@@ -849,10 +890,39 @@ export function applyGraphLayout(
     applyGraphCircleLayout(cy, circleRefineWithForce, graphLayers, standard);
     return;
   }
+  prepareGraphForForceLayout(cy);
+  const incremental = graphForceLayoutHasSeedPositions(cy);
   try {
-    cy.layout(buildGraphCoseLayoutOptions(cy, { name }) as any).run();
+    // 从时间线等已有布局切入：randomize:false 从当前位置增量跑 fcose，动画导向最终位置。
+    // 冷启动（节点堆叠）：randomize:true 做光谱初值。
+    // 增量动画时关闭后处理，避免 layoutstop 后硬跳破坏「导向 fcose」的观感。
+    cy.layout(
+      buildGraphCoseLayoutOptions(
+        cy,
+        {
+          name: 'fcose',
+          randomize: !incremental,
+          quality: incremental ? 'proof' : 'default',
+          animate: true,
+          animationDuration: 1000,
+          fit: true,
+          nodeDimensionsIncludeLabels: true
+        },
+        {
+          enableCrossingPostProcess: !incremental,
+          enableLeftFlowPostProcess: !incremental
+        }
+      ) as any
+    ).run();
   } catch {
-    cy.layout({ name, animate: true, padding: 40 } as any).run();
+    cy.layout({
+      name: 'fcose',
+      animate: true,
+      animationDuration: 1000,
+      padding: 40,
+      randomize: !incremental,
+      quality: incremental ? 'proof' : 'default'
+    } as any).run();
   }
 }
 
@@ -935,10 +1005,16 @@ export function applyGraphTagGridLayout(cy: Core, layers: GraphLayerState | null
   });
 }
 
-/** 图谱二级布局（与底部四个按钮一致），用于恢复上次选择 */
-export type GraphLayoutMode = 'tagGrid' | 'circle' | 'time' | 'cose' | 'frameCluster';
+/** 图谱二级布局（时间线 / 力导），用于恢复上次选择 */
+export type GraphLayoutMode = 'time' | 'cose';
 
-export const DEFAULT_GRAPH_LAYOUT_MODE: GraphLayoutMode = 'tagGrid';
+export const DEFAULT_GRAPH_LAYOUT_MODE: GraphLayoutMode = 'cose';
+
+export function coerceGraphLayoutMode(raw: unknown): GraphLayoutMode {
+  if (raw === 'time' || raw === 'cose') return raw;
+  // 历史 frameCluster 已移除，回退到默认力导
+  return DEFAULT_GRAPH_LAYOUT_MODE;
+}
 
 /** 合并便签中出现的分组与已存顺序/隐藏；供时间线纵轴与导出一致 */
 export function mergeGraphLayerState(
@@ -949,26 +1025,32 @@ export function mergeGraphLayerState(
   const allKeys = new Set<string>();
   for (const n of notes) {
     if (standard === 'tag') {
-      const k = String(n.tags?.[0]?.label?.trim() ?? '');
-      allKeys.add(k === '' ? GRAPH_UNTAGGED_TAG_GROUP : k);
+      const labels = (n.tags ?? [])
+        .map((t) => String(t.label ?? '').trim())
+        .filter((l) => l !== '');
+      if (labels.length === 0) {
+        allKeys.add(GRAPH_UNTAGGED_TAG_GROUP);
+      } else {
+        labels.forEach((l) => allKeys.add(l));
+      }
       continue;
     }
 
-    // frame 标准：收集便签所属的所有 frames（用于保证面板展示所有可选分组）
+    // frame 标准：每便签至多一个 frame（旧多簇取第一个）
     const candidates =
       n.groupIds?.length
-        ? n.groupIds
+        ? n.groupIds.slice(0, 1)
         : n.groupId
           ? [n.groupId]
           : n.groupNames?.length
-            ? n.groupNames
+            ? n.groupNames.slice(0, 1)
             : n.groupName
               ? [n.groupName]
               : [];
 
     const cleaned = candidates.map((x) => String(x).trim()).filter((x) => x !== '');
     if (cleaned.length === 0) {
-      allKeys.add(''); // 无帧归属（可在面板中显隐/加权）
+      allKeys.add(''); // 无簇归属（可在面板中显隐/加权）
       continue;
     }
     cleaned.forEach((k) => allKeys.add(k));
@@ -976,32 +1058,49 @@ export function mergeGraphLayerState(
   const prevOrder = saved?.order ?? [];
   const ordered: string[] = [];
   const seen = new Set<string>();
-  for (const k of prevOrder) {
-    const key = String(k).trim();
-    if (allKeys.has(key) && !seen.has(key)) {
-      ordered.push(key);
-      seen.add(key);
+  if (standard === 'tag') {
+    // 标签面板：全部标签按首字母顺序（不沿用拖拽顺序）
+    [...allKeys]
+      .sort((a, b) => compareTagLayerKeysForAutoOrder(a, b, GRAPH_UNTAGGED_TAG_GROUP))
+      .forEach((k) => {
+        ordered.push(k);
+        seen.add(k);
+      });
+  } else {
+    for (const k of prevOrder) {
+      const key = String(k).trim();
+      if (allKeys.has(key) && !seen.has(key)) {
+        ordered.push(key);
+        seen.add(key);
+      }
     }
   }
   const rest = [...allKeys]
     .filter((k) => !seen.has(k))
-    .sort((a, b) => {
-      if (a === '' && b !== '') return 1;
-      if (b === '' && a !== '') return -1;
-      return a.localeCompare(b, GRAPH_SORT_LOCALE);
-    });
+    .sort((a, b) =>
+      standard === 'tag'
+        ? compareTagLayerKeysForAutoOrder(a, b, GRAPH_UNTAGGED_TAG_GROUP)
+        : (() => {
+            if (a === '' && b !== '') return 1;
+            if (b === '' && a !== '') return -1;
+            return a.localeCompare(b, GRAPH_SORT_LOCALE);
+          })()
+    );
   const hidden = (saved?.hidden ?? []).filter((h) => allKeys.has(String(h).trim())).map((h) => String(h).trim());
   const prevW = saved?.weights ?? {};
   const weights: Record<string, number> = {};
   for (const k of allKeys) {
     const v = prevW[k];
+    const fallback =
+      standard === 'tag' ? defaultWeightForTagLayer(k) : 0.5;
     weights[k] =
-      typeof v === 'number' && Number.isFinite(v) ? clampGraphLayerWeight(v) : clampGraphLayerWeight(0.5);
+      typeof v === 'number' && Number.isFinite(v) ? clampGraphLayerWeight(v) : clampGraphLayerWeight(fallback);
   }
   return {
     order: [...ordered, ...rest],
     hidden,
-    weights
+    weights,
+    tagVisibilityLogic: saved?.tagVisibilityLogic === 'and' ? 'and' : 'or'
   };
 }
 
@@ -1011,7 +1110,7 @@ export interface GraphTimeLayoutOptions {
 }
 
 /**
- * 按模式应用布局。`silentTimeFallback`：恢复缓存为时间线但无年份数据时，静默退回标签分组网格（不弹窗）。
+ * 按模式应用布局。`silentTimeFallback`：恢复缓存为时间线但无年份数据时，静默退回力导。
  */
 export function applyGraphLayoutMode(
   cy: Core,
@@ -1019,57 +1118,29 @@ export function applyGraphLayoutMode(
   options?: {
     silentTimeFallback?: boolean;
     timeLayout?: GraphTimeLayoutOptions;
-    /** 圆环后是否力导向微调；未传时按开启处理 */
+    /** @deprecated 圆环已移除；保留以免旧调用方报错 */
     circleRefineWithForce?: boolean;
     /**
-     * 分层标准：用于圆环/时间轴的分组依据。
-     * `tag` => tagGroup；`frame` => frameGroup
+     * 时间轴分组依据；图谱时间线固定传 `frame`。
      */
     graphLayerGroupStandard?: GraphLayerGroupStandard;
     /**
-     * 合并后的分层面板状态：有则环形/时间轴尊重顺序、隐藏与半径权重
+     * 合并后的分层面板状态（时间线用簇层）
      */
     graphLayers?: GraphLayerState | null;
-    /**
-     * tagGrid 的分层状态；用于 silentTimeFallback 的回退。
-     * 若未提供，则回退到 graphLayers。
-     */
-    tagGridGraphLayers?: GraphLayerState | null;
-    frames?: Frame[];
-    chromeSurface?: { opacity: number; blurPx: number };
   }
 ): void {
   const silent = options?.silentTimeFallback ?? false;
-  const circleRefine = options?.circleRefineWithForce !== false;
   const gl = options?.graphLayers ?? null;
-  const tagGridGl = options?.tagGridGraphLayers ?? gl;
-  const groupStandard = options?.graphLayerGroupStandard ?? 'tag';
-  if (mode === 'tagGrid') {
-    applyGraphTagGridLayout(cy, tagGridGl);
-    return;
-  }
-  if (mode === 'circle') {
-    applyGraphCircleLayout(cy, circleRefine, gl, groupStandard);
-    return;
-  }
+  const groupStandard = options?.graphLayerGroupStandard ?? 'frame';
   if (mode === 'cose') {
-    applyGraphLayout(cy, 'cose-bilkent');
-    return;
-  }
-  if (mode === 'frameCluster') {
-    applyGraphFrameClusterMembersLayout(
-      cy,
-      gl,
-      options?.frames ?? [],
-      options?.tagGridGraphLayers ?? null,
-      options?.chromeSurface ?? null
-    );
+    applyGraphLayout(cy, 'fcose');
     return;
   }
   const valid = cy.nodes().filter((n) => n.data('timeSort') != null);
   if (valid.length === 0) {
     if (silent) {
-      applyGraphTagGridLayout(cy, tagGridGl);
+      applyGraphLayout(cy, 'fcose');
     } else {
       applyGraphTimeLayout(cy, undefined, options?.timeLayout, gl, groupStandard);
     }
@@ -1091,7 +1162,7 @@ export function applyGraphTimeLayout(
     fn('请先在便签中设置开始年份，再使用时间线排布。');
     return;
   }
-  const biasRaw = layoutOpts?.weightBias ?? 0;
+  const biasRaw = layoutOpts?.weightBias ?? DEFAULT_GRAPH_TIME_AXIS_WEIGHT_BIAS;
   const bias = Math.max(0, Math.min(1, Number.isFinite(biasRaw) ? biasRaw : 0));
   const times = valid.map((n) => Number(n.data('timeSort')));
   const minT = Math.min(...times);
@@ -1223,358 +1294,6 @@ export function applyGraphTimeLayout(
   presetLayout.run();
 }
 
-/**
- * frameCluster（cluster+members）：
- * 1) 按当前 `frame` hidden 规则计算每个节点的 effective frame key（跳过已隐藏的前序 frame）
- * 2) 构建“簇图”（簇为节点、跨簇边为边），用 cose-bilkent 布局得到簇中心（簇更近）
- * 3) 簇内：Frame 定区域；Tag 定相对位置——
- *    - 角向：按标签层级前缀（` · ` 前）分扇区，同前缀相邻；扇区内再按完整 tag 切分
- *    - 径向：`graphLayers.weights`（越大越靠近簇心，与 LayerRegistry 一致）
- *    无 tag 面板数据时退化为单环均分。
- * 4) 每簇增加略大于最外圈的玻璃感圆形底衬。
- */
-/** 簇内标签多环所占外圈半径比例；相对原 0.26 加倍，使权重对应的半径上下限跨度约 2 倍 */
-const FRAME_CLUSTER_TAG_RING_DEPTH = 0.52;
-
-/** cytoscape-cose-bilkent 默认 edgeElasticity=0.45；簇图布局用一半弹簧强度，削弱「有连线则簇更易挤在一起」 */
-const FRAME_CLUSTER_COSE_EDGE_ELASTICITY = 0.225;
-
-export function applyGraphFrameClusterMembersLayout(
-  cy: Core,
-  graphFrameLayers: GraphLayerState | null = null,
-  frames: Frame[] = [],
-  tagGraphLayers: GraphLayerState | null = null,
-  chromeSurface: { opacity: number; blurPx: number } | null = null
-): void {
-  const layers: GraphLayerState = graphFrameLayers ?? { order: [], hidden: [], weights: {} };
-
-  const framesById = new Map(frames.map((f) => [String(f.id).trim(), f.title]));
-
-  cy.batch(() => {
-    cy.nodes('.frame-cluster-label').remove();
-    cy.nodes('.frame-cluster-halo').remove();
-  });
-
-  const nodes = cy.nodes();
-  if (nodes.length === 0) return;
-
-  const w = cy.width();
-  const h = cy.height();
-  const cxMain = w / 2;
-  const cyMain = h / 2;
-
-  const hiddenSet = new Set((layers.hidden ?? []).map((x) => String(x).trim()));
-
-  // 1) 节点 -> effective frame key（frame rule：跳过 hidden 的前序 frame）
-  const effectiveKeyByNodeId = new Map<string, string>();
-  const membersByClusterKey = new Map<string, NodeSingular[]>();
-
-  nodes.forEach((n) => {
-    const key = getGraphLayerEffectiveGroupKey(n, 'frame', hiddenSet);
-    effectiveKeyByNodeId.set(n.id(), key);
-    if (!membersByClusterKey.has(key)) membersByClusterKey.set(key, []);
-    membersByClusterKey.get(key)!.push(n);
-  });
-
-  const allClusterKeys = new Set(membersByClusterKey.keys());
-  const keysOrdered = orderedTagGroupKeysFromState(allClusterKeys, layers);
-  const visibleKeys = keysOrdered.filter((k) => !hiddenSet.has(k));
-  const keysForLayout = visibleKeys.length > 0 ? visibleKeys : keysOrdered;
-  if (keysForLayout.length === 0) return;
-
-  // Cytoscape 内部 id 需非空；对空串单独映射
-  const keyToClusterId = new Map<string, string>();
-  keysForLayout.forEach((k) => {
-    const id = k === '' ? '__empty_frame__' : `frame__${k}`;
-    keyToClusterId.set(k, id);
-  });
-
-  // 2) 构建“簇图”边：按簇对聚合跨簇边权重（sum），再用重复边近似权重拉近
-  const pairWeight = new Map<string, number>();
-  cy.edges().forEach((e) => {
-    const sNode = e.source();
-    const tNode = e.target();
-    if (sNode.empty() || tNode.empty()) return;
-    const sKey = effectiveKeyByNodeId.get(sNode.id()) ?? '';
-    const tKey = effectiveKeyByNodeId.get(tNode.id()) ?? '';
-    if (sKey === tKey) return; // 同簇不参与“簇间拉近”
-    if (!keyToClusterId.has(sKey) || !keyToClusterId.has(tKey)) return;
-
-    const baseW = Number(e.data('edgeWeight') ?? 0.3);
-    const wgt = Number.isFinite(baseW) ? baseW : 0.3;
-
-    // 无向聚合：只管“簇-簇”距离
-    const a = sKey;
-    const b = tKey;
-    const pair = a < b ? `${a}||${b}` : `${b}||${a}`;
-    pairWeight.set(pair, (pairWeight.get(pair) ?? 0) + wgt);
-  });
-
-  // 2.1) 准备临时 clusterCy
-  const temp = document.createElement('div');
-  temp.style.position = 'absolute';
-  temp.style.left = '-99999px';
-  temp.style.top = '-99999px';
-  temp.style.width = `${Math.max(320, w)}px`;
-  temp.style.height = `${Math.max(220, h)}px`;
-  document.body.appendChild(temp);
-
-  try {
-    const clusterNodes = keysForLayout.map((k) => ({
-      data: {
-        id: keyToClusterId.get(k)!,
-        label: k === '' ? '无帧' : k
-      }
-    }));
-
-    const clusterEdges: Array<{ data: { id: string; source: string; target: string } }> = [];
-    // 将簇对边权重映射到“重复边数”
-    for (const [pairKey, sumW] of pairWeight.entries()) {
-      const rep = Math.max(1, Math.min(6, Math.round(sumW / 0.35)));
-      const [a, b] = pairKey.split('||');
-      const aId = keyToClusterId.get(a) ?? '';
-      const bId = keyToClusterId.get(b) ?? '';
-      if (!aId || !bId) continue;
-      for (let i = 0; i < rep; i += 1) {
-        clusterEdges.push({
-          data: {
-            id: `ce-${pairKey}-${i}`,
-            source: aId,
-            target: bId
-          }
-        });
-      }
-    }
-
-    const clusterCy = cytoscape({
-      container: temp,
-      elements: { nodes: clusterNodes, edges: clusterEdges },
-      style: [
-        {
-          selector: 'node',
-          style: { width: 8, height: 8, 'background-color': '#000', label: 'data(label)', 'font-size': 1, opacity: 0 }
-        },
-        {
-          selector: 'edge',
-          style: { width: 1, 'line-color': '#999', 'target-arrow-shape': 'none', 'curve-style': 'bezier', opacity: 0.001 }
-        }
-      ],
-      minZoom: 0.1,
-      maxZoom: 1
-    });
-
-    // keysForLayout === 1 时，cose 布局多余；直接放中心
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let maxY = -Infinity;
-    const posByKey = new Map<string, { x: number; y: number }>();
-
-    if (keysForLayout.length > 1) {
-      clusterCy.layout({
-        name: 'cose-bilkent',
-        animate: false,
-        randomize: false,
-        padding: 40,
-        quality: 'draft',
-        numIter: 500,
-        edgeElasticity: FRAME_CLUSTER_COSE_EDGE_ELASTICITY
-      } as any).run();
-    } else {
-      const onlyKey = keysForLayout[0];
-      posByKey.set(onlyKey, { x: 0, y: 0 });
-    }
-
-    // 采样位置范围（用于映射到主画布）
-    keysForLayout.forEach((k) => {
-      if (!keyToClusterId.has(k)) return;
-      const el = clusterCy.getElementById(keyToClusterId.get(k)!);
-      if (!el || el.empty()) return;
-      const p = el.position();
-      posByKey.set(k, { x: p.x, y: p.y });
-      minX = Math.min(minX, p.x);
-      maxX = Math.max(maxX, p.x);
-      minY = Math.min(minY, p.y);
-      maxY = Math.max(maxY, p.y);
-    });
-
-    const mapToMain = (p: { x: number; y: number }) => {
-      const dx = maxX - minX;
-      const dy = maxY - minY;
-      if (dx < 1e-6 || dy < 1e-6) return { x: cxMain, y: cyMain };
-      const x = 80 + ((p.x - minX) / dx) * (w - 160);
-      const y = 80 + ((p.y - minY) / dy) * (h - 160);
-      return { x, y };
-    };
-
-    // 3) 簇中心确定后：成员围绕中心局部圆排列
-  const centerPosByKey = new Map<string, { x: number; y: number }>();
-  keysForLayout.forEach((k) => {
-    const p = posByKey.get(k);
-    centerPosByKey.set(k, p ? mapToMain(p) : { x: cxMain, y: cyMain });
-  });
-
-    const memberPos = new Map<string, { x: number; y: number }>();
-
-    keysOrdered.forEach((clusterKey) => {
-      const members = membersByClusterKey.get(clusterKey) ?? [];
-      if (members.length === 0) return;
-
-      const centerKey = keysForLayout.includes(clusterKey) ? clusterKey : keysForLayout[0];
-      const center = centerPosByKey.get(centerKey) ?? { x: cxMain, y: cyMain };
-
-      if (!keysForLayout.includes(clusterKey) || hiddenSet.has(clusterKey)) {
-        // hidden 或不在 layout keys：放到底部条带（类似 circle/tagGrid 的“隐藏区”）
-        const startY = Math.max(120, h - 90);
-        members.forEach((m, i) => {
-          const y = startY + i * 14;
-          memberPos.set(m.id(), { x: cxMain + (i - members.length / 2) * 10, y });
-        });
-        return;
-      }
-
-      const sorted = [...members].sort((a, b) =>
-        String(a.data('fullTitle') || '').localeCompare(String(b.data('fullTitle') || ''), GRAPH_SORT_LOCALE)
-      );
-      const n = sorted.length;
-      const wgt = layers.weights?.[clusterKey] ?? 0.5;
-      const frameNorm = graphLayerWeightNorm(wgt);
-      const outerR = (24 + Math.min(160, n * 9)) * (0.62 + frameNorm * 0.7);
-
-      if (n === 1) {
-        memberPos.set(sorted[0].id(), { x: center.x, y: center.y });
-        return;
-      }
-
-      const useTagPlacement = tagGraphLayers != null;
-      if (!useTagPlacement) {
-        const phase = stableAngleSeed(`frameCluster::${clusterKey}`) * 2 * Math.PI - Math.PI / 2;
-        for (let i = 0; i < n; i += 1) {
-          const angle = phase + (2 * Math.PI * i) / Math.max(1, n);
-          memberPos.set(sorted[i].id(), {
-            x: center.x + outerR * Math.cos(angle),
-            y: center.y + outerR * Math.sin(angle)
-          });
-        }
-        return;
-      }
-
-      const tagLayersState = tagGraphLayers!;
-      const byTag = new Map<string, NodeSingular[]>();
-      for (const m of sorted) {
-        const tk = String(m.data('tagGroup') ?? '').trim() || GRAPH_UNTAGGED_TAG_GROUP;
-        if (!byTag.has(tk)) byTag.set(tk, []);
-        byTag.get(tk)!.push(m);
-      }
-      const allTagKeys = new Set(byTag.keys());
-      const tagKeysOrdered = orderedTagGroupKeysFromState(allTagKeys, tagLayersState);
-      const hierarchy = groupTagsByHierarchyPrefix(tagKeysOrdered, GRAPH_UNTAGGED_TAG_GROUP);
-      const innerR = outerR * (1 - FRAME_CLUSTER_TAG_RING_DEPTH);
-      // 簇相位稳定，避免每次重排扇区整体旋转
-      let angleCursor =
-        stableAngleSeed(`frameCluster::sectors::${clusterKey}`) * 2 * Math.PI - Math.PI / 2;
-
-      for (const { tags: prefixTags } of hierarchy) {
-        let prefixCount = 0;
-        for (const tagKey of prefixTags) {
-          prefixCount += byTag.get(tagKey)?.length ?? 0;
-        }
-        if (prefixCount === 0) continue;
-        const prefixSpan = (2 * Math.PI * prefixCount) / n;
-        let tagCursor = angleCursor;
-
-        for (const tagKey of prefixTags) {
-          const groupNodes = byTag.get(tagKey);
-          if (!groupNodes?.length) continue;
-          const gn = groupNodes.length;
-          const tagSpan = (prefixSpan * gn) / prefixCount;
-          const tw = tagLayersState.weights?.[tagKey] ?? 0.5;
-          // 权重越大 → 越靠近簇心（与 LayerRegistry「半径权重」一致）
-          const centerFactor = frameClusterTagWeightCenterFactor(graphLayerWeightNorm(tw));
-          const r = innerR + (1 - centerFactor) * (outerR - innerR);
-          for (let i = 0; i < gn; i += 1) {
-            const angle = tagCursor + (tagSpan * (i + 0.5)) / gn;
-            memberPos.set(groupNodes[i].id(), {
-              x: center.x + r * Math.cos(angle),
-              y: center.y + r * Math.sin(angle)
-            });
-          }
-          tagCursor += tagSpan;
-        }
-        angleCursor += prefixSpan;
-      }
-    });
-
-    const haloRByCluster = new Map<string, number>();
-    keysForLayout.forEach((clusterKey) => {
-      if (hiddenSet.has(clusterKey)) return;
-      const mems = membersByClusterKey.get(clusterKey) ?? [];
-      const center = centerPosByKey.get(clusterKey) ?? { x: cxMain, y: cyMain };
-      let maxD = 0;
-      for (const m of mems) {
-        const p = memberPos.get(m.id());
-        if (p) maxD = Math.max(maxD, Math.hypot(p.x - center.x, p.y - center.y));
-      }
-      haloRByCluster.set(clusterKey, Math.max(40, maxD * 1.12 + 18));
-    });
-
-    cy.nodes()
-      .filter((ele) => memberPos.has(ele.id()))
-      .layout({
-        name: 'preset',
-        animate: true,
-        transform: (node) => memberPos.get(node.id()) ?? { x: cxMain, y: cyMain }
-      })
-      .run();
-
-    const { fill: haloFill, border: haloBorder } = mapChromeHaloFillAndBorder(
-      chromeSurface?.opacity ?? DEFAULT_MAP_UI_CHROME_OPACITY,
-      chromeSurface?.blurPx ?? DEFAULT_MAP_UI_CHROME_BLUR_PX
-    );
-
-    cy.batch(() => {
-      cy.nodes('.frame-cluster-label').remove();
-      cy.nodes('.frame-cluster-halo').remove();
-      keysForLayout.forEach((clusterKey) => {
-        if (hiddenSet.has(clusterKey)) return;
-        const center = centerPosByKey.get(clusterKey);
-        if (!center) return;
-        const haloR = haloRByCluster.get(clusterKey) ?? 48;
-        const haloW = haloR * 2;
-        const haloId = `frameClusterHalo__${clusterKey === '' ? '__empty__' : clusterKey}`;
-        cy.add({
-          group: 'nodes',
-          data: { id: haloId, haloW, haloH: haloW, haloFill, haloBorder, clusterFrameKey: clusterKey },
-          classes: ['frame-cluster-halo']
-        });
-        cy.getElementById(haloId).position({ x: center.x, y: center.y });
-
-        const labelText =
-          clusterKey === '' ? '无帧' : framesById.get(clusterKey) ?? clusterKey;
-        const id = `frameClusterLabel__${clusterKey === '' ? '__empty__' : clusterKey}`;
-        if (!cy.getElementById(id).empty()) return;
-        cy.add({
-          group: 'nodes',
-          data: { id, label: labelText, clusterFrameKey: clusterKey },
-          classes: ['frame-cluster-label']
-        });
-        const labelCol = cy.getElementById(id);
-        labelCol.position({ x: center.x, y: center.y });
-        labelCol.ungrabify();
-      });
-    });
-
-    requestAnimationFrame(() => {
-      cy.resize();
-      cy.fit(undefined, 48);
-    });
-
-    clusterCy.destroy();
-  } finally {
-    temp.remove();
-  }
-}
-
 export function patchGraphElementsData(cy: Core, elements: ElementDefinition[]): void {
   cy.batch(() => {
     elements.forEach((item) => {
@@ -1590,17 +1309,278 @@ export function updateGraphStylesheet(cy: Core, stylesheet: Stylesheet): void {
   cy.style().fromJson(stylesheet as Parameters<Core['style']>[0]).update();
 }
 
+/**
+ * 按当前节点间距刷新边的 unbundled-bezier 控制点距：
+ * 幅度 ≈ 边长 × 比例（夹紧），平行边交替正负并拉开档位。
+ */
+export function syncGraphEdgeCurveDistances(cy: Core): void {
+  const pairIndex = new Map<string, number>();
+  cy.batch(() => {
+    cy.edges().forEach((edge) => {
+      const s = edge.source();
+      const t = edge.target();
+      if (s.empty() || t.empty() || !s.isNode() || !t.isNode()) return;
+      if (
+        s.hasClass('frame-cluster-label') ||
+        t.hasClass('frame-cluster-label') ||
+        s.hasClass('frame-cluster-halo') ||
+        t.hasClass('frame-cluster-halo')
+      ) {
+        return;
+      }
+      const sp = s.position();
+      const tp = t.position();
+      const dx = tp.x - sp.x;
+      const dy = tp.y - sp.y;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      if (!Number.isFinite(len) || len < 1e-3) {
+        edge.data('controlPointDistance', 0);
+        return;
+      }
+      const a = s.id();
+      const b = t.id();
+      const pairKey = a < b ? `${a}\0${b}` : `${b}\0${a}`;
+      const idx = pairIndex.get(pairKey) ?? 0;
+      pairIndex.set(pairKey, idx + 1);
+      const sign = idx % 2 === 0 ? 1 : -1;
+      const band = Math.floor(idx / 2) + 1;
+      // 长边弯得更开；短边压低，避免小图里弧线夸张
+      const mag = Math.max(14, Math.min(140, len * 0.2)) * (0.85 + (band - 1) * 0.45);
+      edge.data('controlPointDistance', sign * mag);
+      edge.data('curveSign', sign);
+    });
+  });
+}
+
 const HL = ['focus-core', 'focus-nh', 'focus-e'] as const;
 
+/** 选中焦点节点直径放大/缩回动画时长 */
+const FOCUS_CORE_SIZE_ANIM_MS = 180;
+
+function graphNodeBaseSizePx(node: NodeSingular): number {
+  const fav = node.data('favorite') === 'yes';
+  const raw = Number(node.data(fav ? 'nodeSizeFav' : 'nodeSize'));
+  if (Number.isFinite(raw) && raw > 0) return raw;
+  return 28;
+}
+
+function graphNodeFocusCoreSizePx(node: NodeSingular): number {
+  const fav = node.data('favorite') === 'yes';
+  const raw = Number(node.data(fav ? 'nodeSizeFavCore' : 'nodeSizeCore'));
+  if (Number.isFinite(raw) && raw > 0) return raw;
+  return graphNodeBaseSizePx(node) * GRAPH_FOCUS_CORE_NODE_SCALE;
+}
+
+function graphNodeRenderedSizePx(node: NodeSingular): number {
+  const w = node.numericStyle('width');
+  if (typeof w === 'number' && Number.isFinite(w) && w > 0) return w;
+  const bb = node.boundingBox({ includeLabels: false });
+  const d = Math.max(bb.w, bb.h);
+  return Number.isFinite(d) && d > 0 ? d : graphNodeBaseSizePx(node);
+}
+
+/**
+ * 将节点宽高动画到目标直径；结束后若仍与 focus-core 状态一致则清 bypass，交回 stylesheet。
+ */
+function animateGraphNodeDiameter(node: NodeSingular, targetPx: number, wantCore: boolean): void {
+  const cy = node.cy();
+  if (!cy || cy.destroyed()) return;
+  const from = graphNodeRenderedSizePx(node);
+  node.stop(true);
+  if (Math.abs(from - targetPx) < 0.5) {
+    node.removeStyle('width');
+    node.removeStyle('height');
+    return;
+  }
+  node.style({ width: from, height: from });
+  // cytoscape 类型把 style 动画标成必须带 position，运行时仅 style 合法
+  const anim = node.animation({
+    style: { width: targetPx, height: targetPx },
+    duration: FOCUS_CORE_SIZE_ANIM_MS,
+    easing: 'ease-out'
+  } as any);
+  anim.play().promise('complete').then(() => {
+    if (cy.destroyed() || node.removed()) return;
+    if (node.hasClass('focus-core') === wantCore) {
+      node.removeStyle('width');
+      node.removeStyle('height');
+    }
+  });
+}
+
 export const GRAPH_HOVER_CLASS = 'focus-hover';
+
+/** 边标签用于筛选/合并的键：trim 后；空标签为 '' */
+export function graphEdgeLabelKey(raw?: string | null): string {
+  return String(raw ?? '').trim();
+}
+
+export const GRAPH_EMPTY_EDGE_LABEL_DISPLAY = '（无标签）';
+
+export function graphEdgeLabelDisplay(key: string): string {
+  return key === '' ? GRAPH_EMPTY_EDGE_LABEL_DISPLAY : key;
+}
+
+export type RelatedEdgeLabelColumn = 'from' | 'to';
+
+export type RelatedEdgeLabelEntry = {
+  /** `${column}\u0001${labelKey}`，同栏相同文案合并 */
+  key: string;
+  column: RelatedEdgeLabelColumn;
+  labelKey: string;
+  label: string;
+  count: number;
+};
+
+export type RelatedEdgeLabelGroups = {
+  from: RelatedEdgeLabelEntry[];
+  to: RelatedEdgeLabelEntry[];
+};
+
+type ConnLabelLike = {
+  id: string;
+  fromNoteId: string;
+  toNoteId: string;
+  label?: string;
+  arrow?: 'none' | 'forward' | 'reverse';
+  fromArrow?: 'arrow' | 'none';
+  toArrow?: 'arrow' | 'none';
+};
+
+/** 与 graphData.connectionToGraphDirection 一致（避免循环依赖） */
+function connectionDirectionLocal(c: ConnLabelLike): 'forward' | 'backward' | 'both' | 'none' {
+  if (c.arrow === 'none') return 'none';
+  const derivedFrom: 'arrow' | 'none' =
+    c.fromArrow != null ? c.fromArrow : c.arrow === 'reverse' ? 'arrow' : 'none';
+  const derivedTo: 'arrow' | 'none' =
+    c.toArrow != null ? c.toArrow : c.arrow === 'forward' ? 'arrow' : 'none';
+  if (derivedFrom === 'arrow' && derivedTo === 'arrow') return 'both';
+  if (derivedTo === 'arrow') return 'forward';
+  if (derivedFrom === 'arrow') return 'backward';
+  return 'none';
+}
+
+export function relatedEdgeSelectionKey(
+  column: RelatedEdgeLabelColumn,
+  labelKey: string
+): string {
+  return `${column}\u0001${labelKey}`;
+}
+
+/**
+ * 相对「当前扩展端点」将边归入 From / To。
+ * To = 选中点为语义起点的关系；From = 选中点为语义终点。
+ * 双向与无箭头优先归入 To。
+ */
+export function relatedEdgeColumnForEndpoint(
+  endpointId: string,
+  dir: 'forward' | 'backward' | 'both' | 'none',
+  fromNoteId: string,
+  toNoteId: string
+): RelatedEdgeLabelColumn {
+  if (dir === 'both' || dir === 'none') return 'to';
+  const semanticSource = dir === 'forward' ? fromNoteId : toNoteId;
+  return endpointId === semanticSource ? 'to' : 'from';
+}
+
+function sortRelatedEntries(entries: RelatedEdgeLabelEntry[]): RelatedEdgeLabelEntry[] {
+  return entries.sort((a, b) => {
+    if (a.labelKey === '' && b.labelKey !== '') return 1;
+    if (b.labelKey === '' && a.labelKey !== '') return -1;
+    return a.label.localeCompare(b.label, GRAPH_SORT_LOCALE);
+  });
+}
+
+/**
+ * 无过滤时关系链内出现的边标签，按 From / To 分栏（栏内相同合并计数）。
+ * 与 applyGraphNeighborHighlight 的 BFS 深度一致。
+ */
+export function collectRelatedEdgeLabelEntries(
+  centerId: string,
+  connections: ConnLabelLike[],
+  chainLength: number = 1
+): RelatedEdgeLabelGroups {
+  const depth = Math.max(1, Math.floor(Number.isFinite(chainLength) ? chainLength : 1));
+  const byNode = new Map<string, ConnLabelLike[]>();
+  for (const c of connections) {
+    if (!byNode.has(c.fromNoteId)) byNode.set(c.fromNoteId, []);
+    if (!byNode.has(c.toNoteId)) byNode.set(c.toNoteId, []);
+    byNode.get(c.fromNoteId)!.push(c);
+    if (c.fromNoteId !== c.toNoteId) byNode.get(c.toNoteId)!.push(c);
+  }
+
+  const seenEdges = new Set<string>();
+  const fromCounts = new Map<string, number>();
+  const toCounts = new Map<string, number>();
+  const nodeIds = new Set<string>([centerId]);
+  let frontier = new Set<string>([centerId]);
+
+  for (let dist = 0; dist < depth; dist += 1) {
+    const nextFrontier = new Set<string>();
+    for (const nodeId of frontier) {
+      for (const c of byNode.get(nodeId) ?? []) {
+        if (seenEdges.has(c.id)) continue;
+        seenEdges.add(c.id);
+        const labelKey = graphEdgeLabelKey(c.label);
+        const dir = connectionDirectionLocal(c);
+        const column = relatedEdgeColumnForEndpoint(nodeId, dir, c.fromNoteId, c.toNoteId);
+        const bucket = column === 'from' ? fromCounts : toCounts;
+        bucket.set(labelKey, (bucket.get(labelKey) ?? 0) + 1);
+        const otherId = c.fromNoteId === nodeId ? c.toNoteId : c.fromNoteId;
+        if (!nodeIds.has(otherId)) {
+          nodeIds.add(otherId);
+          nextFrontier.add(otherId);
+        }
+      }
+    }
+    frontier = nextFrontier;
+    if (frontier.size === 0) break;
+  }
+
+  const toEntries = (column: RelatedEdgeLabelColumn, counts: Map<string, number>) =>
+    sortRelatedEntries(
+      [...counts.entries()].map(([labelKey, count]) => ({
+        key: relatedEdgeSelectionKey(column, labelKey),
+        column,
+        labelKey,
+        label: graphEdgeLabelDisplay(labelKey),
+        count
+      }))
+    );
+
+  return {
+    from: toEntries('from', fromCounts),
+    to: toEntries('to', toCounts)
+  };
+}
+
+export function flattenRelatedEdgeLabelGroups(
+  groups: RelatedEdgeLabelGroups
+): RelatedEdgeLabelEntry[] {
+  return [...groups.from, ...groups.to];
+}
 
 /** 点击节点：高亮自身、相邻节点及之间的连线（与 App 内 GraphView 一致） */
 export function applyGraphNeighborHighlight(
   cy: Core,
   centerId: string | null,
   /** 关系链长度：通过连线连续扩展的层级数（1=当前实现） */
-  chainLength: number = 1
+  chainLength: number = 1,
+  /**
+   * 允许遍历的边筛选键（`from\u0001label` / `to\u0001label`）；`null` 表示不过滤。
+   * 空集合时仅高亮中心点。
+   */
+  allowedEdgeLabelKeys: Set<string> | null = null
 ): void {
+  const prevCores = cy.nodes('.focus-core').toArray();
+  // 卸下 focus-core 前先 bypass 锁住当前直径，避免 stylesheet 瞬缩打断动画
+  for (const n of prevCores) {
+    if (centerId && n.id() === centerId) continue;
+    const w = graphNodeRenderedSizePx(n);
+    n.stop(true);
+    n.style({ width: w, height: w });
+  }
+
   cy.batch(() => {
     cy.elements().removeClass([...HL]);
     if (!centerId) return;
@@ -1621,6 +1601,19 @@ export function applyGraphNeighborHighlight(
         if (nodeEl.empty() || !nodeEl.isNode()) continue;
 
         nodeEl.connectedEdges().forEach((edge) => {
+          if (allowedEdgeLabelKeys) {
+            const labelKey = graphEdgeLabelKey(edge.data('label'));
+            const rawDir = String(edge.data('direction') ?? 'none');
+            const dir =
+              rawDir === 'forward' || rawDir === 'backward' || rawDir === 'both' || rawDir === 'none'
+                ? rawDir
+                : 'none';
+            const srcId = edge.source().id();
+            const tgtId = edge.target().id();
+            const column = relatedEdgeColumnForEndpoint(nodeId, dir, srcId, tgtId);
+            const selKey = relatedEdgeSelectionKey(column, labelKey);
+            if (!allowedEdgeLabelKeys.has(selKey)) return;
+          }
           edgeIds.add(edge.id());
           const ns = edge.connectedNodes();
           if (ns.length !== 2) return;
@@ -1646,9 +1639,28 @@ export function applyGraphNeighborHighlight(
       if (!e.empty() && e.isEdge()) e.addClass('focus-e');
     });
   });
+  applyGraphNodeStackZIndex(cy);
+
+  // 选中焦点：直径放大；取消/切换：旧焦点缩回（单节点，开销很小）
+  for (const n of prevCores) {
+    if (centerId && n.id() === centerId) continue;
+    animateGraphNodeDiameter(n, graphNodeBaseSizePx(n), false);
+  }
+  if (centerId) {
+    const el = cy.getElementById(centerId);
+    if (!el.empty() && el.isNode()) {
+      const alreadyCore = prevCores.some((n) => n.id() === centerId);
+      if (!alreadyCore) {
+        const base = graphNodeBaseSizePx(el);
+        el.stop(true);
+        el.style({ width: base, height: base });
+        animateGraphNodeDiameter(el, graphNodeFocusCoreSizePx(el), true);
+      }
+    }
+  }
 }
 
-/** 悬停节点：加框 label 置顶（由样式表 z-index 高于选中/相连） */
+/** 悬停节点：加框 label 置顶（叠放序在 applyGraphNodeStackZIndex 中抬升） */
 export function applyGraphHoverHighlight(cy: Core, hoverNodeId: string | null): void {
   cy.batch(() => {
     cy.nodes().removeClass(GRAPH_HOVER_CLASS);
@@ -1656,6 +1668,7 @@ export function applyGraphHoverHighlight(cy: Core, hoverNodeId: string | null): 
     const el = cy.getElementById(hoverNodeId);
     if (!el.empty() && el.isNode()) el.addClass(GRAPH_HOVER_CLASS);
   });
+  applyGraphNodeStackZIndex(cy);
 }
 
 function escapeHtml(s: string): string {
@@ -1666,20 +1679,187 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
+/** marked 输出的链接：新窗口打开 */
+function withExternalMarkdownLinks(html: string): string {
+  return html.replace(/<a\b([^>]*)>/gi, (_full, attrs: string) => {
+    let next = String(attrs)
+      .replace(/\s*target\s*=\s*(["']).*?\1/gi, '')
+      .replace(/\s*rel\s*=\s*(["']).*?\1/gi, '');
+    return `<a${next} target="_blank" rel="noopener noreferrer">`;
+  });
+}
+
 type MarkedLike = { parse: (md: string) => string } | null;
 
-/** 独立 HTML：悬停预览 + 点击高亮（与 GraphView 一致） */
+const STANDALONE_DIM_KEEP =
+  'node.focus-core, node.focus-nh, node.focus-hover, node.focus-edge-endpoint, node:selected,' +
+  'edge.focus-e, edge.focus-edge-hover, edge.focus-edge-selected, edge:selected';
+
+function applyStandaloneGraphDim(cy: Core, hasSelection: boolean): void {
+  cy.batch(() => {
+    cy.elements().removeClass('graph-dim');
+    if (!hasSelection) return;
+    const keep = cy.elements(STANDALONE_DIM_KEEP);
+    cy.elements().not(keep).addClass('graph-dim');
+  });
+}
+
+function eyeSvg(open: boolean): string {
+  return open
+    ? `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>`
+    : `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-4.86"/><path d="m2 2 20 20"/></svg>`;
+}
+
+/** 独立 HTML：悬停预览 + 点击高亮 + From/To 筛选 + dim（与 GraphView 浏览态一致） */
 export function wireStandaloneGraphInteractions(
   cy: Core,
   payload: GraphExportPayload,
   themeColor: string,
-  marked: MarkedLike
+  marked: MarkedLike,
+  onHighlightChange?: () => void
 ): void {
   const previews = payload.notePreviews || {};
   const previewEl = document.getElementById('graph-note-preview');
+  const relatedEl = document.getElementById('graph-related-panel');
+  const chainLength = Math.max(1, Math.min(3, Math.round(payload.chainLength ?? 1)));
+  const connections = payload.connections || [];
   let previewImgIdx = 0;
   let focusedId: string | null = null;
   let hoverId: string | null = null;
+  let relatedKeys = new Set<string>();
+
+  const notifyHighlight = () => {
+    onHighlightChange?.();
+  };
+
+  const applyFocusHighlight = (noteId: string | null) => {
+    if (!noteId) {
+      applyGraphNeighborHighlight(cy, null, chainLength, null);
+      applyStandaloneGraphDim(cy, false);
+      notifyHighlight();
+      return;
+    }
+    applyGraphNeighborHighlight(cy, noteId, chainLength, relatedKeys);
+    applyStandaloneGraphDim(cy, true);
+    notifyHighlight();
+  };
+
+  function renderRelatedPanel(): void {
+    if (!relatedEl) return;
+    if (!focusedId) {
+      relatedEl.innerHTML = '';
+      return;
+    }
+    const groups = collectRelatedEdgeLabelEntries(focusedId, connections, chainLength);
+    const flat = flattenRelatedEdgeLabelGroups(groups);
+    const total = flat.length;
+    const selectedCount = flat.reduce((n, e) => n + (relatedKeys.has(e.key) ? 1 : 0), 0);
+
+    const colHtml = (title: string, column: RelatedEdgeLabelColumn, entries: typeof groups.from) => {
+      const allOn = entries.length > 0 && entries.every((e) => relatedKeys.has(e.key));
+      const rows =
+        entries.length === 0
+          ? `<p class="text-[11px] text-gray-400">—</p>`
+          : `<ul class="space-y-0.5">${entries
+              .map((entry) => {
+                const checked = relatedKeys.has(entry.key);
+                return `<li>
+                  <label class="flex cursor-pointer items-center gap-1.5 py-0.5 text-left text-xs ${checked ? 'text-gray-800' : 'text-gray-400'}">
+                    <input type="checkbox" data-rel-key="${encodeURIComponent(entry.key)}" ${checked ? 'checked' : ''} class="h-3.5 w-3.5 shrink-0 rounded border-gray-300" style="accent-color:${escapeHtml(themeColor)}" />
+                    <span class="min-w-0 flex-1 truncate font-medium" title="${escapeHtml(entry.label)}">${escapeHtml(entry.label)}</span>
+                    <span class="shrink-0 tabular-nums text-[10px] text-gray-400">${entry.count}</span>
+                  </label>
+                </li>`;
+              })
+              .join('')}</ul>`;
+      return `<div class="min-w-0 flex-1">
+        <div class="mb-1.5 flex items-center justify-between gap-1">
+          <div class="text-[10px] font-semibold uppercase tracking-wide text-gray-400">${title}</div>
+          ${
+            entries.length > 0
+              ? `<button type="button" data-rel-col="${column}" class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700" title="${allOn ? `隐藏全部 ${title}` : `显示全部 ${title}`}">${eyeSvg(allOn)}</button>`
+              : ''
+          }
+        </div>
+        ${rows}
+      </div>`;
+    };
+
+    relatedEl.innerHTML = `
+      <div data-allow-context-menu class="relative w-72 sm:w-80 rounded-2xl shadow-2xl border border-gray-100 overflow-hidden flex flex-col pointer-events-auto bg-white shrink-0" style="max-height:min(40vh,22rem)">
+        <div class="shrink-0 flex items-center justify-between gap-2 border-b border-gray-100 px-3 py-2.5">
+          <div class="min-w-0 flex-1">
+            <div class="text-[10px] font-semibold uppercase tracking-wide text-gray-400">关联</div>
+            <div class="truncate text-sm font-semibold text-gray-900">
+              高亮筛选
+              ${total > 0 ? `<span class="ml-1 font-medium text-gray-400">${selectedCount}/${total}</span>` : ''}
+            </div>
+          </div>
+          ${
+            total > 0
+              ? `<span class="flex shrink-0 gap-1">
+                  <button type="button" data-rel-all class="rounded-md px-1.5 py-0.5 text-[10px] font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-800">全选</button>
+                  <button type="button" data-rel-none class="rounded-md px-1.5 py-0.5 text-[10px] font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-800">清空</button>
+                </span>`
+              : ''
+          }
+        </div>
+        <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3">
+          ${
+            total === 0
+              ? `<p class="text-xs text-gray-400">当前关系链内暂无连线。</p>`
+              : `<div class="flex gap-4">
+                  ${colHtml('From', 'from', groups.from)}
+                  <div class="w-px shrink-0 self-stretch bg-gray-100" aria-hidden="true"></div>
+                  ${colHtml('To', 'to', groups.to)}
+                </div>`
+          }
+        </div>
+      </div>`;
+
+    relatedEl.querySelectorAll<HTMLInputElement>('input[data-rel-key]').forEach((input) => {
+      input.addEventListener('change', () => {
+        const raw = input.getAttribute('data-rel-key') || '';
+        let key = '';
+        try {
+          key = decodeURIComponent(raw);
+        } catch {
+          key = raw;
+        }
+        if (!key) return;
+        if (input.checked) relatedKeys.add(key);
+        else relatedKeys.delete(key);
+        applyFocusHighlight(focusedId);
+        renderRelatedPanel();
+      });
+    });
+    relatedEl.querySelectorAll<HTMLButtonElement>('button[data-rel-col]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const col = btn.getAttribute('data-rel-col') as RelatedEdgeLabelColumn | null;
+        if (col !== 'from' && col !== 'to') return;
+        const entries = col === 'from' ? groups.from : groups.to;
+        const keys = entries.map((x) => x.key);
+        const allOn = keys.length > 0 && keys.every((k) => relatedKeys.has(k));
+        if (allOn) keys.forEach((k) => relatedKeys.delete(k));
+        else keys.forEach((k) => relatedKeys.add(k));
+        applyFocusHighlight(focusedId);
+        renderRelatedPanel();
+      });
+    });
+    relatedEl.querySelector<HTMLButtonElement>('button[data-rel-all]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      relatedKeys = new Set(flat.map((x) => x.key));
+      applyFocusHighlight(focusedId);
+      renderRelatedPanel();
+    });
+    relatedEl.querySelector<HTMLButtonElement>('button[data-rel-none]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      relatedKeys = new Set();
+      applyFocusHighlight(focusedId);
+      renderRelatedPanel();
+    });
+  }
 
   function renderPreview(): void {
     if (!previewEl) return;
@@ -1714,6 +1894,7 @@ export function wireStandaloneGraphInteractions(
       } catch {
         detailHtml = escapeHtml(p.previewDetailMd).replace(/\n/g, '<br/>');
       }
+      detailHtml = withExternalMarkdownLinks(String(detailHtml));
     }
 
     const imgSection =
@@ -1731,7 +1912,7 @@ export function wireStandaloneGraphInteractions(
 
     previewEl.classList.remove('hidden');
     previewEl.innerHTML = `
-      <div data-allow-context-menu class="fixed top-4 left-4 z-[1000] w-72 sm:w-80 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden pointer-events-auto flex flex-col" style="max-height:calc(100vh - 2rem)">
+      <div data-allow-context-menu class="relative w-72 sm:w-80 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden pointer-events-auto flex flex-col shrink-0" style="max-height:min(52vh,28rem)">
         <div class="p-4 pb-2 flex items-start justify-between gap-3 border-b border-gray-100 shrink-0">
           <div class="flex items-start gap-3 flex-1 min-w-0">
             ${p.emoji ? `<span class="text-2xl mt-0.5 shrink-0">${escapeHtml(p.emoji)}</span>` : ''}
@@ -1741,7 +1922,7 @@ export function wireStandaloneGraphInteractions(
             </div>
           </div>
         </div>
-        <div class="flex-1 overflow-y-auto text-sm">
+        <div class="flex-1 overflow-y-auto text-sm min-h-0">
           ${
             detailHtml
               ? `<div class="px-4 py-3 text-gray-800 leading-snug break-words border-b border-gray-50 bg-gray-50/30 mapping-preview-markdown">${detailHtml}</div>`
@@ -1765,48 +1946,58 @@ export function wireStandaloneGraphInteractions(
     });
   }
 
+  const clearFocus = () => {
+    focusedId = null;
+    relatedKeys = new Set();
+    applyFocusHighlight(null);
+    renderRelatedPanel();
+    renderPreview();
+  };
+
   cy.on('mouseover', 'node', (evt) => {
     const n = evt.target;
+    if (n.hasClass?.('frame-cluster-label') || n.hasClass?.('frame-cluster-halo')) return;
     hoverId = n.id();
     previewImgIdx = 0;
     applyGraphHoverHighlight(cy, hoverId);
+    notifyHighlight();
     renderPreview();
   });
   cy.on('mouseout', 'node', () => {
     hoverId = null;
     applyGraphHoverHighlight(cy, null);
+    notifyHighlight();
     renderPreview();
   });
 
   cy.on('tap', 'node', (evt) => {
     cy.elements().unselect();
     const n = evt.target;
+    if (n.hasClass?.('frame-cluster-label') || n.hasClass?.('frame-cluster-halo')) return;
     const id = n.id();
     if (focusedId === id) {
-      focusedId = null;
-      applyGraphNeighborHighlight(cy, null);
-    } else {
-      focusedId = id;
-      applyGraphNeighborHighlight(cy, id);
+      clearFocus();
+      return;
     }
+    focusedId = id;
+    const groups = collectRelatedEdgeLabelEntries(id, connections, chainLength);
+    relatedKeys = new Set(flattenRelatedEdgeLabelGroups(groups).map((e) => e.key));
     previewImgIdx = 0;
+    applyFocusHighlight(id);
     applyGraphHoverHighlight(cy, hoverId);
+    renderRelatedPanel();
     renderPreview();
   });
 
   cy.on('tap', 'edge', () => {
     cy.elements().unselect();
-    focusedId = null;
-    applyGraphNeighborHighlight(cy, null);
-    renderPreview();
+    clearFocus();
   });
 
   cy.on('tap', (evt) => {
     if (evt.target === cy) {
       cy.elements().unselect();
-      focusedId = null;
-      applyGraphNeighborHighlight(cy, null);
-      renderPreview();
+      clearFocus();
     }
   });
 }
@@ -1839,7 +2030,7 @@ export function copyGraphPayloadJson(
 
 /** 独立 HTML：绑定固定 id 的按钮（与 graphExportHtml 中 DOM 一致） */
 export function wireStandaloneGraphControls(
-  cy: Core,
+  _cy: Core,
   payload: GraphExportPayload,
   safeName: string
 ): void {
@@ -1857,13 +2048,4 @@ export function wireStandaloneGraphControls(
       copyGraphPayloadJson(payload, safeName);
     };
   }
-
-  const tagGrid = document.getElementById('btnTagGrid');
-  const circle = document.getElementById('btnCircle');
-  const time = document.getElementById('btnTime');
-  const cose = document.getElementById('btnCose');
-  if (tagGrid) tagGrid.onclick = () => applyGraphTagGridLayout(cy);
-  if (circle) circle.onclick = () => applyGraphLayout(cy, 'circle');
-  if (time) time.onclick = () => applyGraphTimeLayout(cy);
-  if (cose) cose.onclick = () => applyGraphLayout(cy, 'cose-bilkent');
 }

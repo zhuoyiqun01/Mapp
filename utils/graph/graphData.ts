@@ -1,6 +1,7 @@
 import type { Core, ElementDefinition } from 'cytoscape';
-import type { Connection, Note, Project } from '../../types';
+import type { Connection, Frame, Note, Project } from '../../types';
 import { parseNoteContent } from '../../utils';
+import { DEFAULT_MAP_UI_CHROME_BLUR_PX, DEFAULT_MAP_UI_CHROME_OPACITY } from '../map/mapChromeStyle';
 import { GRAPH_UNTAGGED_TAG_GROUP, mergeGraphLayerState } from './graphRuntimeCore';
 
 // Cytoscape 的 style stylesheet 类型在当前工具链下可能不可用，这里用宽类型避免无关类型检查阻塞。
@@ -81,7 +82,15 @@ export function normalizeProjectConnections(project: Project): { project: Projec
   return { project: { ...project, connections: next }, mutated: true };
 }
 
-function noteNodeColor(note: Note, fallback: string): string {
+function noteNodeColor(note: Note, fallback: string, framesById?: Map<string, Frame>): string {
+  const frameId =
+    note.groupIds?.[0]?.trim() ||
+    note.groupId?.trim() ||
+    '';
+  if (frameId && framesById?.has(frameId)) {
+    const fc = framesById.get(frameId)?.color?.trim();
+    if (fc) return fc;
+  }
   if (note.tags?.length) {
     const t = note.tags[0];
     if (t.color) return t.color;
@@ -130,16 +139,74 @@ function yearLabel(note: Note): string {
   return String(note.startYear);
 }
 
+/** 图谱节点直径上限（px）；滑块值为下限 */
+export const GRAPH_NODE_SIZE_MAX_PX = 36;
+
+/**
+ * 按关联度数映射节点直径：`minSize` 为无关联/最低值，最高关联度映射到 `GRAPH_NODE_SIZE_MAX_PX`。
+ */
+export function graphNodeSizeFromDegree(
+  degree: number,
+  maxDegree: number,
+  minSize: number
+): number {
+  const minS = Math.min(GRAPH_NODE_SIZE_MAX_PX, Math.max(1, minSize));
+  const maxS = GRAPH_NODE_SIZE_MAX_PX;
+  if (maxS <= minS || maxDegree <= 0 || !(degree > 0)) return minS;
+  const t = Math.max(0, Math.min(1, degree / maxDegree));
+  const eased = Math.pow(t, 0.65);
+  return Math.round((minS + (maxS - minS) * eased) * 100) / 100;
+}
+
+function attachNodeDegreeSizes(
+  notes: Note[],
+  connections: Connection[],
+  noteIds: Set<string>,
+  minSize: number
+): Map<string, { degree: number; nodeSize: number }> {
+  const adj = new Map<string, Set<string>>();
+  for (const id of noteIds) adj.set(id, new Set());
+  for (const c of connections) {
+    if (!noteIds.has(c.fromNoteId) || !noteIds.has(c.toNoteId)) continue;
+    if (c.fromNoteId === c.toNoteId) continue;
+    adj.get(c.fromNoteId)!.add(c.toNoteId);
+    adj.get(c.toNoteId)!.add(c.fromNoteId);
+  }
+  let maxDegree = 0;
+  const degrees = new Map<string, number>();
+  for (const id of noteIds) {
+    const d = adj.get(id)?.size ?? 0;
+    degrees.set(id, d);
+    if (d > maxDegree) maxDegree = d;
+  }
+  const out = new Map<string, { degree: number; nodeSize: number }>();
+  for (const id of noteIds) {
+    const degree = degrees.get(id) ?? 0;
+    out.set(id, {
+      degree,
+      nodeSize: graphNodeSizeFromDegree(degree, maxDegree, minSize)
+    });
+  }
+  return out;
+}
+
 export function buildGraphElements(
   notes: Note[],
   connections: Connection[],
   themeColor: string,
   edgeWeightBase?: number,
-  tagLayerWeights?: Record<string, number>
+  tagLayerWeights?: Record<string, number>,
+  frames?: Frame[],
+  nodeSizeMin?: number
 ): ElementDefinition[] {
   const noteById = new Map<string, Note>();
   notes.forEach((n) => noteById.set(n.id, n));
   const noteIds = new Set(noteById.keys());
+  const framesById = new Map((frames ?? []).map((f) => [String(f.id).trim(), f]));
+  const sizeMin = nodeSizeMin ?? DEFAULT_GRAPH_STYLESHEET_SIZING.nodeSize;
+  const degreeSizes = attachNodeDegreeSizes(notes, connections, noteIds, sizeMin);
+  const favScale = 1.5;
+  const coreScale = GRAPH_FOCUS_CORE_NODE_SCALE;
 
   // edgeWeight 本质上用于连线粗细映射；你的需求需要让“收藏端点数”对每条边生效，
   // 因此这里为每条边计算出独立的 line width 数据字段（供样式表 data(...) 引用）。
@@ -238,6 +305,14 @@ export function buildGraphElements(
       const yl = yearLabel(note);
       /** 单行：时间在主标题右侧（用 em 空格拉开，避免框过窄过高） */
       const label = yl ? `${main}\u2003\u2003${yl}` : main;
+      const sized = degreeSizes.get(note.id) ?? {
+        degree: 0,
+        nodeSize: graphNodeSizeFromDegree(0, 0, sizeMin)
+      };
+      const ns = sized.nodeSize;
+      const nsFav = Math.round(ns * favScale * 100) / 100;
+      const nsCore = Math.round(ns * coreScale * 100) / 100;
+      const nsFavCore = Math.round(ns * favScale * coreScale * 100) / 100;
       return {
         data: {
           id: note.id,
@@ -245,26 +320,33 @@ export function buildGraphElements(
           fullTitle: parseNoteContent(note.text || '').title || '便签',
           year: yl,
           timeSort: note.startYear != null ? note.startYear : undefined,
-          color: noteNodeColor(note, themeColor),
+          color: noteNodeColor(note, themeColor, framesById),
           layerItemHidden: Boolean(note.layerItemHidden),
           stackZ: stackZById.get(note.id) ?? 2,
           /** 0~1：图中“相对层级(level)”归一化分数（后续在本函数末尾填充） */
           levelNorm: 0,
-          /** 图谱「按标签分组网格」用：无首个标签时归入 GRAPH_UNTAGGED_TAG_GROUP，避免被样式表隐藏 */
+          linkDegree: sized.degree,
+          nodeSize: ns,
+          nodeSizeFav: nsFav,
+          nodeSizeCore: nsCore,
+          nodeSizeFavCore: nsFavCore,
+          /** 图谱「按标签分组」用：无首个标签时归入 GRAPH_UNTAGGED_TAG_GROUP */
           tagGroup,
+          /** 全部标签（显隐：任一未隐藏则显示） */
+          tagLabels: (note.tags ?? [])
+            .map((t) => String(t.label ?? '').trim())
+            .filter((l) => l !== ''),
           /**
-           * 图谱「按帧(frame)分簇」用：
-           * - `frameGroups`：该便签所属的多个 frames（按便签数据里的顺序）
-           * - `frameGroup`：兼容旧逻辑的首帧归属（仍保留，但真正的归属会在运行时按 hidden 动态跳过）
+           * 单簇归属（旧多簇取第一个）
            */
           frameGroups: (() => {
             const raw =
               note.groupIds?.length
-                ? note.groupIds
+                ? note.groupIds.slice(0, 1)
                 : note.groupId
                   ? [note.groupId]
                   : note.groupNames?.length
-                    ? note.groupNames
+                    ? note.groupNames.slice(0, 1)
                     : note.groupName
                       ? [note.groupName]
                       : [];
@@ -367,6 +449,8 @@ export function buildGraphElements(
   });
 
   const edges: ElementDefinition[] = [];
+  /** 同对节点平行边序号：交替弯曲方向；实际曲率幅度由 syncGraphEdgeCurveDistances 按边长刷新 */
+  const pairCurveIndex = new Map<string, number>();
   for (const c of connections) {
     if (!noteIds.has(c.fromNoteId) || !noteIds.has(c.toNoteId)) continue;
     const direction = connectionToGraphDirection(c);
@@ -442,6 +526,15 @@ export function buildGraphElements(
       )
     );
 
+    const pairKey =
+      c.fromNoteId < c.toNoteId
+        ? `${c.fromNoteId}\0${c.toNoteId}`
+        : `${c.toNoteId}\0${c.fromNoteId}`;
+    const pairIdx = pairCurveIndex.get(pairKey) ?? 0;
+    pairCurveIndex.set(pairKey, pairIdx + 1);
+    // 占位：布局后由 syncGraphEdgeCurveDistances 按实际边长覆盖幅度
+    const controlPointDistance = pairIdx % 2 === 0 ? 40 : -40;
+
     edges.push({
       data: {
         id: c.id,
@@ -461,7 +554,11 @@ export function buildGraphElements(
         // 用于样式表中按数据决定箭头端点几何大小
         edgeArrowScale,
         edgeArrowScaleFocus,
-        edgeArrowScaleHi
+        edgeArrowScaleHi,
+        // unbundled-bezier 控制点距（布局后按边长动态刷新）
+        controlPointDistance,
+        /** 平行边弯曲方向：+1 / -1 */
+        curveSign: pairIdx % 2 === 0 ? 1 : -1
       }
     });
   }
@@ -489,17 +586,33 @@ export function graphStructureKey(notes: Note[], connections: Connection[]): str
   return `${n}|${e}`;
 }
 
+export type GraphStylesheetChrome = {
+  opacity: number;
+  blurPx?: number;
+};
+
 export type GraphStylesheetSizing = {
   nodeSize: number;
   labelFontPx: number;
   edgeWeight: number;
+  /** 边标签字号（与连线粗细解耦） */
+  edgeLabelFontPx: number;
 };
 
 export const DEFAULT_GRAPH_STYLESHEET_SIZING: GraphStylesheetSizing = {
   nodeSize: 28,
   labelFontPx: 10,
-  edgeWeight: 0.3
+  edgeWeight: 0.3,
+  edgeLabelFontPx: 6
 };
+
+/** 时间线「按Frame聚类」默认强度（未设置时） */
+export const DEFAULT_GRAPH_TIME_AXIS_WEIGHT_BIAS = 0.8;
+
+/** 选中对象（节点/边）高亮 label 的固定屏上字号（不受设置面板 Label Size 影响） */
+export const GRAPH_HIGHLIGHT_LABEL_SCREEN_PX = 16;
+/** 非选中的关联高亮 label 屏上字号 */
+export const GRAPH_HIGHLIGHT_RELATED_LABEL_SCREEN_PX = 12;
 
 /** 关系链/选点高亮中心（focus-core）相对邻居（focus-nh）的节点缩放，便于区分 */
 export const GRAPH_FOCUS_CORE_NODE_SCALE = 1.5;
@@ -514,6 +627,9 @@ function mergeGraphSizing(partial?: Partial<GraphStylesheetSizing>): GraphStyles
   }
   if (partial?.edgeWeight != null && Number.isFinite(partial.edgeWeight)) {
     o.edgeWeight = Math.min(4, Math.max(0.1, Math.round(partial.edgeWeight * 10) / 10));
+  }
+  if (partial?.edgeLabelFontPx != null && Number.isFinite(partial.edgeLabelFontPx)) {
+    o.edgeLabelFontPx = Math.min(16, Math.max(3, Math.round(partial.edgeLabelFontPx)));
   }
   return o;
 }
@@ -555,19 +671,12 @@ function graphSizingCss(themeColor: string, s: GraphStylesheetSizing) {
   const borderCoreFav = Math.max(4, Math.min(10, Math.round(favNs * 0.14)));
   const borderSel = Math.max(3, Math.min(8, Math.round(ns * 0.11)));
   const borderSelFav = Math.max(3, Math.min(8, Math.round(favNs * 0.11)));
-  const txtBorder = Math.max(1.5, Math.min(3, nf * 0.2));
-  const txtBorderFav = Math.max(1.5, Math.min(3, favNf * 0.2));
-  const txtBorderHi = Math.max(2, Math.min(4, nf * 0.24));
-  const txtBorderHiFav = Math.max(2, Math.min(4, favNf * 0.24));
   const edgeLine = Math.max(0.4, Math.min(4.6, Math.round((0.4 + ewNorm * 2.8) * 100) / 100));
-  // edge label 字号整体收缩（包括 margin 与描边厚度），避免在小边权下视觉显得过大
-  const EDGE_LABEL_SCALE = 0.5;
-  const edgeFont = Math.max(6, Math.min(32, Math.round((6 + ewNorm * 10) * 10) / 10));
-  const edgeFontScaled = Math.max(3, edgeFont * EDGE_LABEL_SCALE);
+  const edgeFontScaled = Math.max(3, Math.min(16, s.edgeLabelFontPx));
   const edgeMarginY = Math.max(2, Math.round(edgeFontScaled * 0.72));
   const edgeOutline = Math.max(0.6, Math.min(1.4, Math.round((0.6 + ewNorm * 0.8) * 100) / 100));
-  // 高亮态 label 描边不受面板 edgeWeight 影响：固定为当前最大值(1.4)的 4 倍。
-  const edgeOutlineHighlight = 5.6 * EDGE_LABEL_SCALE;
+  // 高亮态 label 描边：相对边标签字号缩放，避免过细/过粗
+  const edgeOutlineHighlight = Math.max(2.8, Math.min(5.6, edgeFontScaled * 0.7));
   const edgeLineFocus = Math.max(0.8, Math.min(6.6, Math.round((edgeLine * 1.35) * 100) / 100));
   const edgeLineHi = Math.max(0.8, Math.min(9.2, Math.round((edgeLine * 1.85) * 100) / 100));
   const vpEdgeOff = Math.max(48, Math.round(ns * 3.2));
@@ -593,10 +702,6 @@ function graphSizingCss(themeColor: string, s: GraphStylesheetSizing) {
     borderCoreFav,
     borderSel,
     borderSelFav,
-    txtBorder,
-    txtBorderFav,
-    txtBorderHi,
-    txtBorderHiFav,
     edgeLine,
     edgeLineFocus,
     edgeLineHi,
@@ -609,20 +714,32 @@ function graphSizingCss(themeColor: string, s: GraphStylesheetSizing) {
   };
 }
 
+export type GraphStylesheetOpts = {
+  /**
+   * true / 未设 → 可见曲线（unbundled-bezier + 控制点；bundled `bezier` 单边会画成直线）；
+   * false → straight（保留箭头；haystack 不支持箭头）
+   */
+  edgeCurve?: boolean;
+};
+
 export function getGraphStylesheet(
   themeColor: string,
-  sizingPartial?: Partial<GraphStylesheetSizing>
+  sizingPartial?: Partial<GraphStylesheetSizing>,
+  _chrome?: GraphStylesheetChrome,
+  opts?: GraphStylesheetOpts
 ): Stylesheet {
   const sizing = mergeGraphSizing(sizingPartial);
   const z = graphSizingCss(themeColor, sizing);
+  const edgeCurveOn = opts?.edgeCurve !== false;
+  const curveStyle = edgeCurveOn ? 'unbundled-bezier' : 'straight';
   return [
     {
       selector: 'node',
       style: {
         label: 'data(label)',
         'background-color': 'data(color)',
-        // 交互命中区域：比视觉半径外扩 2px（不改变渲染尺寸）
-        'bounds-expansion': 2,
+        // 交互命中区域：略外扩，减少贴边时误点到连线
+        'bounds-expansion': 4,
         /** 未选中：与地图 label 未强调态一致的浅灰字，无衬底 */
         color: '#9ca3af',
         'text-valign': 'bottom',
@@ -630,16 +747,21 @@ export function getGraphStylesheet(
         'font-size': z.px(z.nf),
         'font-weight': '600',
         'line-height': 1,
-        width: z.ns,
-        height: z.ns,
+        width: 'data(nodeSize)',
+        height: 'data(nodeSize)',
         'border-width': z.borderBase,
         'border-color': '#ffffff',
+        /** label 改由 HTML 层绘制，避免节点圆盖住其他节点文字 */
+        'text-opacity': 0,
         'text-background-opacity': 0,
         'text-border-width': 0,
-        /** 显式压低默认节点，便于高亮连线画在邻居节点之上 */
-        'z-index': 1,
-        /** 与 edge 同用 manual，否则 auto 下边永远在节点下方，z-index 无效 */
-        'z-index-compare': 'manual'
+        /**
+         * 普通节点留在 auto 层（z > 普通边），避免挡住高亮连线（高亮边在 top）。
+         * 高亮节点单独抬到 top。
+         */
+        'z-compound-depth': 'auto',
+        'z-index-compare': 'manual',
+        'z-index': 100
       }
     },
     {
@@ -653,8 +775,8 @@ export function getGraphStylesheet(
       style: {
         'text-margin-y': z.marginYFav,
         'font-size': z.px(z.favNf),
-        width: z.favNs,
-        height: z.favNs,
+        width: 'data(nodeSizeFav)',
+        height: 'data(nodeSizeFav)',
         'border-width': z.borderBaseFav
       }
     },
@@ -674,140 +796,100 @@ export function getGraphStylesheet(
         'border-color': z.themeColor
       }
     },
-    /** 与选中点相连：白底描边 label；低于高亮连线，高于普通节点 */
+    /** 与选中点相连：节点描边高亮；label 由 HTML chrome 层绘制（隐藏 canvas 字） */
     {
       selector: 'node.focus-nh',
       style: {
         'border-width': z.borderNh,
         'border-color': z.themeColor,
         opacity: 1,
-        color: '#000000',
-        'font-weight': '500',
-        'font-size': z.px(z.nf),
-        'line-height': 1,
-        'text-background-color': '#ffffff',
-        'text-background-opacity': 1,
-        'text-background-padding': z.pad,
-        'text-background-shape': 'roundrectangle',
-        'text-border-color': z.themeColor,
-        'text-border-width': z.txtBorder,
-        'text-border-opacity': 1,
-        'z-index': 14000
+        'text-opacity': 0,
+        'text-background-opacity': 0,
+        'text-border-width': 0,
+        'z-compound-depth': 'top',
+        'z-index-compare': 'manual',
+        'z-index': 200
       }
     },
     {
       selector: 'node.focus-nh[favorite = "yes"]',
       style: {
-        color: z.themeColor,
-        'font-weight': 'bold',
         'border-width': z.borderNhFav,
-        'font-size': z.px(z.favNf),
-        'text-background-padding': z.padFav,
-        'text-border-width': z.txtBorderHiFav
+        'font-size': z.px(z.favNf)
       }
     },
-    /** 选中边时两端便签：与 focus-nh 同视觉（独立类名，便于与节点焦点高亮互斥清理） */
+    /** 选中边时两端便签 */
     {
       selector: 'node.focus-edge-endpoint',
       style: {
         'border-width': z.borderNh,
         'border-color': z.themeColor,
         opacity: 1,
-        color: '#000000',
-        'font-weight': '500',
-        'font-size': z.px(z.nf),
-        'line-height': 1,
-        'text-background-color': '#ffffff',
-        'text-background-opacity': 1,
-        'text-background-padding': z.pad,
-        'text-background-shape': 'roundrectangle',
-        'text-border-color': z.themeColor,
-        'text-border-width': z.txtBorder,
-        'text-border-opacity': 1,
-        'z-index': 14000
+        'text-opacity': 0,
+        'text-background-opacity': 0,
+        'text-border-width': 0,
+        'z-compound-depth': 'top',
+        'z-index-compare': 'manual',
+        'z-index': 250
       }
     },
     {
       selector: 'node.focus-edge-endpoint[favorite = "yes"]',
       style: {
-        color: z.themeColor,
-        'font-weight': 'bold',
         'border-width': z.borderNhFav,
-        'font-size': z.px(z.favNf),
-        'text-background-padding': z.padFav,
-        'text-border-width': z.txtBorderHiFav
+        'font-size': z.px(z.favNf)
       }
     },
-    /** 选中（焦点中心）：白底框；高于高亮连线（端点盖住连线） */
+    /** 选中（焦点中心）：label 由 HTML chrome 层绘制 */
     {
       selector: 'node.focus-core',
       style: {
         opacity: 1,
-        width: z.nsCore,
-        height: z.nsCore,
+        width: 'data(nodeSizeCore)',
+        height: 'data(nodeSizeCore)',
         'text-margin-y': z.marginYCore,
         'border-width': z.borderCore,
         'border-color': z.themeColor,
-        color: '#000000',
-        'font-weight': '500',
-        'font-size': z.px(z.nf),
-        'line-height': 1,
-        'text-background-color': '#ffffff',
-        'text-background-opacity': 1,
-        'text-background-padding': z.pad,
-        'text-background-shape': 'roundrectangle',
-        'text-border-color': z.themeColor,
-        'text-border-width': z.txtBorder,
-        'text-border-opacity': 1,
-        'z-index': 16000
+        'text-opacity': 0,
+        'text-background-opacity': 0,
+        'text-border-width': 0,
+        'z-compound-depth': 'top',
+        'z-index-compare': 'manual',
+        'z-index': 300
       }
     },
     {
       selector: 'node.focus-core[favorite = "yes"]',
       style: {
         opacity: 1,
-        width: z.favNsCore,
-        height: z.favNsCore,
+        width: 'data(nodeSizeFavCore)',
+        height: 'data(nodeSizeFavCore)',
         'text-margin-y': z.marginYFavCore,
-        color: z.themeColor,
-        'font-weight': 'bold',
         'border-width': z.borderCoreFav,
-        'font-size': z.px(z.favNf),
-        'text-background-padding': z.padFav,
-        'text-border-width': z.txtBorderHiFav
+        'font-size': z.px(z.favNf)
       }
     },
-    /** 悬停：同焦点加框样式，层级最高 */
+    /** 悬停节点：label 由 HTML chrome 层绘制 */
     {
       selector: 'node.focus-hover',
       style: {
         opacity: 1,
         'border-width': z.borderCore,
         'border-color': z.themeColor,
-        color: '#000000',
-        'font-weight': '500',
-        'font-size': z.px(z.nf),
-        'line-height': 1,
-        'text-background-color': '#ffffff',
-        'text-background-opacity': 1,
-        'text-background-padding': z.pad,
-        'text-background-shape': 'roundrectangle',
-        'text-border-color': z.themeColor,
-        'text-border-width': z.txtBorder,
-        'text-border-opacity': 1,
-        'z-index': 17000
+        'text-opacity': 0,
+        'text-background-opacity': 0,
+        'text-border-width': 0,
+        'z-compound-depth': 'top',
+        'z-index-compare': 'manual',
+        'z-index': 400
       }
     },
     {
       selector: 'node.focus-hover[favorite = "yes"]',
       style: {
         opacity: 1,
-        color: z.themeColor,
-        'font-weight': 'bold',
         'border-width': z.borderCoreFav,
-        'font-size': z.px(z.favNf),
-        'text-background-padding': z.padFav,
-        'text-border-width': z.txtBorderHiFav
+        'font-size': z.px(z.favNf)
       }
     },
     {
@@ -818,7 +900,14 @@ export function getGraphStylesheet(
         'line-color': '#d1d5db',
         width: 'data(edgeLineWidth)',
         'arrow-scale': 'data(edgeArrowScale)',
-        'curve-style': 'bezier',
+        'curve-style': curveStyle,
+        ...(edgeCurveOn
+          ? {
+              // bundled bezier 在单边时会退回直线；unbundled + 距离控制点才能看到弧度
+              'control-point-distances': 'data(controlPointDistance)',
+              'control-point-weights': 0.5
+            }
+          : {}),
         'target-arrow-shape': 'triangle',
         'target-arrow-color': '#d1d5db',
         'source-arrow-shape': 'none',
@@ -826,8 +915,11 @@ export function getGraphStylesheet(
         'text-rotation': 'autorotate',
         'text-margin-y': -z.edgeMarginY,
         color: '#9ca3af',
-        // 普通边始终在节点下方（悬停/选中/高亮边会在下面的 selector 里抬高）
-        'z-index': -1,
+        /**
+         * 普通连线：auto 层且 z 低于普通节点，点在节点上优先命中节点。
+         */
+        'z-compound-depth': 'auto',
+        'z-index': 1,
         'z-index-compare': 'manual'
       }
     },
@@ -868,7 +960,10 @@ export function getGraphStylesheet(
         'line-color': z.themeColor,
         'target-arrow-color': z.themeColor,
         'source-arrow-color': z.themeColor,
-        'z-index': 15000
+        /** top：盖过未高亮节点/边；仍低于高亮节点（200+） */
+        'z-compound-depth': 'top',
+        'z-index-compare': 'manual',
+        'z-index': 50
       }
     },
     {
@@ -880,8 +975,9 @@ export function getGraphStylesheet(
         'source-arrow-color': z.themeColor,
         width: 'data(edgeLineFocusWidth)',
         'arrow-scale': 'data(edgeArrowScaleFocus)',
-        /** 高于 focus-nh(14000)，低于 focus-core(16000)，避免被邻居节点与其它未高亮点挡住 */
-        'z-index': 15000,
+        'z-compound-depth': 'top',
+        'z-index-compare': 'manual',
+        'z-index': 50,
         'font-weight': '600',
         color: '#374151',
         'text-outline-width': z.edgeOutlineHighlight,
@@ -889,7 +985,7 @@ export function getGraphStylesheet(
         'text-outline-opacity': 1
       }
     },
-    /** 悬停边：整段连线与 label 置顶（高于节点 focus-hover） */
+    /** 悬停边：高于未高亮内容，低于高亮节点 */
     {
       selector: 'edge.focus-edge-hover',
       style: {
@@ -899,7 +995,9 @@ export function getGraphStylesheet(
         'source-arrow-color': z.themeColor,
         width: 'data(edgeLineHiWidth)',
         'arrow-scale': 'data(edgeArrowScaleHi)',
-        'z-index': 30000,
+        'z-compound-depth': 'top',
+        'z-index-compare': 'manual',
+        'z-index': 80,
         'font-weight': '600',
         color: '#374151',
         'text-outline-width': z.edgeOutlineHighlight,
@@ -907,7 +1005,7 @@ export function getGraphStylesheet(
         'text-outline-opacity': 1
       }
     },
-    /** 面板/状态选中的边（cy 内未保持 :selected，用类控制；层级高于悬停边） */
+    /** 选中边：同悬停，盖过未高亮节点/边 */
     {
       selector: 'edge.focus-edge-selected',
       style: {
@@ -917,7 +1015,9 @@ export function getGraphStylesheet(
         'source-arrow-color': z.themeColor,
         width: 'data(edgeLineHiWidth)',
         'arrow-scale': 'data(edgeArrowScaleHi)',
-        'z-index': 35000,
+        'z-compound-depth': 'top',
+        'z-index-compare': 'manual',
+        'z-index': 80,
         'font-weight': '600',
         color: '#374151',
         'text-outline-width': z.edgeOutlineHighlight,
@@ -987,108 +1087,6 @@ export function getGraphStylesheet(
         display: 'none'
       }
     },
-    {
-      selector: 'node.frame-cluster-halo',
-      style: {
-        shape: 'ellipse',
-        width: 'data(haloW)',
-        height: 'data(haloH)',
-        'background-color': 'data(haloFill)',
-        'background-opacity': 1,
-        'border-width': 1,
-        'border-color': 'data(haloBorder)',
-        'border-opacity': 1,
-        label: '',
-        color: '#ffffff',
-        'text-opacity': 0,
-        events: 'no',
-        'z-index': -100,
-        'z-index-compare': 'manual'
-      }
-    },
-    {
-      // frameCluster 簇标题：默认 text-events=no 时点在字上会穿透到下层面；设 yes 才用 label 包围盒拾取
-      selector: 'node.frame-cluster-label',
-      style: {
-        width: 84,
-        height: 24,
-        shape: 'roundrectangle',
-        'background-opacity': 0,
-        'border-width': 0,
-        opacity: 1,
-        label: 'data(label)',
-        color: '#6B7280',
-        'font-size': '6px',
-        'font-weight': '800',
-        'text-valign': 'center',
-        'text-halign': 'center',
-        'text-margin-y': 0,
-        'text-background-opacity': 0,
-        'text-border-width': 0,
-        'text-outline-width': 3,
-        'text-outline-color': '#ffffff',
-        'text-outline-opacity': 1,
-        'text-events': 'yes',
-        'z-index': 22000,
-        'z-index-compare': 'manual'
-      }
-    },
-    /** 簇标题选中：不显主题底/边（避免盖住通用 node:selected 的绿色描边） */
-    {
-      selector: 'node.frame-cluster-label:selected',
-      style: {
-        'border-width': 0,
-        'border-opacity': 0,
-        'background-opacity': 0,
-        opacity: 1
-      }
-    },
-    {
-      selector: 'node.frame-cluster-label.graph-frame-peek-focus',
-      style: {
-        color: '#111827',
-        opacity: 1,
-        'text-outline-width': 4
-      }
-    },
-    {
-      selector: 'node.frame-cluster-label.graph-frame-peek-dim',
-      style: {
-        opacity: 0.34,
-        'text-outline-width': 2.5
-      }
-    },
-    {
-      selector: 'node.frame-cluster-halo.graph-frame-peek-dim',
-      style: {
-        'background-opacity': 0.2,
-        'border-opacity': 0.35
-      }
-    },
-    {
-      selector: 'node.graph-frame-peek-dim',
-      style: {
-        opacity: 0.32
-      }
-    },
-    {
-      selector: 'node.frame-cluster-halo.graph-frame-peek-dim, node.frame-cluster-label.graph-frame-peek-dim',
-      style: {
-        opacity: 1
-      }
-    },
-    {
-      selector: 'edge.graph-frame-peek-dim',
-      style: {
-        opacity: 0.3
-      }
-    },
-    {
-      selector: 'edge.graph-frame-peek-dim.focus-edge-hover, edge.graph-frame-peek-dim.focus-edge-selected',
-      style: {
-        opacity: 0.95
-      }
-    },
     /** 有选中对象时（GraphView 会给未高亮元素挂 graph-dim 类）：在“原透明度基础上再 *0.5” */
     {
       selector: 'node.graph-dim',
@@ -1103,21 +1101,9 @@ export function getGraphStylesheet(
       }
     },
     {
-      selector: 'node.graph-frame-peek-dim.graph-dim',
-      style: {
-        opacity: 0.16
-      }
-    },
-    {
       selector: 'edge.graph-dim',
       style: {
         opacity: 0.2
-      }
-    },
-    {
-      selector: 'edge.graph-frame-peek-dim.graph-dim',
-      style: {
-        opacity: 0.15
       }
     },
     {
@@ -1130,74 +1116,88 @@ export function getGraphStylesheet(
 }
 
 /**
- * Hover / 选中（及关系链高亮）节点与连线的 label 保持屏幕像素尺寸，不随 cy.zoom 放大缩小。
- * Cytoscape 字号按模型坐标渲染，故用 `期望屏上 px / zoom` 写入样式。
+ * Hover / 选中（及关系链高亮）时：
+ * - 选中对象（focus-core / focus-hover / focus-edge-selected / focus-edge-hover）label 16px
+ * - 关联高亮（focus-nh / focus-edge-endpoint / focus-e）label 12px
+ * 节点高亮 label 由 HTML chrome 层绘制，此处只隐藏 canvas 字并校正边标签。
+ * 设置面板的 Label Size / Edge Label 仅作用于未高亮样式。
  */
 export function applyGraphHighlightLabelScreenSize(
   cy: Core,
-  sizingPartial?: Partial<GraphStylesheetSizing>
+  sizingPartial?: Partial<GraphStylesheetSizing>,
+  _chrome?: GraphStylesheetChrome
 ): void {
   if (!cy || cy.destroyed?.()) return;
   const sizing = mergeGraphSizing(sizingPartial);
   const z = graphSizingCss('#000000', sizing);
   const zoom = Math.max(0.08, cy.zoom());
+  const hiFontSel = GRAPH_HIGHLIGHT_LABEL_SCREEN_PX;
+  const hiFontRel = GRAPH_HIGHLIGHT_RELATED_LABEL_SCREEN_PX;
   const snum = (n: number) => Math.round((n / zoom) * 1000) / 1000;
-  const spx = (n: number) => `${snum(n)}px`;
+  const edgeMetrics = (fontPx: number) => ({
+    marginY: Math.max(2, Math.round(fontPx * 0.36)),
+    outline: Math.max(2, fontPx * 0.28)
+  });
+  const selM = edgeMetrics(hiFontSel);
+  const relM = edgeMetrics(hiFontRel);
 
   const nodeHi =
     'node.focus-nh, node.focus-edge-endpoint, node.focus-core, node.focus-hover';
-  const nodeHiFav =
-    'node.focus-nh[favorite = "yes"], node.focus-edge-endpoint[favorite = "yes"], node.focus-core[favorite = "yes"], node.focus-hover[favorite = "yes"]';
-  const edgeHi =
-    'edge.focus-e, edge.focus-edge-hover, edge.focus-edge-selected';
-  const edgeHiVpSrc =
-    'edge.focus-e.edge-lbl-vp-src, edge.focus-edge-hover.edge-lbl-vp-src, edge.focus-edge-selected.edge-lbl-vp-src';
-  const edgeHiVpTgt =
-    'edge.focus-e.edge-lbl-vp-tgt, edge.focus-edge-hover.edge-lbl-vp-tgt, edge.focus-edge-selected.edge-lbl-vp-tgt';
+  const edgeRel = 'edge.focus-e';
+  const edgeSel = 'edge.focus-edge-hover, edge.focus-edge-selected';
+  const edgeRelVpSrc = 'edge.focus-e.edge-lbl-vp-src';
+  const edgeSelVpSrc =
+    'edge.focus-edge-hover.edge-lbl-vp-src, edge.focus-edge-selected.edge-lbl-vp-src';
+  const edgeRelVpTgt = 'edge.focus-e.edge-lbl-vp-tgt';
+  const edgeSelVpTgt =
+    'edge.focus-edge-hover.edge-lbl-vp-tgt, edge.focus-edge-selected.edge-lbl-vp-tgt';
 
-  // Cytoscape 类型对 padding/font-size 字符串/数字要求不一致，这里用宽断言。
   (cy.style() as any)
     .selector(nodeHi)
     .style({
-      'font-size': snum(z.nf),
-      'text-background-padding': spx(z.pad),
-      'text-border-width': snum(z.txtBorder),
-      'text-margin-y': snum(z.marginY)
+      'text-opacity': 0,
+      'text-background-opacity': 0,
+      'text-border-width': 0
     } as Record<string, string | number>)
-    .selector(nodeHiFav)
+    .selector(edgeRel)
     .style({
-      'font-size': snum(z.favNf),
-      'text-background-padding': spx(z.padFav),
-      'text-border-width': snum(z.txtBorderHiFav),
-      'text-margin-y': snum(z.marginYFav)
+      'font-size': snum(hiFontRel),
+      'text-outline-width': snum(relM.outline),
+      'text-margin-y': snum(-relM.marginY)
     } as Record<string, string | number>)
-    .selector('node.focus-core')
+    .selector(edgeSel)
     .style({
-      'text-margin-y': snum(z.marginYCore)
+      'font-size': snum(hiFontSel),
+      'text-outline-width': snum(selM.outline),
+      'text-margin-y': snum(-selM.marginY)
     } as Record<string, string | number>)
-    .selector('node.focus-core[favorite = "yes"]')
+    .selector(edgeRelVpSrc)
     .style({
-      'text-margin-y': snum(z.marginYFavCore)
-    } as Record<string, string | number>)
-    .selector(edgeHi)
-    .style({
-      'font-size': snum(z.edgeFont),
-      'text-outline-width': snum(z.edgeOutlineHighlight),
-      'text-margin-y': snum(-z.edgeMarginY)
-    } as Record<string, string | number>)
-    .selector(edgeHiVpSrc)
-    .style({
-      'font-size': snum(z.edgeFont),
-      'text-outline-width': snum(z.edgeOutlineHighlight),
+      'font-size': snum(hiFontRel),
+      'text-outline-width': snum(relM.outline),
       'source-text-offset': snum(z.vpEdgeOff),
-      'source-text-margin-y': snum(-z.edgeMarginY)
+      'source-text-margin-y': snum(-relM.marginY)
     } as Record<string, string | number>)
-    .selector(edgeHiVpTgt)
+    .selector(edgeSelVpSrc)
     .style({
-      'font-size': snum(z.edgeFont),
-      'text-outline-width': snum(z.edgeOutlineHighlight),
+      'font-size': snum(hiFontSel),
+      'text-outline-width': snum(selM.outline),
+      'source-text-offset': snum(z.vpEdgeOff),
+      'source-text-margin-y': snum(-selM.marginY)
+    } as Record<string, string | number>)
+    .selector(edgeRelVpTgt)
+    .style({
+      'font-size': snum(hiFontRel),
+      'text-outline-width': snum(relM.outline),
       'target-text-offset': snum(z.vpEdgeOff),
-      'target-text-margin-y': snum(-z.edgeMarginY)
+      'target-text-margin-y': snum(-relM.marginY)
+    } as Record<string, string | number>)
+    .selector(edgeSelVpTgt)
+    .style({
+      'font-size': snum(hiFontSel),
+      'text-outline-width': snum(selM.outline),
+      'target-text-offset': snum(z.vpEdgeOff),
+      'target-text-margin-y': snum(-selM.marginY)
     } as Record<string, string | number>)
     .update();
 }
@@ -1244,20 +1244,69 @@ export interface GraphExportPayload {
   stylesheet: Stylesheet;
   /** 独立页环形/标签网格布局与图层权重一致 */
   graphLayers?: import('../../types').GraphLayerState;
-  /** 独立页圆环/时间轴的分组标准：标签或帧（frame） */
+  /** 独立页圆环/时间轴的分组标准：标签或簇（frame） */
   graphLayerGroupStandard?: 'tag' | 'frame';
-  /** 独立页时间线纵轴与图层权重的参考强度（0～1） */
+  /** 独立页时间线纵轴按 Frame 聚类强度（0～1；默认 0.8） */
   graphTimeAxisWeightBias?: number;
   /** 独立页悬停预览卡片（Markdown / 图片） */
   notePreviews?: Record<string, GraphNotePreview>;
+  /** UI 玻璃（高亮 chrome label） */
+  chrome?: GraphStylesheetChrome;
+  /** 关系链高亮深度（无 UI，仅 bake） */
+  chainLength?: number;
+  /** 节点尺寸（chrome label 间距） */
+  nodeSize?: number;
+  /** 空闲节点标签字号 */
+  labelFontPx?: number;
+  /** 关联 From/To 筛选用连线副本 */
+  connections?: Array<{
+    id: string;
+    fromNoteId: string;
+    toNoteId: string;
+    label?: string;
+    arrow?: Connection['arrow'];
+    fromArrow?: Connection['fromArrow'];
+    toArrow?: Connection['toArrow'];
+  }>;
 }
 
-export function buildGraphExportPayload(project: Project, themeColor: string, cy: Core): GraphExportPayload {
+export type BuildGraphExportPayloadOpts = {
+  chromeOpacity?: number;
+  chromeBlurPx?: number;
+  chainLength?: number;
+};
+
+export function buildGraphExportPayload(
+  project: Project,
+  themeColor: string,
+  cy: Core,
+  opts?: BuildGraphExportPayloadOpts
+): GraphExportPayload {
   const standard = project.graphLayerStandard ?? 'tag';
   const activeGraphLayers =
     standard === 'frame'
       ? mergeGraphLayerState(project.notes || [], project.graphFrameLayers ?? null, 'frame')
       : mergeGraphLayerState(project.notes || [], project.graphLayers ?? null, 'tag');
+
+  const nodeSize = project.graphNodeSize ?? DEFAULT_GRAPH_STYLESHEET_SIZING.nodeSize;
+  const chrome: GraphStylesheetChrome = {
+    opacity: opts?.chromeOpacity ?? DEFAULT_MAP_UI_CHROME_OPACITY,
+    blurPx: opts?.chromeBlurPx ?? DEFAULT_MAP_UI_CHROME_BLUR_PX
+  };
+  const chainLength = Math.max(
+    1,
+    Math.min(3, Math.round(opts?.chainLength ?? 1))
+  );
+
+  const connections = (project.connections || []).map((c) => ({
+    id: c.id,
+    fromNoteId: c.fromNoteId,
+    toNoteId: c.toNoteId,
+    label: c.label,
+    arrow: c.arrow,
+    fromArrow: c.fromArrow,
+    toArrow: c.toArrow
+  }));
 
   return {
     version: 1,
@@ -1266,14 +1315,26 @@ export function buildGraphExportPayload(project: Project, themeColor: string, cy
     themeColor,
     exportedAt: Date.now(),
     elements: cy.json().elements,
-    stylesheet: getGraphStylesheet(themeColor, {
-      nodeSize: project.graphNodeSize,
-      labelFontPx: project.graphLabelFontPx,
-      edgeWeight: project.graphEdgeWeight
-    }),
+    stylesheet: getGraphStylesheet(
+      themeColor,
+      {
+        nodeSize,
+        labelFontPx: project.graphLabelFontPx,
+        edgeWeight: project.graphEdgeWeight,
+        edgeLabelFontPx: project.graphEdgeLabelFontPx
+      },
+      chrome,
+      { edgeCurve: project.graphEdgeCurve !== false }
+    ),
     graphLayers: activeGraphLayers,
     graphLayerGroupStandard: standard,
-    graphTimeAxisWeightBias: project.graphTimeAxisWeightBias,
-    notePreviews: buildNotePreviewsFromNotes(project.notes || [])
+    graphTimeAxisWeightBias:
+      project.graphTimeAxisWeightBias ?? DEFAULT_GRAPH_TIME_AXIS_WEIGHT_BIAS,
+    notePreviews: buildNotePreviewsFromNotes(project.notes || []),
+    chrome,
+    chainLength,
+    nodeSize,
+    labelFontPx: project.graphLabelFontPx ?? DEFAULT_GRAPH_STYLESHEET_SIZING.labelFontPx,
+    connections
   };
 }

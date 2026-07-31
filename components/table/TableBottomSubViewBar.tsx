@@ -17,7 +17,7 @@ export const TableBottomSubViewBar: React.FC<Props> = ({
   return (
     <div
       data-allow-context-menu
-      className={`fixed bottom-20 left-1/2 -translate-x-1/2 z-[45] max-w-[min(100vw-1rem,28rem)] p-1.5 rounded-2xl shadow-xl border flex flex-wrap justify-center gap-1 pointer-events-auto ${
+      className={`fixed bottom-20 ui-workspace-center-x -translate-x-1/2 z-[45] max-w-[min(100vw-1rem,28rem)] p-1.5 rounded-2xl shadow-xl border flex flex-wrap justify-center gap-1 pointer-events-auto ${
         panelChromeStyle ? 'border-gray-200/80 ring-1 ring-black/[0.04]' : 'border-white/50 map-chrome-surface-fallback'
       }`}
       style={panelChromeStyle}

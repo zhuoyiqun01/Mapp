@@ -4,12 +4,13 @@ import { Core, EdgeSingular, NodeSingular } from 'cytoscape';
 import { NotePreviewCard } from './map/overlays/NotePreviewCard';
 import { NoteEditor } from './NoteEditor';
 import { SettingsPanel } from './SettingsPanel';
-import type { Connection, GraphLayerState, Note, Project } from '../types';
+import type { Connection, Frame, GraphLayerState, Note, Project } from '../types';
 import { DEFAULT_THEME_COLOR } from '../constants';
 import {
   buildGraphElements,
   buildGraphExportPayload,
   DEFAULT_GRAPH_STYLESHEET_SIZING,
+  DEFAULT_GRAPH_TIME_AXIS_WEIGHT_BIAS,
   getGraphStylesheet,
   graphNodeStructureKey,
   applyGraphHighlightLabelScreenSize
@@ -18,16 +19,18 @@ import { buildStandaloneGraphHtml, downloadTextFile } from '../utils/graph/graph
 import { downloadMappVizJson } from '../utils/export/mappVizJson';
 import { attachBoardlikeWheelZoom, createAppGraphCy } from '../utils/graph/graphRuntime';
 import {
-  applyGraphCircleLayout,
   applyGraphLayout,
   applyGraphLayoutMode,
-  applyGraphTagGridLayout,
   applyGraphTimeLayout,
+  coerceGraphLayoutMode,
   DEFAULT_GRAPH_LAYOUT_MODE,
   type GraphLayoutMode,
   type GraphTimeLayoutOptions,
   applyGraphHoverHighlight,
   applyGraphNeighborHighlight,
+  collectRelatedEdgeLabelEntries,
+  flattenRelatedEdgeLabelGroups,
+  type RelatedEdgeLabelColumn,
   attachGraphResizeObserver,
   downloadGraphPayloadJson,
   mergeGraphLayerState,
@@ -36,15 +39,15 @@ import {
   updateGraphStylesheet,
   animateGraphCenterOnNode,
   buildGraphCoseLayoutOptions,
-  applyGraphLayerNodeVisibility,
-  applyGraphFrameClusterMembersLayout,
-  applyGraphFrameClusterPeekHighlight,
-  type GraphLayerGroupStandard
+  applyGraphDualLayerNodeVisibility,
+  applyGraphNodeStackZIndex,
+  syncGraphEdgeCurveDistances
 } from '../utils/graph/graphRuntimeCore';
-import { mapChromeHaloFillAndBorder } from '../utils/map/mapChromeStyle';
 import { getGraphLayoutCache, setGraphLayoutCache } from '../utils/persistence/storage';
 import { GraphConnectionPanel, connectionToPanelDraft, type ConnectionDraft } from './graph/GraphConnectionPanel';
-import { EditInspectorPanel, type InspectorGroupContext } from './map/overlays/MapEditInspectorPanel';
+import { GraphHighlightChromeLabels } from './graph/GraphHighlightChromeLabels';
+import { GraphRelatedHighlightPanel } from './graph/GraphRelatedHighlightPanel';
+import { EditInspectorPanel } from './map/overlays/MapEditInspectorPanel';
 import { GraphTopLeftToolbar } from './graph/GraphTopLeftToolbar';
 import { GraphTopCenterConnectionButton } from './graph/GraphTopCenterConnectionButton';
 import { GraphTopRightToolbar } from './graph/GraphTopRightToolbar';
@@ -64,6 +67,9 @@ interface GraphViewProps {
   onUpdateConnections?: (connections: Connection[]) => void;
   onSwitchToBoardView?: (coords?: { x: number; y: number }) => void;
   onSwitchToMapView?: (coords?: { lat: number; lng: number; zoom?: number }) => void;
+  /** Table/其它视图「定位到图谱」：切换进来后聚焦该节点 */
+  navigateToGraphNoteId?: string | null;
+  onClearGraphNavigation?: () => void;
   panelChromeStyle?: React.CSSProperties;
   chromeHoverBackground?: string;
   onThemeColorChange?: (color: string) => void;
@@ -90,6 +96,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
   onUpdateConnections,
   onSwitchToBoardView,
   onSwitchToMapView,
+  navigateToGraphNoteId,
+  onClearGraphNavigation,
   panelChromeStyle,
   chromeHoverBackground,
   onThemeColorChange,
@@ -106,10 +114,18 @@ export const GraphView: React.FC<GraphViewProps> = ({
   const ch = panelChromeStyle;
   const chHover = chromeHoverBackground;
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
-  const [showLayerPanel, setShowLayerPanel] = useState(false);
+  const settingsButtonRef = useRef<HTMLButtonElement>(null);
+  const [showTagLayerPanel, setShowTagLayerPanel] = useState(false);
+  const [showFrameLayerPanel, setShowFrameLayerPanel] = useState(false);
+  const graphTopLeftChromeRef = useRef<HTMLDivElement>(null);
+  /** 详情 / 关联面板 top：避开左上角按钮与已展开面板 */
+  const [previewOffsetTopPx, setPreviewOffsetTopPx] = useState(64);
   const isGraphToolbarEditMode = workspaceEditMode;
   const containerRef = useRef<HTMLDivElement>(null);
+  const graphStageRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
+  /** cy 实例重建后通知 HTML label 层重新绑定事件 */
+  const [graphCyEpoch, setGraphCyEpoch] = useState(0);
   const unbindRef = useRef<(() => void) | null>(null);
   const noteByIdRef = useRef<Map<string, Note>>(new Map());
   const connectionsRef = useRef<Connection[]>([]);
@@ -118,6 +134,14 @@ export const GraphView: React.FC<GraphViewProps> = ({
   const [chainLength, setChainLength] = useState<number>(1);
   const chainLengthRef = useRef<number>(1);
   chainLengthRef.current = chainLength;
+  /** 关联高亮：按边标签临时筛选（默认全选） */
+  const [relatedHighlightLabelKeys, setRelatedHighlightLabelKeys] = useState<Set<string>>(
+    () => new Set()
+  );
+  const relatedHighlightLabelKeysRef = useRef(relatedHighlightLabelKeys);
+  relatedHighlightLabelKeysRef.current = relatedHighlightLabelKeys;
+  const prevRelatedLabelAvailRef = useRef<Set<string>>(new Set());
+  const relatedFilterFocusRef = useRef<string | null>(null);
   const mapUiChromeRef = useRef({ opacity: mapUiChromeOpacity, blurPx: mapUiChromeBlurPx });
   mapUiChromeRef.current = { opacity: mapUiChromeOpacity, blurPx: mapUiChromeBlurPx };
   const [previewImageIndex, setPreviewImageIndex] = useState(0);
@@ -154,20 +178,11 @@ export const GraphView: React.FC<GraphViewProps> = ({
       const c = getGraphLayoutCache(projectId);
       if (c) return c;
     }
-    return project.graphDefaultLayoutMode ?? DEFAULT_GRAPH_LAYOUT_MODE;
+    return coerceGraphLayoutMode(project.graphDefaultLayoutMode);
   });
-
-  /** frameCluster：点击簇标题「临时只看」选中的帧 id（空串表示「无帧」簇）；逻辑与看板 frame 标题过滤一致 */
-  const [frameClusterPeekFrameIds, setFrameClusterPeekFrameIds] = useState<Set<string>>(() => new Set());
-  const frameClusterPeekKey = useMemo(
-    () => Array.from(frameClusterPeekFrameIds).sort().join('\u0001'),
-    [frameClusterPeekFrameIds]
-  );
 
   const activeGraphLayoutRef = useRef(activeGraphLayout);
   activeGraphLayoutRef.current = activeGraphLayout;
-  const frameClusterPeekFrameIdsRef = useRef(frameClusterPeekFrameIds);
-  frameClusterPeekFrameIdsRef.current = frameClusterPeekFrameIds;
 
   /** cytoscape 回调闭包不随 render 更新，用 ref 读连线面板 + 点选模式 */
   const graphUiRef = useRef({
@@ -195,36 +210,27 @@ export const GraphView: React.FC<GraphViewProps> = ({
     const nodeSize = project.graphNodeSize ?? DEFAULT_GRAPH_STYLESHEET_SIZING.nodeSize;
     const labelFontPx = project.graphLabelFontPx ?? DEFAULT_GRAPH_STYLESHEET_SIZING.labelFontPx;
     const edgeWeight = project.graphEdgeWeight ?? DEFAULT_GRAPH_STYLESHEET_SIZING.edgeWeight;
+    const edgeLabelFontPx =
+      project.graphEdgeLabelFontPx ?? DEFAULT_GRAPH_STYLESHEET_SIZING.edgeLabelFontPx;
     return {
       nodeSize: Math.min(36, Math.max(1, nodeSize)),
       labelFontPx: Math.min(16, Math.max(4, labelFontPx)),
-      edgeWeight: Math.min(4, Math.max(0.1, Math.round(edgeWeight * 10) / 10))
+      edgeWeight: Math.min(4, Math.max(0.1, Math.round(edgeWeight * 10) / 10)),
+      edgeLabelFontPx: Math.min(16, Math.max(3, Math.round(edgeLabelFontPx)))
     };
-  }, [project.graphNodeSize, project.graphLabelFontPx, project.graphEdgeWeight]);
+  }, [
+    project.graphNodeSize,
+    project.graphLabelFontPx,
+    project.graphEdgeWeight,
+    project.graphEdgeLabelFontPx
+  ]);
   const graphStylesheetSizingRef = useRef(graphStylesheetSizing);
   graphStylesheetSizingRef.current = graphStylesheetSizing;
 
-  const handleQuickGraphStyleChange = useCallback(
-    (patch: { nodeSize?: number; labelSize?: number; edgeWeight?: number }) => {
-      if (!onUpdateProject || !projectId) return;
-      const nextPatch: Partial<Project> = {};
-      if (patch.nodeSize != null) {
-        nextPatch.graphNodeSize = Math.round(Math.min(36, Math.max(1, patch.nodeSize)));
-      }
-      if (patch.labelSize != null) {
-        nextPatch.graphLabelFontPx = Math.round(Math.min(16, Math.max(4, patch.labelSize)));
-      }
-      if (patch.edgeWeight != null) {
-        nextPatch.graphEdgeWeight = Math.min(2, Math.max(0.1, Math.round(patch.edgeWeight * 10) / 10));
-      }
-      if (Object.keys(nextPatch).length > 0) {
-        void onUpdateProject(projectId, nextPatch);
-      }
-    },
-    [onUpdateProject, projectId]
-  );
-
-  const graphLayerGroupStandard = (project.graphLayerStandard ?? 'tag') as GraphLayerGroupStandard;
+  /** 未设置时默认开启 bezier 曲线连线 */
+  const graphEdgeCurve = project.graphEdgeCurve !== false;
+  const graphEdgeCurveRef = useRef(graphEdgeCurve);
+  graphEdgeCurveRef.current = graphEdgeCurve;
 
   const mergedTagGraphLayers = useMemo(
     () => mergeGraphLayerState(notes, project.graphLayers ?? null, 'tag'),
@@ -236,67 +242,115 @@ export const GraphView: React.FC<GraphViewProps> = ({
     [notes, project.graphFrameLayers]
   );
 
-  /** 时间轴/环形视图：按当前设置选择对应分组面板 */
-  const mergedGraphLayers = graphLayerGroupStandard === 'frame' ? mergedFrameGraphLayers : mergedTagGraphLayers;
+  const mergedTagGraphLayersRef = useRef(mergedTagGraphLayers);
+  mergedTagGraphLayersRef.current = mergedTagGraphLayers;
+  const mergedFrameGraphLayersRef = useRef(mergedFrameGraphLayers);
+  mergedFrameGraphLayersRef.current = mergedFrameGraphLayers;
+
+  const syncDualLayerVisibility = useCallback((cy: Core) => {
+    const tag = mergedTagGraphLayersRef.current;
+    const frame = mergedFrameGraphLayersRef.current;
+    applyGraphDualLayerNodeVisibility(
+      cy,
+      tag.hidden,
+      frame.hidden,
+      tag.tagVisibilityLogic ?? 'or'
+    );
+  }, []);
+
+  /** 时间线布局固定使用簇图层 */
+  const mergedGraphLayers = mergedFrameGraphLayers;
 
   const timeLayoutOpts = useMemo(
     (): GraphTimeLayoutOptions => ({
-      weightBias: project.graphTimeAxisWeightBias ?? 0
+      weightBias: project.graphTimeAxisWeightBias ?? DEFAULT_GRAPH_TIME_AXIS_WEIGHT_BIAS
     }),
     [project.graphTimeAxisWeightBias]
   );
 
-  /** 节点颜色图例：基于「节点实际颜色来源（首个 tag.color / note.color / themeColor）」 */
+  /** 节点颜色图例：按 Frame 颜色（与图谱节点着色一致） */
   const nodeColorLegendItems = useMemo(() => {
-    const byTagLabel = new Map<string, Set<string>>();
+    const frames = project.frames ?? [];
+    const framesById = new Map(frames.map((f) => [String(f.id).trim(), f]));
+    const usedFrameIds = new Set<string>();
+    let hasUnframed = false;
     for (const note of notes) {
-      const t0 = note.tags?.[0];
-      if (!t0) continue;
-      const label = String(t0.label ?? '').trim();
-      if (!label) continue;
-      const c = (t0.color ?? note.color ?? themeColor).toString().trim();
-      if (!c) continue;
-      if (!byTagLabel.has(label)) byTagLabel.set(label, new Set<string>());
-      byTagLabel.get(label)!.add(c);
+      const fid = String(note.groupIds?.[0] ?? note.groupId ?? '').trim();
+      if (fid && framesById.has(fid)) usedFrameIds.add(fid);
+      else hasUnframed = true;
     }
 
-    const keysInOrder = mergedTagGraphLayers.order ?? [];
+    const keysInOrder = mergedFrameGraphLayers.order ?? [];
     const seen = new Set<string>();
     const ordered: string[] = [];
     for (const k of keysInOrder) {
       const key = String(k).trim();
-      if (byTagLabel.has(key) && !seen.has(key)) {
+      if (!key) continue;
+      if (usedFrameIds.has(key) && !seen.has(key)) {
         ordered.push(key);
         seen.add(key);
       }
     }
-    const rest = [...byTagLabel.keys()]
+    const rest = [...usedFrameIds]
       .filter((k) => !seen.has(k))
-      .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
-    const keys = [...ordered, ...rest];
+      .sort((a, b) => {
+        const ta = framesById.get(a)?.title ?? a;
+        const tb = framesById.get(b)?.title ?? b;
+        return ta.localeCompare(tb, 'zh-Hans-CN');
+      });
 
-    return keys.map((label) => ({
-      label,
-      colors: [...(byTagLabel.get(label) ?? [])]
-    }));
-  }, [notes, themeColor, mergedTagGraphLayers.order]);
+    const items = [...ordered, ...rest].map((id) => {
+      const f = framesById.get(id);
+      const color = (f?.color ?? themeColor).toString().trim() || themeColor;
+      return {
+        key: id,
+        label: f?.title?.trim() || id,
+        colors: [color]
+      };
+    });
 
-  const handleGraphLayersChange = useCallback(
+    if (hasUnframed) {
+      items.push({
+        key: '__no_frame__',
+        label: '无簇',
+        colors: [themeColor]
+      });
+    }
+
+    return items;
+  }, [notes, themeColor, project.frames, mergedFrameGraphLayers.order]);
+
+  const legendLabelFontPx = graphStylesheetSizing.labelFontPx;
+
+  const handleTagLayersChange = useCallback(
     (next: GraphLayerState) => {
       if (!onUpdateProject || !projectId) return;
-      if (graphLayerGroupStandard === 'frame') {
-        void onUpdateProject(projectId, { graphFrameLayers: next });
-      } else {
-        void onUpdateProject(projectId, { graphLayers: next });
-      }
+      void onUpdateProject(projectId, { graphLayers: next });
     },
-    [onUpdateProject, projectId, graphLayerGroupStandard]
+    [onUpdateProject, projectId]
   );
 
-  const handleGraphLayerGroupStandardChange = useCallback(
-    (standard: GraphLayerGroupStandard) => {
+  const handleFrameLayersChange = useCallback(
+    (next: GraphLayerState) => {
       if (!onUpdateProject || !projectId) return;
-      void onUpdateProject(projectId, { graphLayerStandard: standard });
+      void onUpdateProject(projectId, { graphFrameLayers: next });
+    },
+    [onUpdateProject, projectId]
+  );
+
+  const handleUpdateFrame = useCallback(
+    (frame: Frame) => {
+      if (!onUpdateProject || !projectId) return;
+      const frames = (project.frames ?? []).map((f) => (f.id === frame.id ? frame : f));
+      void onUpdateProject(projectId, { frames });
+    },
+    [onUpdateProject, projectId, project.frames]
+  );
+
+  const handleUpdateFrames = useCallback(
+    (frames: Frame[]) => {
+      if (!onUpdateProject || !projectId) return;
+      void onUpdateProject(projectId, { frames });
     },
     [onUpdateProject, projectId]
   );
@@ -349,15 +403,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
     [mergedFrameGraphLayers.order]
   );
 
-  /** 与项目 `graphCircleRefineOrderWithForce` 一致；未设置时默认开启 */
-  const circleRefineWithForce = project.graphCircleRefineOrderWithForce !== false;
-  /** 力传导布局下：节点拖动时是否实时触发重算（未设置默认开启） */
-  const forceDragRealtime = project.graphCoseDragRealtime !== false;
-  const circleRefineLayoutCommittedRef = useRef<boolean | null>(null);
   const dragForceLayoutRef = useRef<{ stop?: () => void } | null>(null);
   const dragForceNodeIdRef = useRef<string | null>(null);
-  const dragForceRafRef = useRef<number | null>(null);
-  const dragForceLastRunRef = useRef(0);
   const dragLastPosRef = useRef<{ x: number; y: number } | null>(null);
 
   const selectedConn = useMemo(
@@ -375,19 +422,13 @@ export const GraphView: React.FC<GraphViewProps> = ({
 
   useEffect(() => {
     if (!projectId) {
-      setActiveGraphLayout(project.graphDefaultLayoutMode ?? DEFAULT_GRAPH_LAYOUT_MODE);
+      setActiveGraphLayout(coerceGraphLayoutMode(project.graphDefaultLayoutMode));
       return;
     }
     setActiveGraphLayout(
-      getGraphLayoutCache(projectId) ?? project.graphDefaultLayoutMode ?? DEFAULT_GRAPH_LAYOUT_MODE
+      getGraphLayoutCache(projectId) ?? coerceGraphLayoutMode(project.graphDefaultLayoutMode)
     );
   }, [projectId, project.graphDefaultLayoutMode]);
-
-  useEffect(() => {
-    if (activeGraphLayout !== 'frameCluster') {
-      setFrameClusterPeekFrameIds(new Set());
-    }
-  }, [activeGraphLayout]);
 
   const nodeStructureKey = useMemo(() => graphNodeStructureKey(notes), [notes]);
   /** 单节点图层显隐 / 叠放序变化时需重跑显隐与 z-index（不依赖节点增删） */
@@ -428,9 +469,10 @@ export const GraphView: React.FC<GraphViewProps> = ({
     setNoteEditorSuppressedForGraphConnection(false);
     if (cy) {
       cy.elements().unselect();
-      applyGraphNeighborHighlight(cy, null, chainLengthRef.current);
+      applyGraphNeighborHighlight(cy, null, chainLengthRef.current, null);
+      syncDualLayerVisibility(cy);
     }
-  }, []);
+  }, [syncDualLayerVisibility]);
 
   /** 关闭节点编辑器但保留 hover（用于 NoteEditor 关闭/保存后） */
   const closeGraphNoteEditor = useCallback(() => {
@@ -439,31 +481,112 @@ export const GraphView: React.FC<GraphViewProps> = ({
     setNoteEditorSuppressedForGraphConnection(false);
     if (cy) {
       cy.elements().unselect();
-      applyGraphNeighborHighlight(cy, null, chainLengthRef.current);
+      applyGraphNeighborHighlight(cy, null, chainLengthRef.current, null);
+      syncDualLayerVisibility(cy);
     }
     onToggleEditor?.(false);
-  }, [onToggleEditor]);
+  }, [onToggleEditor, syncDualLayerVisibility]);
 
   const focusedNote = useMemo(
     () => (focusedNodeId ? noteById.get(focusedNodeId) ?? null : null),
     [focusedNodeId, noteById]
   );
 
-  const graphInspectorGroupContext = useMemo((): InspectorGroupContext | null => {
-    if (focusedNodeId) return null;
-    if (activeGraphLayout !== 'frameCluster' || frameClusterPeekFrameIds.size === 0) return null;
-    const peekIds = Array.from(frameClusterPeekFrameIds);
-    const members = notes.filter((n) => {
-      const g = n.groupIds?.length ? n.groupIds : n.groupId ? [n.groupId] : [];
-      return g.some((id) => frameClusterPeekFrameIds.has(id));
+  const relatedEdgeLabelGroups = useMemo(() => {
+    if (!focusedNodeId) return { from: [], to: [] };
+    return collectRelatedEdgeLabelEntries(focusedNodeId, connections, chainLength);
+  }, [focusedNodeId, connections, chainLength]);
+
+  const relatedEdgeLabelEntries = useMemo(
+    () => flattenRelatedEdgeLabelGroups(relatedEdgeLabelGroups),
+    [relatedEdgeLabelGroups]
+  );
+
+  const relatedHighlightKeysSig = useMemo(
+    () => Array.from(relatedHighlightLabelKeys).sort().join('\u0001'),
+    [relatedHighlightLabelKeys]
+  );
+
+  /** 切换选中点 / 关系链变化：重建标签；已有键保留勾选，新增键默认勾选 */
+  useEffect(() => {
+    if (!focusedNodeId) {
+      relatedFilterFocusRef.current = null;
+      prevRelatedLabelAvailRef.current = new Set();
+      setRelatedHighlightLabelKeys(new Set());
+      return;
+    }
+    const availableKeys = relatedEdgeLabelEntries.map((e) => e.key);
+    const focusChanged = relatedFilterFocusRef.current !== focusedNodeId;
+    relatedFilterFocusRef.current = focusedNodeId;
+    setRelatedHighlightLabelKeys((prev) => {
+      if (focusChanged) return new Set(availableKeys);
+      const prevAvail = prevRelatedLabelAvailRef.current;
+      const next = new Set<string>();
+      for (const key of availableKeys) {
+        if (!prevAvail.has(key) || prev.has(key)) next.add(key);
+      }
+      return next;
     });
-    return {
-      kind: 'framePeek',
-      title: `帧簇预览 · ${peekIds.length} 帧`,
-      members,
-      peekFrameIds: peekIds
-    };
-  }, [focusedNodeId, activeGraphLayout, frameClusterPeekFrameIds, notes, frameClusterPeekKey]);
+    prevRelatedLabelAvailRef.current = new Set(availableKeys);
+  }, [focusedNodeId, relatedEdgeLabelEntries]);
+
+  const allRelatedLabelKeysFor = useCallback((noteId: string) => {
+    const groups = collectRelatedEdgeLabelEntries(
+      noteId,
+      connectionsRef.current,
+      chainLengthRef.current
+    );
+    return new Set(flattenRelatedEdgeLabelGroups(groups).map((e) => e.key));
+  }, []);
+
+  const applyNeighborHighlightNow = useCallback(
+    (cy: Core, noteId: string | null, keys?: Set<string> | null) => {
+      if (!noteId) {
+        applyGraphNeighborHighlight(cy, null, chainLengthRef.current, null);
+        syncDualLayerVisibility(cy);
+        return;
+      }
+      const allow =
+        keys !== undefined ? keys : relatedHighlightLabelKeysRef.current;
+      applyGraphNeighborHighlight(cy, noteId, chainLengthRef.current, allow);
+      // 高亮后再同步显隐：临时显示被高亮的隐藏节点；取消勾选后恢复隐藏
+      syncDualLayerVisibility(cy);
+    },
+    [syncDualLayerVisibility]
+  );
+
+  const toggleRelatedLabelKey = useCallback((key: string) => {
+    setRelatedHighlightLabelKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const toggleRelatedColumn = useCallback(
+    (column: RelatedEdgeLabelColumn) => {
+      const entries = column === 'from' ? relatedEdgeLabelGroups.from : relatedEdgeLabelGroups.to;
+      const keys = entries.map((e) => e.key);
+      if (keys.length === 0) return;
+      setRelatedHighlightLabelKeys((prev) => {
+        const allOn = keys.every((k) => prev.has(k));
+        const next = new Set(prev);
+        if (allOn) keys.forEach((k) => next.delete(k));
+        else keys.forEach((k) => next.add(k));
+        return next;
+      });
+    },
+    [relatedEdgeLabelGroups]
+  );
+
+  const selectAllRelatedLabels = useCallback(() => {
+    setRelatedHighlightLabelKeys(new Set(relatedEdgeLabelEntries.map((e) => e.key)));
+  }, [relatedEdgeLabelEntries]);
+
+  const clearAllRelatedLabels = useCallback(() => {
+    setRelatedHighlightLabelKeys(new Set());
+  }, []);
 
   const previewNote = hoveredNote ?? focusedNote;
 
@@ -517,7 +640,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
     setNoteEditorSuppressedForGraphConnection(false);
     if (cy) {
       cy.elements().unselect();
-      applyGraphNeighborHighlight(cy, null, chainLengthRef.current);
+      applyGraphNeighborHighlight(cy, null, chainLengthRef.current, null);
+      syncDualLayerVisibility(cy);
     }
     // 已是「新建」时：只清起终点与图状态，不要整份 emptyConnectionDraft（否则等同再点一次「新建」）
     if (panelEditingKeyRef.current === 'new') {
@@ -530,7 +654,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
     }
     setPanelEditingKey('new');
     setConnectionDraft(emptyConnectionDraft());
-  }, [emptyConnectionDraft]);
+  }, [emptyConnectionDraft, syncDualLayerVisibility]);
 
   /** 清起点：切到新建并保留终点/标签/箭头设置 */
   const clearConnectionFromOnly = useCallback(() => {
@@ -543,11 +667,12 @@ export const GraphView: React.FC<GraphViewProps> = ({
     setNoteEditorSuppressedForGraphConnection(false);
     if (cy) {
       cy.elements().unselect();
-      applyGraphNeighborHighlight(cy, null, chainLengthRef.current);
+      applyGraphNeighborHighlight(cy, null, chainLengthRef.current, null);
+      syncDualLayerVisibility(cy);
     }
     setPanelEditingKey('new');
     setConnectionDraft((d) => ({ ...d, fromNoteId: '' }));
-  }, []);
+  }, [syncDualLayerVisibility]);
 
   /** 清终点：切到新建并保留起点/标签/箭头设置 */
   const clearConnectionToOnly = useCallback(() => {
@@ -560,11 +685,12 @@ export const GraphView: React.FC<GraphViewProps> = ({
     setNoteEditorSuppressedForGraphConnection(false);
     if (cy) {
       cy.elements().unselect();
-      applyGraphNeighborHighlight(cy, null, chainLengthRef.current);
+      applyGraphNeighborHighlight(cy, null, chainLengthRef.current, null);
+      syncDualLayerVisibility(cy);
     }
     setPanelEditingKey('new');
     setConnectionDraft((d) => ({ ...d, toNoteId: '' }));
-  }, []);
+  }, [syncDualLayerVisibility]);
 
   /** 关联面板内点击已选便签标题：图中定位并高亮，不打开便签编辑器 */
   const focusNoteOnGraphFromPanel = useCallback((noteId: string) => {
@@ -572,13 +698,22 @@ export const GraphView: React.FC<GraphViewProps> = ({
     setFocusedNodeId(noteId);
     setNoteEditorSuppressedForGraphConnection(true);
     if (cy) {
-      applyGraphNeighborHighlight(cy, noteId, chainLengthRef.current);
+      applyNeighborHighlightNow(cy, noteId, allRelatedLabelKeysFor(noteId));
       requestAnimationFrame(() => animateGraphCenterOnNode(cy, noteId));
     }
-  }, []);
+  }, [allRelatedLabelKeysFor, applyNeighborHighlightNow]);
 
   /** 属性面板「编辑便签」：解除图谱单选节点时的编辑器抑制，以便打开全文编辑器 */
   const openInspectorNoteEditor = useCallback((noteId: string) => {
+    setNoteEditorSuppressedForGraphConnection(false);
+    setFocusedNodeId(noteId);
+  }, []);
+
+  /** 浏览态详情卡：打开全文编辑器（不进入视图编辑模式） */
+  const openPreviewNoteEditor = useCallback((noteId: string) => {
+    setSelectedConnectionId(null);
+    setEdgeLabelDraft('');
+    setHoveredNote(null);
     setNoteEditorSuppressedForGraphConnection(false);
     setFocusedNodeId(noteId);
   }, []);
@@ -595,10 +730,10 @@ export const GraphView: React.FC<GraphViewProps> = ({
     setNoteEditorSuppressedForGraphConnection(true);
     setGraphPickNonce((n) => n + 1);
     if (cy) {
-      applyGraphNeighborHighlight(cy, noteId, chainLengthRef.current);
+      applyNeighborHighlightNow(cy, noteId, allRelatedLabelKeysFor(noteId));
       requestAnimationFrame(() => animateGraphCenterOnNode(cy, noteId));
     }
-  }, []);
+  }, [allRelatedLabelKeysFor, applyNeighborHighlightNow]);
 
   const handleInspectorNewConnection = useCallback(() => {
     if (connectionSaveResetTimerRef.current) {
@@ -719,32 +854,6 @@ export const GraphView: React.FC<GraphViewProps> = ({
         const n = evt.target as NodeSingular;
         const id = n.id();
 
-        if (activeGraphLayoutRef.current === 'frameCluster' && n.hasClass('frame-cluster-label')) {
-          if (graphNodeTapTimerRef.current) {
-            clearTimeout(graphNodeTapTimerRef.current);
-            graphNodeTapTimerRef.current = null;
-          }
-          const rawKey = n.data('clusterFrameKey');
-          const clusterKey = rawKey !== undefined && rawKey !== null ? String(rawKey) : '';
-          const oe = evt.originalEvent;
-          const shift = oe instanceof MouseEvent ? oe.shiftKey : false;
-          setFrameClusterPeekFrameIds((prev) => {
-            const next = new Set(prev);
-            if (shift) {
-              if (next.has(clusterKey)) next.delete(clusterKey);
-              else next.add(clusterKey);
-            } else if (next.size === 1 && next.has(clusterKey)) {
-              next.clear();
-            } else {
-              next.clear();
-              next.add(clusterKey);
-            }
-            return next;
-          });
-          cy.elements().unselect();
-          return;
-        }
-
         cy.elements().unselect();
         const ui = graphUiRef.current;
         if (ui.showConnectionPanel && ui.isGraphToolbarEditMode && ui.pickTarget) {
@@ -761,7 +870,21 @@ export const GraphView: React.FC<GraphViewProps> = ({
           setFocusedNodeId(id);
           setNoteEditorSuppressedForGraphConnection(true);
           setGraphPickNonce((n) => n + 1);
-          applyGraphNeighborHighlight(cy, id, chainLengthRef.current);
+          applyGraphNeighborHighlight(
+            cy,
+            id,
+            chainLengthRef.current,
+            new Set(
+              flattenRelatedEdgeLabelGroups(
+                collectRelatedEdgeLabelEntries(
+                  id,
+                  connectionsRef.current,
+                  chainLengthRef.current
+                )
+              ).map((e) => e.key)
+            )
+          );
+          syncDualLayerVisibility(cy);
           requestAnimationFrame(() => {
             animateGraphCenterOnNode(cy, id);
           });
@@ -799,7 +922,21 @@ export const GraphView: React.FC<GraphViewProps> = ({
         setEdgeLabelDraft('');
         setNoteEditorSuppressedForGraphConnection(false);
         setFocusedNodeId(id);
-        applyGraphNeighborHighlight(cy, id, chainLengthRef.current);
+        applyGraphNeighborHighlight(
+          cy,
+          id,
+          chainLengthRef.current,
+          new Set(
+            flattenRelatedEdgeLabelGroups(
+              collectRelatedEdgeLabelEntries(
+                id,
+                connectionsRef.current,
+                chainLengthRef.current
+              )
+            ).map((e) => e.key)
+          )
+        );
+        syncDualLayerVisibility(cy);
       };
 
       const onEdgeTap = (evt: cytoscape.EventObject) => {
@@ -814,7 +951,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
         setFocusedNodeId(null);
         setHoveredConnectionId(null);
         setNoteEditorSuppressedForGraphConnection(false);
-        applyGraphNeighborHighlight(cy, null, chainLengthRef.current);
+        applyGraphNeighborHighlight(cy, null, chainLengthRef.current, null);
+        syncDualLayerVisibility(cy);
         if (c) {
           setSelectedConnectionId(id);
           setEdgeLabelDraft(c.label || '');
@@ -832,9 +970,6 @@ export const GraphView: React.FC<GraphViewProps> = ({
 
       const onBgTap = (evt: cytoscape.EventObject) => {
         if (evt.target !== cy) return;
-        if (activeGraphLayoutRef.current === 'frameCluster' && frameClusterPeekFrameIdsRef.current.size > 0) {
-          setFrameClusterPeekFrameIds(new Set());
-        }
         cy.elements().unselect();
         clearSelection();
       };
@@ -904,7 +1039,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
         cy.removeListener('mouseout', 'edge', onEdgeOut);
       };
     },
-    [clearSelection, emptyConnectionDraft]
+    [clearSelection, emptyConnectionDraft, syncDualLayerVisibility]
   );
 
   useEffect(() => {
@@ -926,35 +1061,41 @@ export const GraphView: React.FC<GraphViewProps> = ({
         connections,
         themeColor,
         graphStylesheetSizing.edgeWeight,
-        mergedTagGraphLayers.weights
+        mergedTagGraphLayers.weights,
+        project.frames ?? [],
+        graphStylesheetSizing.nodeSize
       ),
-      style: getGraphStylesheet(themeColor, graphStylesheetSizing)
+      style: getGraphStylesheet(
+        themeColor,
+        graphStylesheetSizing,
+        {
+          opacity: mapUiChromeOpacity,
+          blurPx: mapUiChromeBlurPx
+        },
+        { edgeCurve: graphEdgeCurve }
+      )
     });
     const cached = projectId ? getGraphLayoutCache(projectId) : null;
-    let initialMode =
-      cached ?? project.graphDefaultLayoutMode ?? DEFAULT_GRAPH_LAYOUT_MODE;
-    const initGraphLayers = initialMode === 'frameCluster' ? mergedFrameGraphLayers : mergedGraphLayers;
-    const initGraphLayerGroupStandard =
-      initialMode === 'frameCluster' ? ('frame' as const) : graphLayerGroupStandard;
+    let initialMode = coerceGraphLayoutMode(
+      cached ?? project.graphDefaultLayoutMode ?? DEFAULT_GRAPH_LAYOUT_MODE
+    );
     applyGraphLayoutMode(cy, initialMode, {
       silentTimeFallback: true,
       timeLayout: timeLayoutOpts,
-      circleRefineWithForce,
-      graphLayers: initGraphLayers,
-      graphLayerGroupStandard: initGraphLayerGroupStandard,
-      tagGridGraphLayers: mergedTagGraphLayers,
-      frames: project.frames ?? [],
-      chromeSurface: { opacity: mapUiChromeOpacity, blurPx: mapUiChromeBlurPx }
+      graphLayers: mergedFrameGraphLayers,
+      graphLayerGroupStandard: 'frame'
     });
     if (initialMode === 'time') {
       const valid = cy.nodes().filter((n) => n.data('timeSort') != null);
       if (valid.length === 0) {
-        initialMode = 'tagGrid';
-        if (projectId) setGraphLayoutCache(projectId, 'tagGrid');
+        initialMode = 'cose';
+        applyGraphLayout(cy, 'fcose');
+        if (projectId) setGraphLayoutCache(projectId, 'cose');
       }
     }
     setActiveGraphLayout(initialMode);
     cyRef.current = cy;
+    setGraphCyEpoch((n) => n + 1);
     unbindRef.current = bindCyEvents(cy);
 
     const detachWheel = attachBoardlikeWheelZoom(cy);
@@ -965,18 +1106,34 @@ export const GraphView: React.FC<GraphViewProps> = ({
       labelSizeRaf = requestAnimationFrame(() => {
         labelSizeRaf = null;
         if (cy.destroyed()) return;
-        applyGraphHighlightLabelScreenSize(cy, graphStylesheetSizingRef.current);
+        applyGraphHighlightLabelScreenSize(cy, graphStylesheetSizingRef.current, mapUiChromeRef.current);
       });
     };
     cy.on('viewport', syncHighlightLabelSize);
-    applyGraphHighlightLabelScreenSize(cy, graphStylesheetSizingRef.current);
+    applyGraphHighlightLabelScreenSize(cy, graphStylesheetSizingRef.current, mapUiChromeRef.current);
+
+    let curveRaf: number | null = null;
+    const syncCurveFromLength = () => {
+      if (curveRaf != null) return;
+      curveRaf = requestAnimationFrame(() => {
+        curveRaf = null;
+        if (cy.destroyed()) return;
+        if (graphEdgeCurveRef.current) syncGraphEdgeCurveDistances(cy);
+      });
+    };
+    cy.on('position', syncCurveFromLength);
+    cy.on('layoutstop', syncCurveFromLength);
+    if (graphEdgeCurveRef.current) syncGraphEdgeCurveDistances(cy);
 
     const detachRo = attachGraphResizeObserver(cy, el);
     scheduleGraphResizeAndFit(cy);
 
     return () => {
       if (labelSizeRaf != null) cancelAnimationFrame(labelSizeRaf);
+      if (curveRaf != null) cancelAnimationFrame(curveRaf);
       cy.removeListener('viewport', syncHighlightLabelSize);
+      cy.removeListener('position', syncCurveFromLength);
+      cy.removeListener('layoutstop', syncCurveFromLength);
       detachWheel();
       detachRo();
       unbindRef.current?.();
@@ -997,7 +1154,9 @@ export const GraphView: React.FC<GraphViewProps> = ({
       connections,
       themeColor,
       graphStylesheetSizing.edgeWeight,
-      mergedTagGraphLayers.weights
+      mergedTagGraphLayers.weights,
+      project.frames ?? [],
+      graphStylesheetSizing.nodeSize
     );
     const desiredEdges = elements.filter((el) => {
       const d = (el as any).data as any;
@@ -1014,16 +1173,31 @@ export const GraphView: React.FC<GraphViewProps> = ({
       });
     });
 
-    updateGraphStylesheet(cy, getGraphStylesheet(themeColor, graphStylesheetSizing));
-    applyGraphHighlightLabelScreenSize(cy, graphStylesheetSizing);
-    const haloPaint = mapChromeHaloFillAndBorder(mapUiChromeOpacity, mapUiChromeBlurPx);
-    cy.batch(() => {
-      cy.nodes('.frame-cluster-halo').forEach((n) => {
-        n.data({ haloFill: haloPaint.fill, haloBorder: haloPaint.border });
-      });
+    updateGraphStylesheet(
+      cy,
+      getGraphStylesheet(
+        themeColor,
+        graphStylesheetSizing,
+        {
+          opacity: mapUiChromeOpacity,
+          blurPx: mapUiChromeBlurPx
+        },
+        { edgeCurve: graphEdgeCurve }
+      )
+    );
+    applyGraphHighlightLabelScreenSize(cy, graphStylesheetSizing, {
+      opacity: mapUiChromeOpacity,
+      blurPx: mapUiChromeBlurPx
     });
     patchGraphElementsData(cy, elements);
-    applyGraphNeighborHighlight(cy, focusedNodeId, chainLength);
+    if (graphEdgeCurve) syncGraphEdgeCurveDistances(cy);
+    applyGraphNeighborHighlight(
+      cy,
+      focusedNodeId,
+      chainLength,
+      focusedNodeId ? relatedHighlightLabelKeysRef.current : null
+    );
+    syncDualLayerVisibility(cy);
     applyGraphHoverHighlight(cy, hoveredNote?.id ?? null);
     requestAnimationFrame(() => {
       cy.resize();
@@ -1035,10 +1209,32 @@ export const GraphView: React.FC<GraphViewProps> = ({
     focusedNodeId,
     hoveredNote?.id,
     graphStylesheetSizing,
+    graphEdgeCurve,
     chainLength,
     mapUiChromeOpacity,
     mapUiChromeBlurPx,
-    tagGraphLayersWeightsKey
+    tagGraphLayersWeightsKey,
+    syncDualLayerVisibility
+  ]);
+
+  /** 边标签筛选变化时单独刷新高亮（避免整图数据重同步） */
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy || cy.destroyed?.()) return;
+    applyGraphNeighborHighlight(
+      cy,
+      focusedNodeId,
+      chainLength,
+      focusedNodeId ? relatedHighlightLabelKeys : null
+    );
+    syncDualLayerVisibility(cy);
+  }, [
+    focusedNodeId,
+    chainLength,
+    relatedHighlightKeysSig,
+    relatedHighlightLabelKeys,
+    graphCyEpoch,
+    syncDualLayerVisibility
   ]);
 
   // edge 被删除后：避免继续编辑/选中一个已不存在的 edge
@@ -1060,15 +1256,24 @@ export const GraphView: React.FC<GraphViewProps> = ({
     cy.batch(() => {
       cy.edges().removeClass('focus-edge-hover');
       cy.edges().removeClass('focus-edge-selected');
+      cy.nodes().removeClass('focus-edge-endpoint');
       if (hoveredConnectionId) {
         const e = cy.getElementById(hoveredConnectionId);
         if (!e.empty() && e.isEdge()) e.addClass('focus-edge-hover');
       }
       if (selectedConnectionId) {
         const e = cy.getElementById(selectedConnectionId);
-        if (!e.empty() && e.isEdge()) e.addClass('focus-edge-selected');
+        if (!e.empty() && e.isEdge()) {
+          e.addClass('focus-edge-selected');
+          e.connectedNodes().forEach((n) => {
+            if (n.isNode() && !n.hasClass('frame-cluster-label') && !n.hasClass('frame-cluster-halo')) {
+              n.addClass('focus-edge-endpoint');
+            }
+          });
+        }
       }
     });
+    applyGraphNodeStackZIndex(cy);
   }, [hoveredConnectionId, selectedConnectionId, edgeStructureKey]);
 
   /** 有“选中对象”时：把未高亮的点/边整体再 dim 50%（在各自基础透明度上 *0.5） */
@@ -1085,7 +1290,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
       const keep = cy.elements(keepSel);
       cy.elements().not(keep).addClass('graph-dim');
     });
-  }, [focusedNodeId, selectedConnectionId, hoveredConnectionId, hoveredNote?.id, edgeStructureKey, nodeStructureKey]);
+  }, [focusedNodeId, selectedConnectionId, hoveredConnectionId, hoveredNote?.id, edgeStructureKey, nodeStructureKey, relatedHighlightKeysSig]);
 
   /** 时间线布局下：图层面板权重或牵引强度变更时重跑时间线 preset */
   useEffect(() => {
@@ -1094,119 +1299,30 @@ export const GraphView: React.FC<GraphViewProps> = ({
     if (!cy) return;
     const valid = cy.nodes().filter((n) => n.data('timeSort') != null);
     if (valid.length === 0) return;
-    applyGraphTimeLayout(cy, () => {}, timeLayoutOpts, mergedGraphLayers, graphLayerGroupStandard);
-  }, [activeGraphLayout, timeLayoutOpts, graphLayersOrderKey, graphLayersHiddenKey, mergedGraphLayers]);
-
-  /** 圆环布局下：仅当用户切换「力传导重排」时重跑圆环（避免与初载布局重复） */
-  useEffect(() => {
-    if (activeGraphLayout !== 'circle') {
-      circleRefineLayoutCommittedRef.current = circleRefineWithForce;
-      return;
-    }
-    const cy = cyRef.current;
-    if (!cy) return;
-    if (circleRefineLayoutCommittedRef.current === null) {
-      circleRefineLayoutCommittedRef.current = circleRefineWithForce;
-      return;
-    }
-    if (circleRefineLayoutCommittedRef.current === circleRefineWithForce) return;
-    circleRefineLayoutCommittedRef.current = circleRefineWithForce;
-    applyGraphCircleLayout(cy, circleRefineWithForce, mergedGraphLayers, graphLayerGroupStandard);
-  }, [activeGraphLayout, circleRefineWithForce, mergedGraphLayers]);
+    applyGraphTimeLayout(cy, () => {}, timeLayoutOpts, mergedFrameGraphLayers, 'frame');
+  }, [activeGraphLayout, timeLayoutOpts, graphLayersOrderKey, graphLayersHiddenKey, mergedFrameGraphLayers]);
 
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy) return;
-    if (activeGraphLayout === 'time' || activeGraphLayout === 'circle') {
-      applyGraphLayerNodeVisibility(cy, mergedGraphLayers.hidden, graphLayerGroupStandard);
-      return;
-    }
-    if (activeGraphLayout === 'frameCluster') {
-      applyGraphLayerNodeVisibility(cy, mergedFrameGraphLayers.hidden, 'frame');
-      return;
-    }
-    applyGraphLayerNodeVisibility(cy, mergedTagGraphLayers.hidden, 'tag');
+    applyGraphDualLayerNodeVisibility(
+      cy,
+      mergedTagGraphLayers.hidden,
+      mergedFrameGraphLayers.hidden,
+      mergedTagGraphLayers.tagVisibilityLogic ?? 'or'
+    );
   }, [
     activeGraphLayout,
-    graphLayerGroupStandard,
-    graphLayersHiddenKey,
     mergedTagGraphLayers.hidden,
+    mergedTagGraphLayers.tagVisibilityLogic,
+    mergedFrameGraphLayers.hidden,
     tagGraphLayersHiddenKey,
     frameGraphLayersHiddenKey,
     nodeStructureKey,
-    notesLayerVisualKey
+    notesLayerVisualKey,
+    focusedNodeId,
+    relatedHighlightKeysSig
   ]);
-
-  useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    if (activeGraphLayout === 'tagGrid') {
-      applyGraphTagGridLayout(cy, mergedTagGraphLayers);
-    } else if (activeGraphLayout === 'circle') {
-      applyGraphCircleLayout(cy, circleRefineWithForce, mergedGraphLayers, graphLayerGroupStandard);
-    }
-  }, [mergedGraphLayers, mergedTagGraphLayers, activeGraphLayout, circleRefineWithForce, graphLayerGroupStandard]);
-
-  /** frameCluster 布局：当帧分层面板（排序/显隐/权重）变化时重算簇中心 + 簇内成员位置 */
-  useEffect(() => {
-    if (activeGraphLayout !== 'frameCluster') return;
-    const cy = cyRef.current;
-    if (!cy) return;
-    const chrome = mapUiChromeRef.current;
-    applyGraphFrameClusterMembersLayout(
-      cy,
-      mergedFrameGraphLayers,
-      project.frames ?? [],
-      mergedTagGraphLayers,
-      { opacity: chrome.opacity, blurPx: chrome.blurPx }
-    );
-  }, [
-    activeGraphLayout,
-    mergedFrameGraphLayers,
-    mergedTagGraphLayers,
-    project.frames,
-    frameGraphLayersHiddenKey,
-    frameGraphLayersOrderKey,
-    tagGraphLayersOrderKey,
-    tagGraphLayersWeightsKey,
-    tagGraphLayersHiddenKey
-  ]);
-
-  /** frameCluster 布局重算后簇标题节点会重建，需按当前「临时只看」状态重新挂类 */
-  useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    if (activeGraphLayout !== 'frameCluster') {
-      applyGraphFrameClusterPeekHighlight(cy, null);
-      return;
-    }
-    applyGraphFrameClusterPeekHighlight(
-      cy,
-      frameClusterPeekFrameIds.size > 0 ? frameClusterPeekFrameIds : null
-    );
-  }, [
-    activeGraphLayout,
-    frameClusterPeekKey,
-    mergedFrameGraphLayers,
-    mergedTagGraphLayers,
-    project.frames,
-    frameGraphLayersHiddenKey,
-    frameGraphLayersOrderKey,
-    tagGraphLayersOrderKey,
-    tagGraphLayersWeightsKey,
-    tagGraphLayersHiddenKey,
-    nodeStructureKey
-  ]);
-
-  useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    if (activeGraphLayout === 'frameCluster') return;
-    cy.batch(() => {
-      cy.nodes('.frame-cluster-label').remove();
-      cy.nodes('.frame-cluster-halo').remove();
-    });
-  }, [activeGraphLayout]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -1216,57 +1332,25 @@ export const GraphView: React.FC<GraphViewProps> = ({
     return () => el.removeEventListener('mouseleave', onLeave);
   }, []);
 
-  const applyLayout = useCallback(
-    (name: 'cose-bilkent' | 'circle') => {
-      const cy = cyRef.current;
-      if (!cy) return;
-      applyGraphLayout(cy, name, circleRefineWithForce, mergedGraphLayers, graphLayerGroupStandard);
-      const mode: GraphLayoutMode = name === 'circle' ? 'circle' : 'cose';
-      setActiveGraphLayout(mode);
-      persistGraphLayout(mode);
-    },
-    [persistGraphLayout, circleRefineWithForce, mergedGraphLayers, graphLayerGroupStandard]
-  );
+  const applyCoseLayout = useCallback(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    // applyGraphLayout 内会清簇装饰并以增量 fcose 从当前位置动画导向
+    applyGraphLayout(cy, 'fcose');
+    setActiveGraphLayout('cose');
+    persistGraphLayout('cose');
+  }, [persistGraphLayout]);
 
   const applyTimeLayout = useCallback(() => {
     const cy = cyRef.current;
     if (!cy) return;
-    applyGraphTimeLayout(cy, undefined, timeLayoutOpts, mergedGraphLayers, graphLayerGroupStandard);
+    applyGraphTimeLayout(cy, undefined, timeLayoutOpts, mergedFrameGraphLayers, 'frame');
     const valid = cy.nodes().filter((n) => n.data('timeSort') != null);
     if (valid.length > 0) {
       setActiveGraphLayout('time');
       persistGraphLayout('time');
     }
-  }, [persistGraphLayout, timeLayoutOpts, mergedGraphLayers, graphLayerGroupStandard]);
-
-  const applyTagGridLayout = useCallback(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    applyGraphTagGridLayout(cy, mergedTagGraphLayers);
-    setActiveGraphLayout('tagGrid');
-    persistGraphLayout('tagGrid');
-  }, [persistGraphLayout, mergedTagGraphLayers]);
-
-  const applyFrameClusterLayout = useCallback(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    applyGraphFrameClusterMembersLayout(
-      cy,
-      mergedFrameGraphLayers,
-      project.frames ?? [],
-      mergedTagGraphLayers,
-      { opacity: mapUiChromeOpacity, blurPx: mapUiChromeBlurPx }
-    );
-    setActiveGraphLayout('frameCluster');
-    persistGraphLayout('frameCluster');
-  }, [
-    persistGraphLayout,
-    mergedFrameGraphLayers,
-    mergedTagGraphLayers,
-    project.frames,
-    mapUiChromeOpacity,
-    mapUiChromeBlurPx
-  ]);
+  }, [persistGraphLayout, timeLayoutOpts, mergedFrameGraphLayers]);
 
   const saveEdgeLabel = useCallback(() => {
     if (!selectedConn || !onUpdateConnections) return;
@@ -1279,19 +1363,27 @@ export const GraphView: React.FC<GraphViewProps> = ({
   const exportStandaloneHtml = useCallback(() => {
     const cy = cyRef.current;
     if (!cy) return;
-    const payload = buildGraphExportPayload(project, themeColor, cy);
+    const payload = buildGraphExportPayload(project, themeColor, cy, {
+      chromeOpacity: mapUiChromeOpacity,
+      chromeBlurPx: mapUiChromeBlurPx,
+      chainLength
+    });
     const html = buildStandaloneGraphHtml(payload);
     const safe = (project.name || 'graph').replace(/[/\\\\?%*:|"<>]/g, '_');
     downloadTextFile(`${safe}-graph-demo.html`, html, 'text/html;charset=utf-8');
-  }, [project, themeColor]);
+  }, [project, themeColor, mapUiChromeOpacity, mapUiChromeBlurPx, chainLength]);
 
   const exportJson = useCallback(() => {
     const cy = cyRef.current;
     if (!cy) return;
-    const payload = buildGraphExportPayload(project, themeColor, cy);
+    const payload = buildGraphExportPayload(project, themeColor, cy, {
+      chromeOpacity: mapUiChromeOpacity,
+      chromeBlurPx: mapUiChromeBlurPx,
+      chainLength
+    });
     const safe = (project.name || 'graph').replace(/[/\\\\?%*:|"<>]/g, '_');
     downloadGraphPayloadJson(payload, safe);
-  }, [project, themeColor]);
+  }, [project, themeColor, mapUiChromeOpacity, mapUiChromeBlurPx, chainLength]);
 
   const exportMappViz = useCallback(() => {
     if (!(project.notes || []).length) {
@@ -1311,6 +1403,49 @@ export const GraphView: React.FC<GraphViewProps> = ({
   );
 
   useEffect(() => {
+    if (!isUIVisible) return;
+    let raf: number | null = null;
+    const GAP = 12;
+    const measure = () => {
+      raf = null;
+      let bottom = 0;
+      const host = graphTopLeftChromeRef.current;
+      if (host) {
+        bottom = Math.max(bottom, host.getBoundingClientRect().bottom);
+      }
+      document.querySelectorAll('[data-graph-top-left-panel]').forEach((node) => {
+        if (!(node instanceof HTMLElement)) return;
+        const r = node.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) return;
+        bottom = Math.max(bottom, r.bottom);
+      });
+      // 无工具栏时仍至少留出「按钮行」下方空隙的近似值
+      const minTop = window.matchMedia('(min-width: 640px)').matches ? 16 + 48 + GAP : 8 + 40 + GAP;
+      setPreviewOffsetTopPx(Math.max(minTop, Math.round(bottom + GAP)));
+    };
+    const schedule = () => {
+      if (raf != null) return;
+      raf = requestAnimationFrame(measure);
+    };
+    schedule();
+    const t = window.setTimeout(schedule, 50);
+    const ro =
+      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(schedule) : null;
+    const host = graphTopLeftChromeRef.current;
+    if (host && ro) ro.observe(host);
+    document.querySelectorAll('[data-graph-top-left-panel]').forEach((node) => {
+      if (node instanceof HTMLElement && ro) ro.observe(node);
+    });
+    window.addEventListener('resize', schedule);
+    return () => {
+      if (raf != null) cancelAnimationFrame(raf);
+      window.clearTimeout(t);
+      ro?.disconnect();
+      window.removeEventListener('resize', schedule);
+    };
+  }, [isUIVisible, showTagLayerPanel, showFrameLayerPanel, showSettingsPanel, isGraphToolbarEditMode]);
+
+  useEffect(() => {
     if (!isUIVisible) onWorkspaceEditModeChange(false);
   }, [isUIVisible, onWorkspaceEditModeChange]);
 
@@ -1318,10 +1453,16 @@ export const GraphView: React.FC<GraphViewProps> = ({
     setPreviewImageIndex(0);
   }, [previewNote?.id]);
 
-  /** 仅编辑模式下双击节点打开 NoteEditor；单击仅选中/预览 */
+  /** 从 Table 等外部「定位到图谱」 */
+  useEffect(() => {
+    if (!navigateToGraphNoteId) return;
+    focusNoteOnGraphFromPanel(navigateToGraphNoteId);
+    onClearGraphNavigation?.();
+  }, [navigateToGraphNoteId, focusNoteOnGraphFromPanel, onClearGraphNavigation]);
+
+  /** 打开 NoteEditor 与视图编辑模式无关；单击选中会抑制，双击 / 详情铅笔 / 属性面板解除抑制 */
   const graphEditorOpen =
     isUIVisible &&
-    isGraphToolbarEditMode &&
     !!focusedNodeId &&
     !selectedConn &&
     !noteEditorSuppressedForGraphConnection;
@@ -1329,13 +1470,13 @@ export const GraphView: React.FC<GraphViewProps> = ({
     onToggleEditor?.(graphEditorOpen);
   }, [graphEditorOpen, onToggleEditor]);
 
-  /** 标签网格（Tab）与非编辑模式：禁止拖节点；其余布局在编辑模式下可拖动以微调位置 */
+  /** 标签网格（Tab）禁止拖节点；其余布局在浏览/编辑模式下均可拖动微调位置 */
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy) return;
-    const allowNodeDrag = isGraphToolbarEditMode && activeGraphLayout !== 'tagGrid';
+    const allowNodeDrag = true;
     cy.autoungrabify(!allowNodeDrag);
-  }, [isGraphToolbarEditMode, activeGraphLayout]);
+  }, [activeGraphLayout, graphCyEpoch]);
 
   useEffect(() => {
     const cy = cyRef.current;
@@ -1356,11 +1497,12 @@ export const GraphView: React.FC<GraphViewProps> = ({
       const numIter = opts?.numIter ?? 160;
       try {
         dragForceLayoutRef.current = cy.layout(buildGraphCoseLayoutOptions(cy, {
-          name: 'cose-bilkent',
+          name: 'fcose',
           randomize: false,
           animate,
           fit: false,
-          quality: 'draft',
+          // fCoSE：incremental + randomize:false 需 quality:proof
+          quality: 'proof',
           numIter,
           nodeDimensionsIncludeLabels: true
         }, {
@@ -1369,12 +1511,12 @@ export const GraphView: React.FC<GraphViewProps> = ({
         }) as any);
       } catch {
         dragForceLayoutRef.current = cy.layout({
-          name: 'cose-bilkent',
+          name: 'fcose',
           randomize: false,
           animate,
           fit: false,
           padding: 40,
-          quality: 'draft',
+          quality: 'proof',
           numIter,
           nodeDimensionsIncludeLabels: true
         } as any);
@@ -1385,7 +1527,6 @@ export const GraphView: React.FC<GraphViewProps> = ({
         // 防御：cose 在少数数据状态下可能抛 RangeError，降级为不触发本次重排。
         stopRunningDragForce();
       }
-      dragForceLastRunRef.current = performance.now();
     };
 
     const pullNeighborNodesOnDrag = (center: NodeSingular, dx: number, dy: number) => {
@@ -1455,10 +1596,6 @@ export const GraphView: React.FC<GraphViewProps> = ({
     if (!(isGraphToolbarEditMode && activeGraphLayout === 'cose')) {
       stopRunningDragForce();
       dragForceNodeIdRef.current = null;
-      if (dragForceRafRef.current != null) {
-        cancelAnimationFrame(dragForceRafRef.current);
-        dragForceRafRef.current = null;
-      }
       return;
     }
 
@@ -1467,7 +1604,6 @@ export const GraphView: React.FC<GraphViewProps> = ({
       if (n.hasClass('frame-cluster-label') || n.hasClass('frame-cluster-halo')) return;
       dragForceNodeIdRef.current = n.id();
       dragLastPosRef.current = { x: n.position('x'), y: n.position('y') };
-      if (forceDragRealtime) runDragForceStep({ animate: false, numIter: 180 });
     };
 
     const onDrag = (evt: cytoscape.EventObject) => {
@@ -1482,15 +1618,6 @@ export const GraphView: React.FC<GraphViewProps> = ({
         );
       }
       dragLastPosRef.current = nowPos;
-      const now = performance.now();
-      // 节流重算，避免每个 drag 事件都启动一次布局导致掉帧
-      if (!forceDragRealtime) return;
-      if (now - dragForceLastRunRef.current < 56) return;
-      if (dragForceRafRef.current != null) return;
-      dragForceRafRef.current = requestAnimationFrame(() => {
-        dragForceRafRef.current = null;
-        runDragForceStep({ animate: false, numIter: 180 });
-      });
     };
 
     const onFree = (evt: cytoscape.EventObject) => {
@@ -1498,8 +1625,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
       if (dragForceNodeIdRef.current !== n.id()) return;
       dragForceNodeIdRef.current = null;
       dragLastPosRef.current = null;
-      // 即使关闭实时联动，松手后也做一次全局回弹，形成“牵一点而动全身”。
-      runDragForceStep({ animate: true, numIter: forceDragRealtime ? 220 : 360 });
+      // 松手后做一次全局回弹，形成“牵一点而动全身”。
+      runDragForceStep({ animate: true, numIter: 360 });
     };
 
     cy.on('grab', 'node', onGrab);
@@ -1513,12 +1640,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
       stopRunningDragForce();
       dragForceNodeIdRef.current = null;
       dragLastPosRef.current = null;
-      if (dragForceRafRef.current != null) {
-        cancelAnimationFrame(dragForceRafRef.current);
-        dragForceRafRef.current = null;
-      }
     };
-  }, [isGraphToolbarEditMode, activeGraphLayout, forceDragRealtime, tagGraphLayersWeightsKey]);
+  }, [isGraphToolbarEditMode, activeGraphLayout, tagGraphLayersWeightsKey]);
 
   useEffect(() => {
     return () => {
@@ -1539,10 +1662,23 @@ export const GraphView: React.FC<GraphViewProps> = ({
     >
       {/* 用 flex-1 参与文档流高度，避免仅 absolute 子节点导致父级高度塌成 0（导出页用 100vh 无此问题） */}
       <div
-        ref={containerRef}
+        ref={graphStageRef}
         className="relative min-h-0 min-w-0 flex-1 w-full"
         style={{ backgroundImage: 'radial-gradient(#e5e7eb 1px, transparent 1px)', backgroundSize: '20px 20px' }}
-      />
+      >
+        {/* cy 容器保持文档流高度（flex-1 祖先），避免 absolute 在部分布局下量到 0 */}
+        <div ref={containerRef} className="h-full w-full min-h-0 min-w-0" />
+        <GraphHighlightChromeLabels
+          cyRef={cyRef}
+          hostRef={graphStageRef}
+          chromeOpacity={mapUiChromeOpacity}
+          chromeBlurPx={mapUiChromeBlurPx}
+          themeColor={themeColor}
+          nodeSize={graphStylesheetSizing.nodeSize}
+          labelFontPx={graphStylesheetSizing.labelFontPx}
+          highlightKey={`${graphCyEpoch}\u0001${focusedNodeId ?? ''}\u0001${hoveredNote?.id ?? ''}\u0001${selectedConnectionId ?? ''}\u0001${hoveredConnectionId ?? ''}\u0001${chainLength}\u0001${relatedHighlightKeysSig}\u0001${graphStylesheetSizing.labelFontPx}\u0001${nodeStructureKey}\u0001${tagGraphLayersHiddenKey}\u0001${frameGraphLayersHiddenKey}\u0001${notesLayerVisualKey}\u0001${mergedTagGraphLayers.tagVisibilityLogic ?? 'or'}`}
+        />
+      </div>
 
       {nodeColorLegendItems.length > 0 ? (
         <div
@@ -1550,22 +1686,32 @@ export const GraphView: React.FC<GraphViewProps> = ({
           aria-hidden
         >
           <div className="flex flex-col gap-1.5">
-            {nodeColorLegendItems.slice(0, 8).map((item) => (
-              <div key={item.label} className="flex items-center gap-2">
+            {nodeColorLegendItems.slice(0, 8).map((item) => {
+              const swatch = Math.max(6, Math.round(legendLabelFontPx * 0.9));
+              return (
+              <div key={item.key} className="flex items-center gap-2">
                 <div className="flex items-center gap-1.5">
                   {item.colors.slice(0, 3).map((c) => (
                     <span
-                      key={`${item.label}:${c}`}
-                      className="inline-block w-2.5 h-2.5 rounded-full border border-white/90 shadow-sm"
-                      style={{ backgroundColor: c }}
+                      key={`${item.key}:${c}`}
+                      className="inline-block rounded-full border border-white/90 shadow-sm shrink-0"
+                      style={{ backgroundColor: c, width: swatch, height: swatch }}
                     />
                   ))}
                 </div>
-                <span className="text-[11px] text-gray-500 font-medium truncate">{item.label}</span>
+                <span
+                  className="text-gray-500 font-medium truncate"
+                  style={{ fontSize: legendLabelFontPx }}
+                >
+                  {item.label}
+                </span>
               </div>
-            ))}
+              );
+            })}
             {nodeColorLegendItems.length > 8 ? (
-              <div className="text-[10px] text-gray-500 mt-1">…共 {nodeColorLegendItems.length} 类</div>
+              <div className="text-gray-500 mt-1" style={{ fontSize: Math.max(8, legendLabelFontPx - 1) }}>
+                …共 {nodeColorLegendItems.length} 类
+              </div>
             ) : null}
           </div>
         </div>
@@ -1577,29 +1723,26 @@ export const GraphView: React.FC<GraphViewProps> = ({
         chromeSurfaceStyle={ch}
         chromeHoverBackground={chHover}
         setShowSettingsPanel={setShowSettingsPanel}
-        showLayerPanel={showLayerPanel}
-        setShowLayerPanel={setShowLayerPanel}
+        showSettingsPanel={showSettingsPanel}
+        settingsButtonRef={settingsButtonRef}
+        showTagLayerPanel={showTagLayerPanel}
+        setShowTagLayerPanel={setShowTagLayerPanel}
+        showFrameLayerPanel={showFrameLayerPanel}
+        setShowFrameLayerPanel={setShowFrameLayerPanel}
         canShowLayer={!!onUpdateProject}
         panelChromeStyle={panelChromeStyle}
-        mergedGraphLayers={mergedGraphLayers}
-        layerGroupStandard={graphLayerGroupStandard}
-        onLayerGroupStandardChange={handleGraphLayerGroupStandardChange}
-        onGraphLayersChange={handleGraphLayersChange}
+        mergedTagLayers={mergedTagGraphLayers}
+        mergedFrameLayers={mergedFrameGraphLayers}
+        onTagLayersChange={handleTagLayersChange}
+        onFrameLayersChange={handleFrameLayersChange}
         notes={notes}
         onUpdateNote={onUpdateNote}
         onBatchUpdateNotes={handleBatchUpdateNotes}
         frames={project.frames ?? []}
+        onUpdateFrame={handleUpdateFrame}
         projectId={projectId}
         onActivateNoteFromLayer={(n) => focusNoteOnGraphFromPanel(n.id)}
-        isGraphToolbarEditMode={isGraphToolbarEditMode}
-        chainLength={chainLength}
-        onChainLengthChange={(v) => setChainLength(Math.max(1, Math.min(3, Math.round(v))))}
-        quickStyleValues={{
-          nodeSize: graphStylesheetSizing.nodeSize,
-          labelSize: graphStylesheetSizing.labelFontPx,
-          edgeWeight: graphStylesheetSizing.edgeWeight
-        }}
-        onQuickStyleChange={handleQuickGraphStyleChange}
+        chromeHostRef={graphTopLeftChromeRef}
       />
 
       <GraphTopCenterConnectionButton
@@ -1629,21 +1772,42 @@ export const GraphView: React.FC<GraphViewProps> = ({
         panelChromeStyle={panelChromeStyle}
         themeColor={themeColor}
         activeGraphLayout={activeGraphLayout}
-        onApplyTagGridLayout={applyTagGridLayout}
-        onApplyCircleLayout={() => applyLayout('circle')}
         onApplyTimeLayout={applyTimeLayout}
-        onApplyCoseLayout={() => applyLayout('cose-bilkent')}
-        onApplyFrameClusterLayout={applyFrameClusterLayout}
+        onApplyCoseLayout={applyCoseLayout}
       />
 
-      {previewNote && !selectedConn && !isGraphToolbarEditMode && (
-        <NotePreviewCard
-          note={previewNote}
-          currentImageIndex={previewImageIndex}
-          onImageIndexChange={setPreviewImageIndex}
-          chromeSurfaceStyle={panelChromeStyle}
-          passThrough={hoveredNote != null}
-        />
+      {previewNote && !selectedConn && !isGraphToolbarEditMode && !graphEditorOpen && (
+        <div
+          className="fixed ui-workspace-left z-[1000] flex flex-col gap-3 pointer-events-none"
+          style={{
+            top: previewOffsetTopPx,
+            maxHeight: `calc(100dvh - ${previewOffsetTopPx}px - 1rem)`
+          }}
+        >
+          <NotePreviewCard
+            note={previewNote}
+            currentImageIndex={previewImageIndex}
+            onImageIndexChange={setPreviewImageIndex}
+            chromeSurfaceStyle={panelChromeStyle}
+            passThrough={Boolean(hoveredNote && hoveredNote.id !== focusedNodeId)}
+            embedded
+            themeColor={themeColor}
+            onOpenEditor={isUIVisible ? openPreviewNoteEditor : undefined}
+          />
+          {focusedNote ? (
+            <GraphRelatedHighlightPanel
+              groups={relatedEdgeLabelGroups}
+              selectedKeys={relatedHighlightLabelKeys}
+              onToggleKey={toggleRelatedLabelKey}
+              onToggleColumn={toggleRelatedColumn}
+              onSelectAll={selectAllRelatedLabels}
+              onClearAll={clearAllRelatedLabels}
+              themeColor={themeColor}
+              chromeSurfaceStyle={panelChromeStyle}
+              embedded
+            />
+          ) : null}
+        </div>
       )}
 
       {graphEditorOpen && editorInitialNote && (
@@ -1666,22 +1830,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
             onUpdateNote(fullNote);
           }}
           onDelete={onDeleteNote}
-          onSwitchToMapView={
-            onSwitchToMapView
-              ? (coords) => {
-                  closeGraphNoteEditor();
-                  onSwitchToMapView(
-                    coords
-                      ? {
-                          lat: coords.lat,
-                          lng: coords.lng,
-                          zoom: (coords as { zoom?: number }).zoom ?? 16
-                        }
-                      : undefined
-                  );
-                }
-              : undefined
-          }
+          onSwitchToMapView={undefined}
           onSwitchToBoardView={
             onSwitchToBoardView
               ? (coords) => {
@@ -1690,6 +1839,10 @@ export const GraphView: React.FC<GraphViewProps> = ({
                 }
               : undefined
           }
+          onSwitchToGraphView={(noteId) => {
+            closeGraphNoteEditor();
+            focusNoteOnGraphFromPanel(noteId);
+          }}
           themeColor={themeColor}
           panelChromeStyle={panelChromeStyle}
         />
@@ -1743,7 +1896,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
         <EditInspectorPanel
           note={focusedNote}
           inspectorConnection={focusedNote ? null : selectedConn}
-          groupContext={focusedNote ? null : selectedConn ? null : graphInspectorGroupContext}
+          groupContext={null}
           coordMode="graph"
           themeColor={themeColor}
           panelChromeStyle={panelChromeStyle}
@@ -1756,12 +1909,14 @@ export const GraphView: React.FC<GraphViewProps> = ({
           onEditConnection={handleInspectorEditConnection}
           onNewConnection={handleInspectorNewConnection}
           onFocusPeerInView={focusNoteOnGraphFromPanel}
+          onUpdateFrames={onUpdateProject ? handleUpdateFrames : undefined}
         />
       )}
 
       <SettingsPanel
         isOpen={showSettingsPanel}
         onClose={() => setShowSettingsPanel(false)}
+        anchorRef={settingsButtonRef}
         settingsContextView="graph"
         themeColor={themeColor}
         onThemeColorChange={onThemeColorChange ?? (() => {})}

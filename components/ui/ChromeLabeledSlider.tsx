@@ -1,4 +1,5 @@
 import React from 'react';
+import { MAP_CHROME_SURFACE_SHELL_CLASS } from '../../utils/map/mapChromeStyle';
 
 export interface ChromeLabeledSliderProps {
   label: string;
@@ -17,7 +18,7 @@ export const ChromeLabeledSlider: React.FC<ChromeLabeledSliderProps> = ({
   children
 }) => (
   <div
-    className={`rounded-lg shadow-lg border border-gray-100/80 p-2 flex flex-col items-center gap-1 ${className}`.trim()}
+    className={`${MAP_CHROME_SURFACE_SHELL_CLASS} p-2 flex flex-col items-center gap-1 ${className}`.trim()}
     style={chromeSurfaceStyle}
   >
     <span className="text-xs font-medium text-gray-600 whitespace-nowrap">{label}</span>

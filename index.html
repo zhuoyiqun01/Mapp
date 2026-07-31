@@ -75,6 +75,18 @@
          user-select: text !important;
        }
 
+       /* 详情预览卡：允许鼠标选中正文与标题 */
+       .mapping-preview-selectable,
+       .mapping-preview-selectable * {
+         -webkit-user-select: text !important;
+         user-select: text !important;
+       }
+       .mapping-preview-selectable button,
+       .mapping-preview-selectable button * {
+         -webkit-user-select: none !important;
+         user-select: none !important;
+       }
+
        /* Disable context menu on right-click/long-press */
        * {
          -webkit-context-menu: none !important;

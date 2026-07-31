@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { Note, Project, Frame, Connection, type GraphLayerState } from '../types';
 import { Trash2 } from 'lucide-react';
 import { connectionToGraphDirection } from '../utils/graph/graphData';
@@ -25,6 +25,8 @@ interface TableViewProps {
   onUpdateFrames?: (frames: Frame[]) => void;
   onUpdateConnections?: (connections: Connection[]) => void | Promise<void>;
   onSwitchToBoardView?: (coords?: { x: number; y: number }) => void;
+  onSwitchToMapView?: (coords?: { lat: number; lng: number; zoom?: number }) => void;
+  onSwitchToGraphView?: (noteId: string) => void;
   themeColor: string;
   panelChromeStyle?: React.CSSProperties;
   isUIVisible?: boolean;
@@ -100,6 +102,8 @@ export const TableView: React.FC<TableViewProps> = ({
   onUpdateFrames: _onUpdateFrames,
   onUpdateConnections,
   onSwitchToBoardView,
+  onSwitchToMapView,
+  onSwitchToGraphView,
   themeColor,
   panelChromeStyle,
   isUIVisible = true,
@@ -115,6 +119,7 @@ export const TableView: React.FC<TableViewProps> = ({
   const ch = panelChromeStyle;
   const chHover = chromeHoverBackground;
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
+  const settingsButtonRef = useRef<HTMLButtonElement>(null);
   const [subView, setSubView] = useState<TableSubView>('points');
   const [pendingDelete, setPendingDelete] = useState<PendingTableDelete | null>(null);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
@@ -383,9 +388,12 @@ export const TableView: React.FC<TableViewProps> = ({
     <div className="relative h-full bg-gray-50 flex flex-col min-h-0">
       <TableTopLeftSettingsButton
         isUIVisible={isUIVisible}
+        themeColor={themeColor}
         chromeSurfaceStyle={ch}
         chromeHoverBackground={chHover}
-        onOpenSettings={() => setShowSettingsPanel(true)}
+        settingsOpen={showSettingsPanel}
+        settingsButtonRef={settingsButtonRef}
+        onOpenSettings={() => setShowSettingsPanel((v) => !v)}
       />
       <TableTopRightDownloadButton
         isUIVisible={isUIVisible}
@@ -565,6 +573,8 @@ export const TableView: React.FC<TableViewProps> = ({
             setEditorNoteId(null);
           }}
           onSwitchToBoardView={onSwitchToBoardView}
+          onSwitchToMapView={onSwitchToMapView}
+          onSwitchToGraphView={onSwitchToGraphView}
           themeColor={themeColor}
           panelChromeStyle={panelChromeStyle}
         />
@@ -581,6 +591,7 @@ export const TableView: React.FC<TableViewProps> = ({
       <SettingsPanel
         isOpen={showSettingsPanel}
         onClose={() => setShowSettingsPanel(false)}
+        anchorRef={settingsButtonRef}
         settingsContextView="table"
         themeColor={themeColor}
         onThemeColorChange={onThemeColorChange ?? (() => {})}

@@ -1,11 +1,8 @@
 import React from 'react';
-import { Settings } from 'lucide-react';
+import { Settings, Tag as TagIcon, Frame as FrameIcon } from 'lucide-react';
 import { ChromeIconButton } from '../ui/ChromeIconButton';
-import { GraphLayerPanel } from './GraphLayerPanel';
-import { LayerToolbarIcon } from '../ui/LayerToolbarIcon';
-import { GraphToolbarSliders } from './GraphToolbarSliders';
+import { ProjectNotesLayerPanel } from '../layer/ProjectNotesLayerPanel';
 import type { Frame, GraphLayerState, Note } from '../../types';
-import type { GraphLayerGroupStandard } from '../../utils/graph/graphRuntimeCore';
 
 type Props = {
   isUIVisible: boolean;
@@ -13,29 +10,26 @@ type Props = {
   chromeSurfaceStyle?: React.CSSProperties;
   chromeHoverBackground?: string;
   setShowSettingsPanel: React.Dispatch<React.SetStateAction<boolean>>;
-  showLayerPanel: boolean;
-  setShowLayerPanel: React.Dispatch<React.SetStateAction<boolean>>;
+  showSettingsPanel?: boolean;
+  settingsButtonRef?: React.RefObject<HTMLButtonElement | null>;
+  showTagLayerPanel: boolean;
+  setShowTagLayerPanel: React.Dispatch<React.SetStateAction<boolean>>;
+  showFrameLayerPanel: boolean;
+  setShowFrameLayerPanel: React.Dispatch<React.SetStateAction<boolean>>;
   canShowLayer: boolean;
   panelChromeStyle?: React.CSSProperties;
-  mergedGraphLayers: GraphLayerState;
-  layerGroupStandard: GraphLayerGroupStandard;
-  onLayerGroupStandardChange: (standard: GraphLayerGroupStandard) => void;
-  onGraphLayersChange: (next: GraphLayerState) => void;
-  isGraphToolbarEditMode: boolean;
+  mergedTagLayers: GraphLayerState;
+  mergedFrameLayers: GraphLayerState;
+  onTagLayersChange: (next: GraphLayerState) => void;
+  onFrameLayersChange: (next: GraphLayerState) => void;
   notes: Note[];
   onUpdateNote: (note: Note) => void;
   onBatchUpdateNotes?: (nextNotes: Note[]) => void | Promise<void>;
   frames: Frame[];
+  onUpdateFrame?: (frame: Frame) => void;
   projectId: string;
   onActivateNoteFromLayer?: (note: Note) => void;
-  chainLength: number;
-  onChainLengthChange: (value: number) => void;
-  quickStyleValues?: {
-    nodeSize: number;
-    labelSize: number;
-    edgeWeight: number;
-  };
-  onQuickStyleChange?: (patch: { nodeSize?: number; labelSize?: number; edgeWeight?: number }) => void;
+  chromeHostRef?: React.RefObject<HTMLDivElement | null>;
 };
 
 export const GraphTopLeftToolbar: React.FC<Props> = ({
@@ -44,102 +38,147 @@ export const GraphTopLeftToolbar: React.FC<Props> = ({
   chromeSurfaceStyle,
   chromeHoverBackground,
   setShowSettingsPanel,
-  showLayerPanel,
-  setShowLayerPanel,
+  showSettingsPanel = false,
+  settingsButtonRef,
+  showTagLayerPanel,
+  setShowTagLayerPanel,
+  showFrameLayerPanel,
+  setShowFrameLayerPanel,
   canShowLayer,
   panelChromeStyle,
-  mergedGraphLayers,
-  layerGroupStandard,
-  onLayerGroupStandardChange,
-  onGraphLayersChange,
-  isGraphToolbarEditMode,
+  mergedTagLayers,
+  mergedFrameLayers,
+  onTagLayersChange,
+  onFrameLayersChange,
   notes,
   onUpdateNote,
   onBatchUpdateNotes,
   frames,
+  onUpdateFrame,
   projectId,
   onActivateNoteFromLayer,
-  chainLength,
-  onChainLengthChange,
-  quickStyleValues,
-  onQuickStyleChange
+  chromeHostRef
 }) => {
   if (!isUIVisible) return null;
 
+  const closePanels = () => {
+    setShowTagLayerPanel(false);
+    setShowFrameLayerPanel(false);
+  };
+
   return (
     <div
+      ref={chromeHostRef}
       data-allow-context-menu
-      className="fixed top-2 sm:top-4 left-2 sm:left-4 z-[500] pointer-events-none flex flex-col gap-2"
+      data-graph-top-left-chrome
+      className="fixed top-2 sm:top-4 ui-workspace-left z-[500] pointer-events-none flex flex-col gap-2"
       onPointerDown={(e) => e.stopPropagation()}
     >
       <div className="pointer-events-auto flex h-10 sm:h-12 items-center gap-1.5 sm:gap-2">
         <ChromeIconButton
+          ref={settingsButtonRef}
+          themeColor={themeColor}
           chromeSurfaceStyle={chromeSurfaceStyle}
           chromeHoverBackground={chromeHoverBackground}
           nonChromeIdleHover="imperative-gray100"
+          active={showSettingsPanel}
+          pressThemeFlash
           onClick={(e) => {
             e.stopPropagation();
-            setShowSettingsPanel(true);
-            setShowLayerPanel(false);
+            setShowSettingsPanel((v) => !v);
+            closePanels();
           }}
           onPointerDown={(e) => e.stopPropagation()}
-          title="设置"
+          tooltip="设置"
         >
           <Settings size={18} className="sm:w-5 sm:h-5" />
         </ChromeIconButton>
         {canShowLayer ? (
-          <div className="relative">
-            <ChromeIconButton
-              themeColor={themeColor}
-              chromeSurfaceStyle={chromeSurfaceStyle}
-              chromeHoverBackground={chromeHoverBackground}
-              active={showLayerPanel}
-              pressThemeFlash
-              nonChromeIdleHover="imperative-gray100"
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowLayerPanel((v) => !v);
-                setShowSettingsPanel(false);
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-              title={layerGroupStandard === 'tag' ? '图层（标签组顺序、显隐、半径权重）' : '图层（帧组顺序、显隐、半径权重）'}
-            >
-              <LayerToolbarIcon layerGroupStandard={layerGroupStandard} />
-            </ChromeIconButton>
-            {showLayerPanel ? (
-              <GraphLayerPanel
+          <>
+            <div className="relative">
+              <ChromeIconButton
                 themeColor={themeColor}
-                panelChromeStyle={panelChromeStyle}
-                merged={mergedGraphLayers}
-                layerGroupStandard={layerGroupStandard}
-                onLayerGroupStandardChange={onLayerGroupStandardChange}
-                onStateChange={onGraphLayersChange}
-                notes={notes}
-                onUpdateNote={onUpdateNote}
-                onBatchUpdateNotes={onBatchUpdateNotes}
-                frames={frames}
-                projectId={projectId}
-                onActivateNote={onActivateNoteFromLayer}
-              />
-            ) : null}
-          </div>
+                chromeSurfaceStyle={chromeSurfaceStyle}
+                chromeHoverBackground={chromeHoverBackground}
+                active={showTagLayerPanel}
+                pressThemeFlash
+                nonChromeIdleHover="imperative-gray100"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowTagLayerPanel((v) => !v);
+                  setShowFrameLayerPanel(false);
+                  setShowSettingsPanel(false);
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                tooltip="标签图层"
+              >
+                <TagIcon size={18} className="sm:w-5 sm:h-5" />
+              </ChromeIconButton>
+              {showTagLayerPanel ? (
+                <ProjectNotesLayerPanel
+                  themeColor={themeColor}
+                  panelChromeStyle={panelChromeStyle}
+                  variant="graph"
+                  embed={false}
+                  dockAlign="start"
+                  merged={mergedTagLayers}
+                  layerGroupStandard="tag"
+                  hideStandardToggle
+                  onLayerGroupStandardChange={() => {}}
+                  onStateChange={onTagLayersChange}
+                  notes={notes}
+                  onUpdateNote={onUpdateNote}
+                  onBatchUpdateNotes={onBatchUpdateNotes}
+                  frames={frames}
+                  projectId={projectId}
+                  onActivateNote={onActivateNoteFromLayer}
+                />
+              ) : null}
+            </div>
+            <div className="relative">
+              <ChromeIconButton
+                themeColor={themeColor}
+                chromeSurfaceStyle={chromeSurfaceStyle}
+                chromeHoverBackground={chromeHoverBackground}
+                active={showFrameLayerPanel}
+                pressThemeFlash
+                nonChromeIdleHover="imperative-gray100"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowFrameLayerPanel((v) => !v);
+                  setShowTagLayerPanel(false);
+                  setShowSettingsPanel(false);
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                tooltip="簇图层"
+              >
+                <FrameIcon size={18} className="sm:w-5 sm:h-5" />
+              </ChromeIconButton>
+              {showFrameLayerPanel ? (
+                <ProjectNotesLayerPanel
+                  themeColor={themeColor}
+                  panelChromeStyle={panelChromeStyle}
+                  variant="graph"
+                  embed={false}
+                  dockAlign="start"
+                  merged={mergedFrameLayers}
+                  layerGroupStandard="frame"
+                  hideStandardToggle
+                  onLayerGroupStandardChange={() => {}}
+                  onStateChange={onFrameLayersChange}
+                  notes={notes}
+                  onUpdateNote={onUpdateNote}
+                  onBatchUpdateNotes={onBatchUpdateNotes}
+                  frames={frames}
+                  onUpdateFrame={onUpdateFrame}
+                  projectId={projectId}
+                  onActivateNote={onActivateNoteFromLayer}
+                />
+              ) : null}
+            </div>
+          </>
         ) : null}
       </div>
-      {isGraphToolbarEditMode && quickStyleValues && onQuickStyleChange ? (
-        <GraphToolbarSliders
-          nodeSize={quickStyleValues.nodeSize}
-          setNodeSize={(v) => onQuickStyleChange({ nodeSize: v })}
-          labelSize={quickStyleValues.labelSize}
-          setLabelSize={(v) => onQuickStyleChange({ labelSize: v })}
-          edgeWeight={quickStyleValues.edgeWeight}
-          setEdgeWeight={(v) => onQuickStyleChange({ edgeWeight: v })}
-          chainLength={chainLength}
-          setChainLength={onChainLengthChange}
-          themeColor={themeColor}
-          chromeSurfaceStyle={chromeSurfaceStyle}
-        />
-      ) : null}
     </div>
   );
 };
-

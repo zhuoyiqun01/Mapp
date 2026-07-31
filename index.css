@@ -19,6 +19,31 @@
   /* 与 mapChromeSurfaceStyle / App 状态同步，避免再叠一层 Tailwind backdrop-blur */
   --map-ui-chrome-opacity: 0.9;
   --map-ui-chrome-blur-px: 8px;
+  /**
+   * 项目侧栏打开且非全宽时：侧栏右缘相对视口的偏移（px）。
+   * 工作区 fixed 按钮以此为左界（左对齐 / 水平居中）。
+   */
+  --workspace-ui-left-inset: 0px;
+  --workspace-ui-inset-transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/** 相对工作区左缘：侧栏右缘 + 原 left-2 / sm:left-4 */
+.ui-workspace-left {
+  left: calc(var(--workspace-ui-left-inset, 0px) + 0.5rem);
+  transition: left var(--workspace-ui-inset-transition);
+}
+@media (min-width: 640px) {
+  .ui-workspace-left {
+    left: calc(var(--workspace-ui-left-inset, 0px) + 1rem);
+  }
+}
+
+/** 相对工作区水平居中（侧栏右缘～视口右缘） */
+.ui-workspace-center-x {
+  left: calc(
+    var(--workspace-ui-left-inset, 0px) + (100vw - var(--workspace-ui-left-inset, 0px)) / 2
+  );
+  transition: left var(--workspace-ui-inset-transition);
 }
 
 /* 原生 range 滑块拇指/强调色（否则为系统蓝） */

@@ -22,7 +22,7 @@ export const GraphTopCenterConnectionButton: React.FC<Props> = ({
   return (
     <div
       data-allow-context-menu
-      className="fixed top-2 sm:top-4 left-1/2 -translate-x-1/2 z-[500] pointer-events-auto flex h-10 sm:h-12 items-center justify-center"
+      className="fixed top-2 sm:top-4 ui-workspace-center-x -translate-x-1/2 z-[500] pointer-events-auto flex h-10 sm:h-12 items-center justify-center"
       onPointerDown={(e) => e.stopPropagation()}
     >
       <ChromeIconButton
@@ -32,7 +32,7 @@ export const GraphTopCenterConnectionButton: React.FC<Props> = ({
         active={showConnectionPanel}
         activeVariant="muted"
         onClick={() => onToggleConnectionPanel()}
-        title="关联"
+        tooltip="关联"
       >
         <Link2 size={18} className="sm:w-5 sm:h-5" />
       </ChromeIconButton>

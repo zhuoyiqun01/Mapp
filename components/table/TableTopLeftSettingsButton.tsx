@@ -4,34 +4,44 @@ import { ChromeIconButton } from '../ui/ChromeIconButton';
 
 type Props = {
   isUIVisible: boolean;
+  themeColor?: string;
   chromeSurfaceStyle?: React.CSSProperties;
   chromeHoverBackground?: string;
   onOpenSettings: () => void;
+  settingsOpen?: boolean;
+  settingsButtonRef?: React.RefObject<HTMLButtonElement | null>;
 };
 
 export const TableTopLeftSettingsButton: React.FC<Props> = ({
   isUIVisible,
+  themeColor,
   chromeSurfaceStyle,
   chromeHoverBackground,
-  onOpenSettings
+  onOpenSettings,
+  settingsOpen = false,
+  settingsButtonRef
 }) => {
   if (!isUIVisible) return null;
   return (
     <div
       data-allow-context-menu
-      className="fixed top-2 sm:top-4 left-2 sm:left-4 z-[500] pointer-events-auto flex h-10 sm:h-12 items-center"
+      className="fixed top-2 sm:top-4 ui-workspace-left z-[500] pointer-events-auto flex h-10 sm:h-12 items-center"
       onPointerDown={(e) => e.stopPropagation()}
     >
       <ChromeIconButton
+        ref={settingsButtonRef}
+        themeColor={themeColor}
         chromeSurfaceStyle={chromeSurfaceStyle}
         chromeHoverBackground={chromeHoverBackground}
         nonChromeIdleHover="imperative-gray100"
+        active={settingsOpen}
+        pressThemeFlash
         onClick={(e) => {
           e.stopPropagation();
           onOpenSettings();
         }}
         onPointerDown={(e) => e.stopPropagation()}
-        title="设置"
+        tooltip="设置"
       >
         <Settings size={18} className="sm:w-5 sm:h-5" />
       </ChromeIconButton>

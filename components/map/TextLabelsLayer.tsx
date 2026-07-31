@@ -1,8 +1,13 @@
-import React, { useRef, useState } from 'react';
-import { Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
+import React, { useMemo, useRef, useState } from 'react';
+import { Marker, useMap, useMapEvents } from 'react-leaflet';
 import type { Note, Coordinates } from '../../types';
 import { DivIcon } from 'leaflet';
 import { lngWrapOffsetsForBounds } from '../../utils/map/lngWorldWrap';
+import {
+  DEFAULT_MAP_UI_CHROME_BLUR_PX,
+  DEFAULT_MAP_UI_CHROME_OPACITY,
+  mapChromeSurfaceInlineCss
+} from '../../utils/map/mapChromeStyle';
 
 interface TextLabelsLayerProps {
   notes: Note[];
@@ -10,7 +15,7 @@ interface TextLabelsLayerProps {
   pinSize: number;
   labelSize: number;
   themeColor: string;
-  clusteredMarkers?: Array<{ notes: Note[], position: [number, number] }>;
+  clusteredMarkers?: Array<{ notes: Note[]; position: [number, number] }>;
   selectedNoteId?: string | null;
   /** 普通地图模式多选：与 Board Shift 多选一致，用于同时展示多个 label */
   selectedNoteIds?: ReadonlySet<string> | null;
@@ -26,28 +31,22 @@ interface TextLabelsLayerProps {
   noteCoordOverrides?: Record<string, Coordinates>;
   /** 地图编辑模式：双击已展示的文字标签打开完整便签编辑器 */
   onLabelDoubleClickEdit?: (noteId: string) => void;
+  /** 与全局 UI chrome 一致的玻璃面（透明度 / 模糊） */
+  mapUiChromeOpacity?: number;
+  mapUiChromeBlurPx?: number;
 }
 
 function getLabelText(rawText: string): string {
   if (!rawText) return '';
-  // Label 规则：
-  // - 取“第一段分隔符”之前的内容
-  // - 默认分隔符为换行符 `\n` 和 `, `（逗号+空格）
   const separators = ['\n', ', '];
-
-  // Find the earliest separator occurrence.
   let endIndex = rawText.length;
   for (const sep of separators) {
     const idx = rawText.indexOf(sep);
     if (idx !== -1) endIndex = Math.min(endIndex, idx);
   }
-
   const firstChunk = rawText.slice(0, endIndex).trim();
   if (!firstChunk) return '';
-
-  // Remove markdown heading prefix like "### " if present.
-  const withoutHeading = firstChunk.replace(/^#{1,6}\s+/, '').trim();
-  return withoutHeading;
+  return firstChunk.replace(/^#{1,6}\s+/, '').trim();
 }
 
 function getTimeText(note: Note): string {
@@ -83,6 +82,54 @@ function textLabelZIndexOffset(
   return isFavorite ? 300 : 50;
 }
 
+/** 玻璃框 + 文字排版（强调态只改字色/字重，框本身跟全局 chrome 一致） */
+function chromeLabelShellStyle(opts: {
+  chromeCss: string;
+  color: string;
+  paddingY: number;
+  paddingX: number;
+  fontSize: number;
+  fontWeight: string | number;
+  pointerEvents: string;
+  display?: string;
+  extra?: string;
+}): string {
+  return [
+    opts.chromeCss,
+    `color:${opts.color}`,
+    `padding:${opts.paddingY}px ${opts.paddingX}px`,
+    `font-size:${opts.fontSize}px`,
+    `font-weight:${opts.fontWeight}`,
+    'white-space:nowrap',
+    'overflow:hidden',
+    'text-overflow:ellipsis',
+    `pointer-events:${opts.pointerEvents}`,
+    `display:${opts.display ?? 'inline-flex'}`,
+    'align-items:flex-start',
+    'width:fit-content',
+    opts.extra ?? ''
+  ]
+    .filter(Boolean)
+    .join(';');
+}
+
+function labelInnerHtml(
+  text: string,
+  timeText: string,
+  timeFontSize: number,
+  isFavorite: boolean,
+  themeColor: string
+): string {
+  return `<div style="display:flex;flex-direction:column;gap:2px;">
+    <span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${text}</span>
+    ${
+      timeText
+        ? `<span style="font-size:${timeFontSize}px;font-weight:500;color:${isFavorite ? themeColor : '#6b7280'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${timeText}</span>`
+        : ''
+    }
+  </div>`;
+}
+
 export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
   notes,
   showTextLabels,
@@ -99,11 +146,18 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
   connectionHighlightNoteIds,
   hoveredNoteId,
   noteCoordOverrides = {},
-  onLabelDoubleClickEdit
+  onLabelDoubleClickEdit,
+  mapUiChromeOpacity = DEFAULT_MAP_UI_CHROME_OPACITY,
+  mapUiChromeBlurPx = DEFAULT_MAP_UI_CHROME_BLUR_PX
 }) => {
   const map = useMap();
   const [, bump] = useState(0);
   const rafRef = useRef<number | null>(null);
+  const chromeCss = useMemo(
+    () => mapChromeSurfaceInlineCss(mapUiChromeOpacity, mapUiChromeBlurPx),
+    [mapUiChromeOpacity, mapUiChromeBlurPx]
+  );
+
   useMapEvents({
     zoomend: () => bump((n) => n + 1),
     moveend: () => bump((n) => n + 1),
@@ -117,7 +171,6 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
     }
   });
 
-  // 如果当前是“连线高亮模式”，忽略全局 showTextLabels 开关，只根据给定的 ID 集合渲染 label
   const isConnectionHighlightMode =
     Array.isArray(connectionHighlightNoteIds) && connectionHighlightNoteIds.length > 0;
 
@@ -135,7 +188,6 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
     return null;
   }
 
-  // 预览模式下，如果没有任何选择、没有 hover、也没有连线高亮，并且 label 模式关闭，就不显示
   if (
     !isConnectionHighlightMode &&
     isPreviewMode &&
@@ -147,7 +199,6 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
     return null;
   }
 
-  // Get IDs of notes that are actually rendered as individual markers (not clustered)
   const visibleIndividualNoteIds = new Set<string>();
   const clusterLabels: Array<{
     position: [number, number];
@@ -156,32 +207,28 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
     isFavorite: boolean;
   }> = [];
 
-  clusteredMarkers.forEach(cluster => {
+  clusteredMarkers.forEach((cluster) => {
     if (cluster.notes.length === 1) {
       visibleIndividualNoteIds.add(cluster.notes[0].id);
     } else if (cluster.notes.length > 1) {
-      // For clusters, find the first note with title/text to represent the cluster（标题规则参考 TableView/tab 模式）
       const representativeNote = cluster.notes.find(
-        note => note.variant === 'standard' && (getLabelText(note.text || '') || note.text?.trim())
+        (note) => note.variant === 'standard' && (getLabelText(note.text || '') || note.text?.trim())
       );
       if (representativeNote) {
-        let text =
+        const text =
           getLabelText(representativeNote.text || '') ||
           representativeNote.emoji ||
           (representativeNote.variant === 'image' ? '照片' : '点位');
-        const timeText = getTimeText(representativeNote);
-
         clusterLabels.push({
           position: cluster.position,
-          text: text,
-          timeText,
+          text,
+          timeText: getTimeText(representativeNote),
           isFavorite: representativeNote.isFavorite === true
         });
       }
     }
   });
 
-  // 如果处于连线高亮模式：只渲染给定 ID 集合对应点位的 label，且不显示 cluster labels 等其他元素
   if (isConnectionHighlightMode) {
     const idSet = new Set(connectionHighlightNoteIds);
     const bb = map.getBounds();
@@ -191,19 +238,18 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
     return (
       <>
         {notes
-          .filter(note => idSet.has(note.id))
-          .flatMap(note => {
+          .filter((note) => idSet.has(note.id))
+          .flatMap((note) => {
             const text = getLabelText(note.text || '');
             if (!text) return [];
             const timeText = getTimeText(note);
-
             const isFavorite = note.isFavorite === true;
             const override = noteCoordOverrides[note.id];
             const lat = override?.lat ?? note.coords.lat;
             const lng = override?.lng ?? note.coords.lng;
             const scale = isFavorite ? 1.5 : 1;
             const fontSize = 10 * labelSize * scale;
-            const paddingY = 2 * scale;
+            const paddingY = Math.max(4, Math.round(2 * scale + 2));
             const paddingX = paddingY;
             const timeFontSize = Math.max(8, Math.floor(fontSize * 0.75));
             const labelHeight = paddingY * 2 + fontSize + timeFontSize + 6;
@@ -221,47 +267,20 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
               note.id,
               isFavorite
             );
+            const ksSafe = lngWrapOffsetsForBounds(lng, west, east);
+            const ks = ksSafe.length ? ksSafe : [0];
 
-            const ks = lngWrapOffsetsForBounds(lng, west, east);
-            const ksSafe = ks.length ? ks : [0];
-            return ksSafe.map((k) => {
+            return ks.map((k) => {
               const icon = new DivIcon({
-                html: `
-                <div style="
-                  background: white;
-                  color: ${isFavorite ? themeColor : 'black'};
-                  padding: ${paddingY}px ${paddingX}px;
-                  border-radius: 4px;
-                  font-size: ${fontSize}px;
-                  font-weight: ${isFavorite ? 'bold' : '500'};
-                  white-space: nowrap;
-                  overflow: hidden;
-                  text-overflow: ellipsis;
-                  border: ${isFavorite ? 2 : 1.5}px solid ${themeColor};
-                  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-                  display: inline-flex;
-                  align-items: flex-start;
-                  pointer-events: ${allowLabelPointer ? 'auto' : 'none'};
-                  width: fit-content;
-                ">
-                  <div style="display:flex; flex-direction:column; gap:2px;">
-                    <span style="
-                      flex: 0 1 auto;
-                      min-width: 0;
-                      overflow: hidden;
-                      text-overflow: ellipsis;
-                      white-space: nowrap;
-                    ">
-                      ${text}
-                    </span>
-                    ${
-                      timeText
-                        ? `<span style="font-size: ${timeFontSize}px; font-weight: 500; color: ${isFavorite ? themeColor : '#6b7280'}; white-space: nowrap; overflow:hidden; text-overflow: ellipsis;">${timeText}</span>`
-                        : ''
-                    }
-                  </div>
-                </div>
-            `,
+                html: `<div style="${chromeLabelShellStyle({
+                  chromeCss,
+                  color: isFavorite ? themeColor : '#000000',
+                  paddingY,
+                  paddingX,
+                  fontSize,
+                  fontWeight: isFavorite ? 'bold' : 500,
+                  pointerEvents: allowLabelPointer ? 'auto' : 'none'
+                })}">${labelInnerHtml(text, timeText, timeFontSize, isFavorite, themeColor)}</div>`,
                 className: 'custom-text-label',
                 iconSize: [0, labelHeight],
                 iconAnchor: [0, labelHeight + (isFavorite ? 10 : 5)]
@@ -296,8 +315,6 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
 
   return (
     <>
-      {/* Pre-selected cluster labels (stacked vertically).
-          在普通地图模式和预览模式下都可复用，用于“展开簇内 labels，点击 label 选择 note”。 */}
       {preSelectedNotes && preSelectedNotes.length > 0 && (() => {
         const pos = preSelectedNotes[0].coords;
         const fontSize = 10 * labelSize;
@@ -313,78 +330,44 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
             className: 'pre-selected-labels-container',
             html: `
                 <div style="display: flex; flex-direction: column; gap: 4px; align-items: flex-start;">
-                  ${preSelectedNotes.map((note, idx) => {
-                    let text =
-                      getLabelText(note.text || '') ||
-                      note.emoji ||
-                      (note.variant === 'image' ? '照片' : '点位');
-                    const timeText = getTimeText(note);
+                  ${preSelectedNotes
+                    .map((note) => {
+                      const text =
+                        getLabelText(note.text || '') ||
+                        note.emoji ||
+                        (note.variant === 'image' ? '照片' : '点位');
+                      const timeText = getTimeText(note);
+                      const isFav = note.isFavorite === true;
+                      const rowZ =
+                        !isPreviewMode && selectedNoteIds && selectedNoteIds.size > 0
+                          ? selectedNoteIds.has(note.id)
+                            ? 2
+                            : 0
+                          : selectedNoteId === note.id
+                            ? 2
+                            : 0;
 
-                    const isFav = note.isFavorite === true;
-                    const isSelected = isNoteShownAsSelectedLabel(
-                      isPreviewMode,
-                      note.id,
-                      selectedNoteId,
-                      selectedNoteIds
-                    );
-                    const rowZ =
-                      !isPreviewMode && selectedNoteIds && selectedNoteIds.size > 0
-                        ? selectedNoteIds.has(note.id)
-                          ? 2
-                          : 0
-                        : selectedNoteId === note.id
-                          ? 2
-                          : 0;
-
-                    return `
+                      return `
                       <div 
                         data-note-id="${note.id}"
                         class="pre-selected-label-item"
-                        style="
-                          position: relative;
-                          z-index: ${rowZ};
-                          background: white;
-                          color: ${isFav ? themeColor : 'black'};
-                          padding: 4px 4px;
-                          border-radius: 4px;
-                          display: flex;
-                          align-items: flex-start;
-                          justify-content: flex-start;
-                          gap: 6px;
-                          font-size: ${fontSize}px;
-                          font-weight: ${isFav ? 'bold' : '500'};
-                          white-space: nowrap;
-                          overflow: hidden;
-                          text-overflow: ellipsis;
-                          border: 2px solid ${themeColor};
-                          box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-                          cursor: pointer;
-                          pointer-events: auto;
-                          margin-bottom: 4px;
-                        "
+                        style="${chromeLabelShellStyle({
+                          chromeCss,
+                          color: isFav ? themeColor : '#000000',
+                          paddingY: 4,
+                          paddingX: 4,
+                          fontSize,
+                          fontWeight: isFav ? 'bold' : 500,
+                          pointerEvents: 'auto',
+                          display: 'flex',
+                          extra: `position:relative;z-index:${rowZ};cursor:pointer;margin-bottom:4px;gap:6px;justify-content:flex-start`
+                        })}"
                       >
-                        <div style="display:flex; flex-direction:column; gap:2px;">
-                          <span
-                            class="pre-selected-label-text"
-                            style="
-                              flex: 1;
-                              min-width: 0;
-                              overflow: hidden;
-                              text-overflow: ellipsis;
-                              white-space: nowrap;
-                            "
-                          >
-                            ${text}
-                          </span>
-                          ${
-                            timeText
-                              ? `<span style="font-size: ${timeFontSize}px; font-weight: 500; color: ${isFav ? themeColor : '#6b7280'}; white-space: nowrap; overflow:hidden; text-overflow: ellipsis;">${timeText}</span>`
-                              : ''
-                          }
-                        </div>
+                        ${labelInnerHtml(text, timeText, timeFontSize, isFav, themeColor)}
                       </div>
                     `;
-                  }).join('')}
+                    })
+                    .join('')}
                 </div>
               `,
             iconSize: [0, totalHeight],
@@ -432,18 +415,22 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
         );
       })()}
 
-      {/* Individual marker labels */}
       {(() => {
         const wb = map.getBounds();
         const west = wb.getWest();
         const east = wb.getEast();
         return notes
-          .filter(note => {
+          .filter((note) => {
             if (isPreviewMode) {
               if (preSelectedNotes) return false;
               if (selectedNoteId && note.id === selectedNoteId && note.text?.trim()) return true;
               if (hoveredNoteId && note.id === hoveredNoteId && note.text?.trim()) return true;
-              return showTextLabels && note.variant === 'standard' && note.text?.trim() && visibleIndividualNoteIds.has(note.id);
+              return (
+                showTextLabels &&
+                note.variant === 'standard' &&
+                note.text?.trim() &&
+                visibleIndividualNoteIds.has(note.id)
+              );
             }
             if (preSelectedNotes) return false;
             const baseOk = note.variant === 'standard' && note.text?.trim();
@@ -458,21 +445,19 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
             if (isSelected) return baseOk;
             return showTextLabels && baseOk && visibleIndividualNoteIds.has(note.id);
           })
-          .flatMap(note => {
+          .flatMap((note) => {
             const text = getLabelText(note.text || '');
             const timeText = getTimeText(note);
-
             const isFavorite = note.isFavorite === true;
             const scale = isFavorite ? 1.5 : 1;
             const fontSize = 10 * labelSize * scale;
-            const paddingY = 2 * scale;
+            const paddingY = Math.max(4, Math.round(2 * scale + 2));
             const paddingX = paddingY;
             const timeFontSize = Math.max(8, Math.floor(fontSize * 0.75));
             const labelHeight = paddingY * 2 + fontSize + timeFontSize + 6;
             const override = noteCoordOverrides[note.id];
             const lat = override?.lat ?? note.coords.lat;
             const lng = override?.lng ?? note.coords.lng;
-
             const isSelected = isNoteShownAsSelectedLabel(
               isPreviewMode,
               note.id,
@@ -487,46 +472,21 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
               note.id,
               isFavorite
             );
-
             const ks = lngWrapOffsetsForBounds(lng, west, east);
             const ksSafe = ks.length ? ks : [0];
+
             return ksSafe.map((k) => {
               const icon = new DivIcon({
-                html: `
-                <div style="
-                  background: white;
-                  color: ${isFavorite ? themeColor : 'black'};
-                  padding: ${paddingY}px ${paddingX}px;
-                  border-radius: 4px;
-                  font-size: ${fontSize}px;
-                  font-weight: ${isFavorite ? 'bold' : '500'};
-                  white-space: nowrap;
-                  border: ${isFavorite ? 2 : 1.5}px solid ${themeColor};
-                  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-                  pointer-events: ${labelPointerInteractive ? 'auto' : 'none'};
-                  display: flex;
-                  align-items: flex-start;
-                  justify-content: flex-start;
-                  width: fit-content;
-                ">
-                  <div style="display:flex; flex-direction:column; gap:2px;">
-                    <span style="
-                      flex: 0 1 auto;
-                      min-width: 0;
-                      white-space: nowrap;
-                      overflow: hidden;
-                      text-overflow: ellipsis;
-                    ">
-                      ${text}
-                    </span>
-                    ${
-                      timeText
-                        ? `<span style="font-size: ${timeFontSize}px; font-weight: 500; color: ${isFavorite ? themeColor : '#6b7280'}; white-space: nowrap; overflow:hidden; text-overflow: ellipsis;">${timeText}</span>`
-                        : ''
-                    }
-                  </div>
-                </div>
-            `,
+                html: `<div style="${chromeLabelShellStyle({
+                  chromeCss,
+                  color: isFavorite ? themeColor : '#000000',
+                  paddingY,
+                  paddingX,
+                  fontSize,
+                  fontWeight: isFavorite ? 'bold' : 500,
+                  pointerEvents: labelPointerInteractive ? 'auto' : 'none',
+                  display: 'flex'
+                })}">${labelInnerHtml(text, timeText, timeFontSize, isFavorite, themeColor)}</div>`,
                 className: 'custom-text-label',
                 iconSize: [0, labelHeight],
                 iconAnchor: [0, labelHeight + (isFavorite ? 10 : 5)]
@@ -557,11 +517,8 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
           });
       })()}
 
-      {/* Cluster labels */}
       {(
-        // 非预览模式：只有在没有 preSelectedNotes 时才显示全局 cluster labels
         (!isPreviewMode && !preSelectedNotes && showTextLabels) ||
-        // 预览/tab 模式：与导出页一致，仅开启「显示文字标签」时在 idle 下显示簇代表 label
         (isPreviewMode &&
           showTextLabels &&
           !selectedNoteId &&
@@ -582,37 +539,30 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
             const isFavorite = clusterLabel.isFavorite;
             const scale = isFavorite ? 1.5 : 1;
             const fontSize = 10 * labelSize * scale;
-            const paddingX = 8 * scale;
-            const paddingY = 2 * scale;
+            const paddingX = Math.max(4, Math.round(8 * scale * 0.5 + 2));
+            const paddingY = Math.max(4, Math.round(2 * scale + 2));
             const timeFontSize = Math.max(8, Math.floor(fontSize * 0.75));
             const labelHeight = paddingY * 2 + fontSize + timeFontSize + 6;
 
             return ksSafe.map((k) => {
               const icon = new DivIcon({
-                html: `
-                <div style="
-                  background: white;
-                  color: ${isFavorite ? themeColor : 'black'};
-                  padding: ${paddingY}px ${paddingX}px;
-                  border-radius: 4px;
-                  font-size: ${fontSize}px;
-                  font-weight: ${isFavorite ? 'bold' : '500'};
-                  border: ${isFavorite ? 2 : 1.5}px solid ${themeColor};
-                  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-                  pointer-events: none;
-                  display: inline-block;
-                  width: fit-content;
-                ">
-                  <div style="display:flex; flex-direction:column; gap:2px;">
-                    <div style="white-space: nowrap; overflow:hidden; text-overflow: ellipsis;">${text}</div>
+                html: `<div style="${chromeLabelShellStyle({
+                  chromeCss,
+                  color: isFavorite ? themeColor : '#000000',
+                  paddingY,
+                  paddingX,
+                  fontSize,
+                  fontWeight: isFavorite ? 'bold' : 500,
+                  pointerEvents: 'none',
+                  display: 'inline-block'
+                })}"><div style="display:flex;flex-direction:column;gap:2px;">
+                    <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${text}</div>
                     ${
                       timeText
-                        ? `<div style="font-size: ${timeFontSize}px; font-weight: 500; color: ${isFavorite ? themeColor : '#6b7280'}; white-space: nowrap; overflow:hidden; text-overflow: ellipsis;">${timeText}</div>`
+                        ? `<div style="font-size:${timeFontSize}px;font-weight:500;color:${isFavorite ? themeColor : '#6b7280'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${timeText}</div>`
                         : ''
                     }
-                  </div>
-                </div>
-          `,
+                  </div></div>`,
                 className: 'custom-text-label',
                 iconSize: [0, labelHeight],
                 iconAnchor: [0, labelHeight + (isFavorite ? 10 : 5)]
@@ -633,5 +583,3 @@ export const TextLabelsLayer: React.FC<TextLabelsLayerProps> = ({
     </>
   );
 };
-
-

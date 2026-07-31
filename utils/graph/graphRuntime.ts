@@ -1,7 +1,7 @@
 import cytoscape, { type Core, type CytoscapeOptions } from 'cytoscape';
-import coseBilkent from 'cytoscape-cose-bilkent';
+import fcose from 'cytoscape-fcose';
 
-cytoscape.use(coseBilkent);
+cytoscape.use(fcose);
 
 export { attachBoardlikeWheelZoom, GRAPH_WHEEL_ZOOM_SENSITIVITY } from './graphRuntimeCore';
 
@@ -12,7 +12,7 @@ const defaultUi: Pick<CytoscapeOptions, 'minZoom' | 'maxZoom' | 'wheelSensitivit
   wheelSensitivity: 0
 };
 
-/** 应用内关系图：已注册 cose-bilkent */
+/** 应用内关系图：已注册 fcose（力传导） */
 export function createAppGraphCy(
   container: HTMLElement,
   opts: Pick<CytoscapeOptions, 'elements' | 'style'>

@@ -26,6 +26,7 @@ import {
 import { SettingsCompactSlider } from '../ui/SettingsCompactSlider';
 import { TagAddPanel } from '../ui/TagAddPanel';
 import { NoteTimeRangeControl } from '../note-editor/NoteTimeRangeControl';
+import { TagLayerHierarchyList } from './TagLayerHierarchyList';
 
 function insertRelative(order: string[], fromKey: string, toKey: string, place: 'before' | 'after'): string[] {
   const next = [...order];
@@ -75,6 +76,10 @@ export interface ProjectNotesLayerPanelProps {
   tableMode?: boolean;
   /** Table：重命名 frame（更新 project.frames.title） */
   onUpdateFrameTitle?: (frameId: string, nextTitle: string) => void;
+  /** 更新整簇（如图谱面板改 Frame.color） */
+  onUpdateFrame?: (frame: Frame) => void;
+  /** 隐藏面板内 tag/frame 切换条（图谱顶栏已拆成两钮时） */
+  hideStandardToggle?: boolean;
 }
 
 export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
@@ -95,7 +100,9 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
   embed = false,
   dockAlign = 'start',
   tableMode = false,
-  onUpdateFrameTitle
+  onUpdateFrameTitle,
+  onUpdateFrame,
+  hideStandardToggle = false
 }) => {
   const hiddenSet = new Set((merged.hidden ?? []).map((h) => String(h).trim()));
   const keysSet = useMemo(() => new Set((merged.order ?? []).map((k) => String(k).trim())), [merged.order]);
@@ -144,6 +151,50 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
     portalPlacement: { top: number; left: number };
   };
   const [tagColorBatchEditor, setTagColorBatchEditor] = useState<TagColorBatchEditor | null>(null);
+
+  type FrameColorEditor = {
+    frameId: string;
+    fromColor: string;
+    toColor: string;
+    portalPlacement: { top: number; left: number };
+  };
+  const [frameColorEditor, setFrameColorEditor] = useState<FrameColorEditor | null>(null);
+
+  const openFrameColorEditor = useCallback(
+    (frameId: string, fromColor: string, anchorEl: HTMLElement) => {
+      if (layerGroupStandard !== 'frame' || !onUpdateFrame) return;
+      const rect = anchorEl.getBoundingClientRect();
+      const TAG_PANEL_EST_W = 260;
+      const TAG_PANEL_EST_H = 220;
+      const gap = 8;
+      let top = rect.bottom + gap;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      if (spaceBelow < TAG_PANEL_EST_H && rect.top > TAG_PANEL_EST_H + gap) {
+        top = rect.top - TAG_PANEL_EST_H - gap;
+      }
+      let left = rect.left;
+      left = Math.max(8, Math.min(left, window.innerWidth - TAG_PANEL_EST_W - 8));
+      const idx = TAG_COLORS.indexOf(fromColor);
+      const defaultToColor = idx >= 0 ? TAG_COLORS[(idx + 1) % TAG_COLORS.length] : TAG_COLORS[0];
+      setFrameColorEditor({
+        frameId,
+        fromColor,
+        toColor: defaultToColor,
+        portalPlacement: { top, left }
+      });
+    },
+    [layerGroupStandard, onUpdateFrame]
+  );
+
+  const applyFrameColorChange = useCallback(
+    (frameId: string, toColor: string) => {
+      if (!onUpdateFrame) return;
+      const frame = framesById.get(String(frameId).trim());
+      if (!frame || frame.color === toColor) return;
+      onUpdateFrame({ ...frame, color: toColor });
+    },
+    [framesById, onUpdateFrame]
+  );
 
   const openTagColorBatchEditor = useCallback(
     (tagLabelKey: string, fromColor: string, anchorEl: HTMLElement) => {
@@ -516,6 +567,7 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
 
   return (
     <div
+      data-graph-top-left-panel
       className={`${posCls} mt-2 flex max-h-[min(24rem,70vh)] overflow-hidden rounded-xl border border-gray-200/90 shadow-xl ${
         embed ? 'w-full max-w-xl' : weightSideOpen ? 'w-[min(36rem,calc(100vw-1rem))]' : 'w-[min(20rem,calc(100vw-2rem))]'
       }`}
@@ -564,6 +616,7 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
             </>
           ) : null}
 
+          {!hideStandardToggle ? (
           <div className="flex items-center gap-2 px-1.5 py-1.5">
             <button
               type="button"
@@ -596,14 +649,29 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
                   : 'text-theme-chrome-fg opacity-60'
               } ${layerGroupStandard === 'frame' ? '' : 'bg-gray-100 hover:bg-gray-200'}`}
               style={layerGroupStandard === 'frame' ? { backgroundColor: themeColor } : undefined}
-              aria-label="切换为按帧分组"
-              title="按帧分组"
+              aria-label="切换为按簇分组"
+              title="按簇分组"
             >
               <FrameIcon size={18} strokeWidth={2} aria-hidden />
             </button>
           </div>
+          ) : null}
 
-          {merged.order.map((key) => {
+          {layerGroupStandard === 'tag' ? (
+            <TagLayerHierarchyList
+              themeColor={themeColor}
+              merged={merged}
+              onStateChange={onStateChange}
+              notes={notes}
+              onUpdateNote={onUpdateNote}
+              onActivateNote={onActivateNote}
+              tagColorsByKey={tagColorsByKey}
+              onOpenTagColor={openTagColorBatchEditor}
+              weightOpenKey={weightOpenKey}
+              setWeightOpenKey={setWeightOpenKey}
+            />
+          ) : (
+          merged.order.map((key) => {
             const k = String(key).trim();
             const visible = !hiddenSet.has(k);
             const rowKey = k === '' && layerGroupStandard === 'frame' ? '__empty_frame__' : k;
@@ -693,11 +761,7 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
                       <GripVertical size={16} strokeWidth={2} />
                     </div>
                     <div className="flex flex-shrink-0 items-center gap-1 pr-0.5">
-                      {(
-                        (layerGroupStandard === 'tag' ? tagColorsByKey.get(k) : frameColorsByKey.get(k)) ?? []
-                      )
-                        .slice(0, 6)
-                        .map((c) => (
+                      {(frameColorsByKey.get(k) ?? []).slice(0, 6).map((c) => (
                           <button
                             key={`${k}:${c}`}
                             type="button"
@@ -705,21 +769,21 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
                             onPointerDown={(e) => e.stopPropagation()}
                             onClick={(e) => {
                               e.stopPropagation();
-                              if (layerGroupStandard === 'tag') {
-                                openTagColorBatchEditor(k, c, e.currentTarget);
-                              }
+                              if (k) openFrameColorEditor(k, c, e.currentTarget);
                             }}
                             className="h-3 w-3 rounded-full border border-white/90 shadow-sm transition-transform hover:scale-110"
                             style={{ backgroundColor: c }}
-                            title={layerGroupStandard === 'tag' ? `点击切换颜色：${c}` : `帧颜色：${c}`}
+                            title={
+                              onUpdateFrame
+                                ? `点击切换簇颜色：${c}`
+                                : `簇颜色：${c}`
+                            }
                             aria-label={`分组「${groupDisplayLabel(k, layerGroupStandard, framesById)}」颜色`}
                           />
                         ))}
-                      {(
-                        (layerGroupStandard === 'tag' ? tagColorsByKey.get(k) : frameColorsByKey.get(k)) ?? []
-                      ).length > 6 ? (
+                      {(frameColorsByKey.get(k) ?? []).length > 6 ? (
                         <span className="pl-0.5 text-[10px] leading-none text-gray-400">
-                          +{((layerGroupStandard === 'tag' ? tagColorsByKey.get(k) : frameColorsByKey.get(k)) ?? []).length - 6}
+                          +{(frameColorsByKey.get(k) ?? []).length - 6}
                         </span>
                       ) : null}
                     </div>
@@ -762,10 +826,8 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
                           if (!tableMode) return;
                           e.stopPropagation();
 
-                          const canRenameTag =
-                            layerGroupStandard === 'tag' && k !== '' && k !== GRAPH_UNTAGGED_TAG_GROUP;
-                          const canRenameFrame = layerGroupStandard === 'frame' && k !== '' && !!onUpdateFrameTitle;
-                          if (!canRenameTag && !canRenameFrame) return;
+                          const canRenameFrame = k !== '' && !!onUpdateFrameTitle;
+                          if (!canRenameFrame) return;
 
                           cancelRenameRef.current = false;
                           setEditingGroupKey(k);
@@ -800,7 +862,7 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
                       }`}
                       style={weightOpen ? { color: themeColor } : undefined}
                       aria-label={weightOpen ? '关闭权重面板' : '在右侧调节半径权重'}
-                      title={layerGroupStandard === 'tag' ? '标签分组半径权重' : '帧分组半径权重'}
+                      title="簇分组半径权重"
                       onClick={() => setWeightOpenKey((prev) => (prev === k ? null : k))}
                     >
                       {weightOpen ? (
@@ -984,7 +1046,8 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
                 ) : null}
               </div>
             );
-          })}
+          })
+          )}
         </div>
       </div>
 
@@ -1007,8 +1070,10 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
               }))
             }
             formatValue={(v) => v.toFixed(2)}
-            minCaption="近心"
-            maxCaption="远心"
+            // tag：与 LayerRegistry 一致——权重大 → 靠圆心
+            // frame：时间线纵轴权重大 → 更靠上（「按Frame聚类」强度另见设置项）
+            minCaption={layerGroupStandard === 'tag' ? '远心' : '近心'}
+            maxCaption={layerGroupStandard === 'tag' ? '近心' : '远心'}
             trackWidth="stretch"
             className="min-w-0"
           />
@@ -1036,6 +1101,30 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
           }}
           onDismissOutside={() => setTagColorBatchEditor(null)}
           portalPlacement={tagColorBatchEditor.portalPlacement}
+          closeOnInteractOutside
+          dismissIgnoreClosestSelector={undefined}
+          autoFocus={false}
+          onLabelChange={() => {}}
+        />
+      )}
+
+      {frameColorEditor && (
+        <TagAddPanel
+          themeColor={themeColor}
+          panelChromeStyle={panelChromeStyle}
+          title={`修改簇「${groupDisplayLabel(frameColorEditor.frameId, 'frame', framesById)}」颜色`}
+          label={frameColorEditor.frameId}
+          hideLabelInput
+          selectedColor={frameColorEditor.toColor}
+          onColorChange={(c) => {
+            setFrameColorEditor((prev) => (prev ? { ...prev, toColor: c } : prev));
+          }}
+          onApply={() => {
+            applyFrameColorChange(frameColorEditor.frameId, frameColorEditor.toColor);
+            setFrameColorEditor(null);
+          }}
+          onDismissOutside={() => setFrameColorEditor(null)}
+          portalPlacement={frameColorEditor.portalPlacement}
           closeOnInteractOutside
           dismissIgnoreClosestSelector={undefined}
           autoFocus={false}

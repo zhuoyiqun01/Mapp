@@ -1,5 +1,10 @@
 import type { Coordinates, Note } from '../../types';
 import { generateId } from '../../utils';
+import type { ImportErrorDetail } from './importErrorFormat';
+import {
+  formatJsonParseFailure,
+  validateNotesOnlyImportPayload
+} from './importErrorFormat';
 
 export function generateBoardSlotForImport(index: number): { boardX: number; boardY: number } {
   const col = index % 6;
@@ -85,13 +90,25 @@ export function buildNewNotesFromProjectJsonRaws(rawNotes: Note[], existingNotes
   return out;
 }
 
+export type ParseProjectJsonNotesResult =
+  | { ok: true; rawNotes: Note[] }
+  | { ok: false; error: ImportErrorDetail };
+
+/** @deprecated 优先用 parseProjectJsonNotesPayloadResult，便于带回出错位置 */
 export function parseProjectJsonNotesPayload(text: string): { rawNotes: Note[] } | null {
-  let data: { project?: { notes?: Note[] } };
+  const r = parseProjectJsonNotesPayloadResult(text);
+  return r.ok ? { rawNotes: r.rawNotes } : null;
+}
+
+export function parseProjectJsonNotesPayloadResult(text: string): ParseProjectJsonNotesResult {
+  let data: unknown;
   try {
-    data = JSON.parse(text) as typeof data;
-  } catch {
-    return null;
+    data = JSON.parse(text);
+  } catch (e) {
+    return { ok: false, error: formatJsonParseFailure(text, e) };
   }
-  if (!data?.project?.notes || !Array.isArray(data.project.notes)) return null;
-  return { rawNotes: data.project.notes as Note[] };
+  const invalid = validateNotesOnlyImportPayload(data);
+  if (invalid) return { ok: false, error: invalid };
+  const notes = (data as { project: { notes: Note[] } }).project.notes;
+  return { ok: true, rawNotes: notes };
 }

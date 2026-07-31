@@ -1,8 +1,10 @@
 import React from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Pencil } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import type { Note } from '../../../types';
 import { parseNoteContent } from '../../../utils';
+import { chromePanelGhostIconButtonClass } from '../../ui/chromePanelIconButton';
+import { PortalTooltip } from '../../ui/PortalTooltip';
 
 interface NotePreviewCardProps {
   note: Note;
@@ -11,6 +13,17 @@ interface NotePreviewCardProps {
   chromeSurfaceStyle?: React.CSSProperties;
   /** 为 true 时不拦截指针（悬停预览穿透到底层，仅选中展示时可交互） */
   passThrough?: boolean;
+  /** 相对视口顶部的偏移（px）；用于避开左上角按钮/已展开面板 */
+  offsetTopPx?: number;
+  /**
+   * 嵌入父级堆叠容器时：相对定位，由外层负责 fixed / top / maxHeight。
+   * 图谱详情 + 高亮筛选上下排列时使用。
+   */
+  embedded?: boolean;
+  /** 保留以兼容调用方；详情卡右上角编辑为无框 icon，不再使用主题色底 */
+  themeColor?: string;
+  /** 传入时显示右上角铅笔，打开全文编辑器 */
+  onOpenEditor?: (noteId: string) => void;
 }
 
 export const NotePreviewCard: React.FC<NotePreviewCardProps> = ({
@@ -18,7 +31,10 @@ export const NotePreviewCard: React.FC<NotePreviewCardProps> = ({
   currentImageIndex,
   onImageIndexChange,
   chromeSurfaceStyle,
-  passThrough = false
+  passThrough = false,
+  offsetTopPx,
+  embedded = false,
+  onOpenEditor
 }) => {
   const formatPreviewTitle = (rawText: string): string => {
     const title = parseNoteContent(rawText || '').title || 'Untitled Note';
@@ -37,11 +53,25 @@ export const NotePreviewCard: React.FC<NotePreviewCardProps> = ({
   const allImages = [...(note.images || [])];
   if (note.sketch) allImages.push(note.sketch);
 
+  const topPx = offsetTopPx ?? 16;
+  const showEdit = Boolean(onOpenEditor) && !passThrough;
+
   return (
     <div
       data-allow-context-menu
-      className={`fixed top-4 left-4 z-[1000] w-72 sm:w-80 rounded-2xl shadow-2xl border border-gray-100 overflow-hidden animate-in slide-in-from-left-8 duration-500 ease-out flex flex-col ${passThrough ? 'pointer-events-none' : 'pointer-events-auto'} ${chromeSurfaceStyle ? '' : 'bg-white'}`}
-      style={{ maxHeight: 'calc(100vh - 2rem)', ...chromeSurfaceStyle }}
+      className={`mapping-preview-selectable ${
+        embedded
+          ? 'relative w-72 sm:w-80 shrink-0'
+          : 'fixed ui-workspace-left z-[1000] w-72 sm:w-80'
+      } rounded-2xl shadow-2xl border border-gray-100 overflow-hidden animate-in slide-in-from-left-8 duration-500 ease-out flex flex-col ${
+        passThrough ? 'pointer-events-none' : 'pointer-events-auto'
+      } ${chromeSurfaceStyle ? '' : 'bg-white'}`}
+      style={{
+        ...(embedded
+          ? { maxHeight: 'min(52dvh, 28rem)' }
+          : { top: topPx, maxHeight: `calc(100dvh - ${topPx}px - 1rem)` }),
+        ...chromeSurfaceStyle
+      }}
       onClick={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
     >
@@ -59,8 +89,42 @@ export const NotePreviewCard: React.FC<NotePreviewCardProps> = ({
                 {timeRangeText}
               </div>
             )}
+            {(note.tags?.length ?? 0) > 0 ? (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {note.tags!.map((t) => (
+                  <span
+                    key={t.id || `${t.label}:${t.color}`}
+                    className="inline-flex max-w-full items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-gray-700 bg-gray-100/90 border border-gray-200/80"
+                    title={t.label}
+                  >
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full border border-white/80"
+                      style={{ backgroundColor: t.color || '#9ca3af' }}
+                      aria-hidden
+                    />
+                    <span className="truncate">{t.label}</span>
+                  </span>
+                ))}
+              </div>
+            ) : null}
           </div>
         </div>
+        {showEdit ? (
+          <PortalTooltip content="编辑" compact>
+            <button
+              type="button"
+              className={`${chromePanelGhostIconButtonClass} mt-0.5`}
+              aria-label="编辑"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenEditor?.(note.id);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <Pencil size={14} strokeWidth={2} aria-hidden />
+            </button>
+          </PortalTooltip>
+        ) : null}
       </div>
 
       <div className="flex-1 overflow-y-auto custom-scrollbar">
@@ -69,7 +133,22 @@ export const NotePreviewCard: React.FC<NotePreviewCardProps> = ({
           if (!detail.trim()) return null;
           return (
             <div className="px-4 py-3 text-gray-800 text-sm leading-snug break-words border-b border-gray-50 bg-gray-50/30 mapping-preview-markdown">
-              <ReactMarkdown>{detail}</ReactMarkdown>
+              <ReactMarkdown
+                components={{
+                  a: ({ href, children, ...props }) => (
+                    <a
+                      {...props}
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {children}
+                    </a>
+                  )
+                }}
+              >
+                {detail}
+              </ReactMarkdown>
               <style>{`
                 .mapping-preview-markdown p { margin-bottom: 0.6rem; line-height: 1.4; }
                 .mapping-preview-markdown p:last-child { margin-bottom: 0; }
@@ -81,6 +160,8 @@ export const NotePreviewCard: React.FC<NotePreviewCardProps> = ({
                 .mapping-preview-markdown blockquote { border-left: 3px solid #e5e7eb; padding-left: 0.8rem; color: #6b7280; font-style: italic; margin: 0.5rem 0; }
                 .mapping-preview-markdown code { background: #f3f4f6; padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.85em; font-family: monospace; }
                 .mapping-preview-markdown pre { background: #f9fafb; padding: 0.5rem; border-radius: 6px; overflow-x: auto; margin: 0.5rem 0; border: 1px solid #f3f4f6; }
+                .mapping-preview-markdown a { color: #2563eb; text-decoration: underline; text-underline-offset: 2px; word-break: break-all; }
+                .mapping-preview-markdown a:hover { color: #1d4ed8; }
               `}</style>
             </div>
           );
@@ -92,6 +173,7 @@ export const NotePreviewCard: React.FC<NotePreviewCardProps> = ({
               src={allImages[currentImageIndex]}
               alt="Preview"
               className="w-full h-full object-cover"
+              draggable={false}
             />
             {allImages.length > 1 && (
               <>

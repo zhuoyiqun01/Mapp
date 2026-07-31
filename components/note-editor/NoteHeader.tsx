@@ -19,6 +19,9 @@ interface NoteHeaderProps {
   showLocateMap: boolean;
   onLocateMap?: () => void;
 
+  showLocateGraph?: boolean;
+  onLocateGraph?: () => void;
+
   onSave: () => void;
 
   /** 中间区域（如起止时间），与左右工具条同一行 */
@@ -38,6 +41,8 @@ export const NoteHeader: React.FC<NoteHeaderProps> = ({
   onLocateBoard,
   showLocateMap,
   onLocateMap,
+  showLocateGraph = false,
+  onLocateGraph,
   onSave,
   centerSlot,
 }) => {
@@ -105,13 +110,19 @@ export const NoteHeader: React.FC<NoteHeaderProps> = ({
         )}
 
         {showLocateBoard && onLocateBoard && (
-          <NoteIconButton onClick={onLocateBoard} variant="neutral" title="定位到board视图">
+          <NoteIconButton onClick={onLocateBoard} variant="neutral" title="定位到看板">
             <Locate size={22} strokeWidth={2} className="text-gray-400 hover:text-gray-600" />
           </NoteIconButton>
         )}
 
         {showLocateMap && onLocateMap && (
-          <NoteIconButton onClick={onLocateMap} variant="neutral" title="定位到地图视图">
+          <NoteIconButton onClick={onLocateMap} variant="neutral" title="定位到地图">
+            <Locate size={22} strokeWidth={2} className="text-gray-400 hover:text-gray-600" />
+          </NoteIconButton>
+        )}
+
+        {showLocateGraph && onLocateGraph && (
+          <NoteIconButton onClick={onLocateGraph} variant="neutral" title="定位到图谱">
             <Locate size={22} strokeWidth={2} className="text-gray-400 hover:text-gray-600" />
           </NoteIconButton>
         )}

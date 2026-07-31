@@ -5,6 +5,7 @@ import type { Note } from '../../types';
 import { graphNoteSearchLabel } from '../../utils/graph/graphData';
 import { ChromeDownloadMenu } from '../ui/ChromeDownloadMenu';
 import { ChromeIconButton } from '../ui/ChromeIconButton';
+import { PortalTooltip } from '../ui/PortalTooltip';
 
 type DownloadItem = { id: string; label: string; onSelect: () => void };
 
@@ -19,11 +20,7 @@ function isGraphCyNoteNode(cy: Core, id: string): boolean {
   const n = cy.getElementById(id);
   if (n.empty() || !n.isNode()) return false;
   if (n.hasClass('frame-cluster-label') || n.hasClass('frame-cluster-halo')) return false;
-  try {
-    if (n.style('display') === 'none') return false;
-  } catch {
-    /* cytoscape 未就绪时忽略 */
-  }
+  // 图层隐藏的节点仍可被搜索定位（仅排除簇装饰节点）
   return true;
 }
 
@@ -175,25 +172,27 @@ export const GraphTopRightToolbar: React.FC<Props> = ({
           aria-autocomplete="list"
           aria-expanded={pickResults.shown.length > 0 && q.trim() !== ''}
         />
-        <button
-          type="button"
-          onClick={clearQuery}
-          disabled={q.length === 0}
-          className="shrink-0 border-0 bg-transparent px-1.5 text-gray-400 hover:bg-black/[0.04] hover:text-gray-700 disabled:pointer-events-none disabled:opacity-30"
-          title="清空"
-          aria-label="清空检索词"
-        >
-          <Minus size={18} strokeWidth={2.25} />
-        </button>
-        <button
-          type="button"
-          onClick={closeSearch}
-          className="shrink-0 border-0 bg-transparent px-2 text-gray-400 hover:bg-black/[0.04] hover:text-gray-700"
-          title="关闭（Esc）"
-          aria-label="关闭检索"
-        >
-          <X size={18} strokeWidth={2.25} />
-        </button>
+        <PortalTooltip content="清空" compact>
+          <button
+            type="button"
+            onClick={clearQuery}
+            disabled={q.length === 0}
+            className="shrink-0 border-0 bg-transparent px-1.5 text-gray-400 hover:bg-black/[0.04] hover:text-gray-700 disabled:pointer-events-none disabled:opacity-30"
+            aria-label="清空"
+          >
+            <Minus size={18} strokeWidth={2.25} />
+          </button>
+        </PortalTooltip>
+        <PortalTooltip content="关闭" compact>
+          <button
+            type="button"
+            onClick={closeSearch}
+            className="shrink-0 border-0 bg-transparent px-2 text-gray-400 hover:bg-black/[0.04] hover:text-gray-700"
+            aria-label="关闭"
+          >
+            <X size={18} strokeWidth={2.25} />
+          </button>
+        </PortalTooltip>
       </div>
       {pickResults.shown.length > 0 && q.trim() !== '' ? (
         <ul
@@ -261,8 +260,8 @@ export const GraphTopRightToolbar: React.FC<Props> = ({
               chromeHoverBackground={chromeHoverBackground}
               nonChromeIdleHover="imperative-gray100"
               onClick={() => setSearchOpen(true)}
-              title="检索节点"
-              aria-label="检索节点"
+              tooltip="检索"
+              aria-label="检索"
             >
               <Search size={18} className="sm:w-5 sm:h-5" />
             </ChromeIconButton>
@@ -281,25 +280,27 @@ export const GraphTopRightToolbar: React.FC<Props> = ({
               chromeHoverBackground={chromeHoverBackground}
               nonChromeIdleHover="imperative-gray100"
               onClick={() => setIsGraphToolbarEditMode(true)}
-              title="编辑模式"
+              tooltip="编辑"
             >
               <Pencil size={18} className="sm:w-5 sm:h-5" />
             </ChromeIconButton>
           ) : (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsGraphToolbarEditMode(false);
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-              className="flex h-10 sm:h-12 items-center gap-1 sm:gap-2 px-2 sm:px-3 text-sm text-theme-chrome-fg rounded-xl shadow-lg font-bold"
-              style={{ backgroundColor: themeColor }}
-              title="完成编辑"
-            >
-              <Check size={18} className="sm:w-5 sm:h-5" />
-              <span className="hidden sm:inline">Done</span>
-            </button>
+            <PortalTooltip content="完成" compact>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsGraphToolbarEditMode(false);
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                className="flex h-10 sm:h-12 items-center gap-1 sm:gap-2 px-2 sm:px-3 text-sm text-theme-chrome-fg rounded-xl shadow-lg font-bold"
+                style={{ backgroundColor: themeColor }}
+                aria-label="完成"
+              >
+                <Check size={18} className="sm:w-5 sm:h-5" />
+                <span className="hidden sm:inline">Done</span>
+              </button>
+            </PortalTooltip>
           )}
         </div>
       </div>
@@ -322,8 +323,8 @@ export const GraphTopRightToolbar: React.FC<Props> = ({
           chromeHoverBackground={chromeHoverBackground}
           nonChromeIdleHover="imperative-gray100"
           onClick={() => setSearchOpen(true)}
-          title="检索节点"
-          aria-label="检索节点"
+          tooltip="检索"
+          aria-label="检索"
         >
           <Search size={18} className="sm:w-5 sm:h-5" />
         </ChromeIconButton>

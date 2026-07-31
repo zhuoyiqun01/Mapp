@@ -21,7 +21,7 @@ interface MapLayerControlProps {
   setEditingFrameDescription?: (v: string | null) => void;
   onSaveFrameDescription?: () => void;
   frameLayerRef: React.RefObject<HTMLDivElement | null>;
-  /** 统一节点图层（tag/frame），排在帧描述/帧列表左侧 */
+  /** 统一节点图层（tag/frame），排在簇描述/簇列表左侧 */
   unifiedNotesLayerSlot?: React.ReactNode;
   /** 展开面板相对图层按钮：`start`=左边缘对齐（主地图顶栏），`end`=右边缘对齐（右上角工具条等） */
   dropdownAlign?: 'start' | 'end';
@@ -61,11 +61,7 @@ export const MapLayerControl: React.FC<MapLayerControlProps> = ({
       pressThemeFlash
       nonChromeIdleHover="imperative-gray100"
       onClick={() => onTogglePanel()}
-      title={
-        layerGroupStandard === 'tag'
-          ? '图层（标签组顺序、显隐、半径权重）'
-          : '图层（帧组顺序、显隐、半径权重）'
-      }
+      tooltip="图层"
     >
       <LayerToolbarIcon layerGroupStandard={layerGroupStandard} />
     </ChromeIconButton>

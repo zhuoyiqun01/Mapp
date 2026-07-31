@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Note, Project } from '../../types';
+import { Note, Project, ProjectKind } from '../../types';
 import {
   loadAllProjects,
   loadProjectSummaries,
@@ -25,7 +25,7 @@ interface UseProjectStateReturn {
 
   // Actions
   loadProjects: () => Promise<void>;
-  createProject: (projectData: { name: string }) => Promise<string>;
+  createProject: (projectData: { name: string; projectKind?: ProjectKind }) => Promise<string>;
   selectProject: (projectId: string) => Promise<void>;
   updateProject: (project: Project) => Promise<void>;
   deleteProject: (projectId: string) => Promise<void>;
@@ -55,6 +55,7 @@ export const useProjectState = (): UseProjectStateReturn => {
       id: summary.id,
       name: summary.name,
       type: summary.type,
+      projectKind: summary.projectKind,
       createdAt: summary.createdAt,
       backgroundImage: undefined,
       notes: [], // Empty for now, will be loaded when selected
@@ -136,11 +137,15 @@ export const useProjectState = (): UseProjectStateReturn => {
   }, [summariesToProjects]);
 
   // Create new project
-  const createProject = useCallback(async (projectData: { name: string }): Promise<string> => {
+  const createProject = useCallback(async (projectData: {
+    name: string;
+    projectKind?: ProjectKind;
+  }): Promise<string> => {
     const newProject: Project = {
       id: `project_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       name: projectData.name,
       type: 'map',
+      projectKind: projectData.projectKind ?? 'mapping',
       createdAt: Date.now(),
       notes: [],
       frames: [],
@@ -157,6 +162,7 @@ export const useProjectState = (): UseProjectStateReturn => {
       id: newProject.id,
       name: newProject.name,
       type: newProject.type,
+      projectKind: newProject.projectKind,
       createdAt: newProject.createdAt,
       notesCount: 0,
       hasImages: false,
@@ -191,10 +197,14 @@ export const useProjectState = (): UseProjectStateReturn => {
     setActiveProject(updatedProject);
     setProjects(prev => prev.map(p => p.id === updatedProject.id ? updatedProject : p));
 
-    // Also update projectSummaries to reflect name changes
+    // Also update projectSummaries to reflect name / kind changes
     setProjectSummaries(prev => prev.map(summary =>
       summary.id === updatedProject.id
-        ? { ...summary, name: updatedProject.name }
+        ? {
+            ...summary,
+            name: updatedProject.name,
+            projectKind: updatedProject.projectKind
+          }
         : summary
     ));
   }, []);
@@ -226,6 +236,7 @@ export const useProjectState = (): UseProjectStateReturn => {
       id: newProjectId,
       name: `${project.name} (Copy)`,
       type: 'map',
+      projectKind: project.projectKind,
       createdAt: Date.now(),
       notes: project.notes.map(note => ({
         ...note,
@@ -241,7 +252,16 @@ export const useProjectState = (): UseProjectStateReturn => {
         id: `connection_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
       })),
       backgroundOpacity: project.backgroundOpacity,
-      themeColor: project.themeColor
+      themeColor: project.themeColor,
+      graphLayers: project.graphLayers,
+      graphLayerStandard: project.graphLayerStandard,
+      graphFrameLayers: project.graphFrameLayers,
+      graphNodeSize: project.graphNodeSize,
+      graphLabelFontPx: project.graphLabelFontPx,
+      graphEdgeWeight: project.graphEdgeWeight,
+      graphEdgeLabelFontPx: project.graphEdgeLabelFontPx,
+      graphEdgeCurve: project.graphEdgeCurve,
+      graphDefaultLayoutMode: project.graphDefaultLayoutMode
     };
 
     await saveProject(duplicatedProject);
@@ -252,6 +272,7 @@ export const useProjectState = (): UseProjectStateReturn => {
       id: duplicatedProject.id,
       name: duplicatedProject.name,
       type: duplicatedProject.type,
+      projectKind: duplicatedProject.projectKind,
       createdAt: duplicatedProject.createdAt,
       notesCount: duplicatedProject.notes.length,
       hasImages: duplicatedProject.notes.some(note => note.images && note.images.length > 0),
@@ -291,7 +312,11 @@ export const useProjectState = (): UseProjectStateReturn => {
 
     const updatedProject = {
       ...activeProject,
-      notes: activeProject.notes.filter(note => note.id !== noteId)
+      notes: activeProject.notes.filter((note) => note.id !== noteId),
+      // 同步去掉端点已不存在的连线（打开项目时 normalizeProjectConnections 也会兜底）
+      connections: (activeProject.connections || []).filter(
+        (c) => c.fromNoteId !== noteId && c.toNoteId !== noteId
+      )
     };
 
     await updateProject(updatedProject);

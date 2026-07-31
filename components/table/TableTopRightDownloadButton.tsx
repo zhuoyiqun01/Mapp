@@ -33,7 +33,7 @@ export const TableTopRightDownloadButton: React.FC<Props> = ({
           onDownload();
         }}
         onPointerDown={(e) => e.stopPropagation()}
-        title={subView === 'points' ? '下载节点表 (CSV)' : '下载关联表 (CSV)'}
+        tooltip="下载"
       >
         <Download size={18} className="sm:w-5 sm:h-5" />
       </ChromeIconButton>

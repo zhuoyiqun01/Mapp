@@ -1,6 +1,9 @@
 import React from 'react';
 import type { Project } from '../types';
-import { DEFAULT_GRAPH_STYLESHEET_SIZING } from '../utils/graph/graphData';
+import {
+  DEFAULT_GRAPH_STYLESHEET_SIZING,
+  DEFAULT_GRAPH_TIME_AXIS_WEIGHT_BIAS
+} from '../utils/graph/graphData';
 import { SettingsCompactSlider } from './ui/SettingsCompactSlider';
 
 export interface GraphStyleSettingsBlockProps {
@@ -9,7 +12,7 @@ export interface GraphStyleSettingsBlockProps {
   onPatch: (patch: Partial<Project>) => void;
 }
 
-/** 设置面板「Graph Style」：节点/边视觉、时间线图层权重牵引 */
+/** 设置面板「Graph Style」：节点/边视觉、按 Frame 聚类强度 */
 export const GraphStyleSettingsBlock: React.FC<GraphStyleSettingsBlockProps> = ({
   themeColor,
   project,
@@ -18,14 +21,14 @@ export const GraphStyleSettingsBlock: React.FC<GraphStyleSettingsBlockProps> = (
   const nodeSize = project.graphNodeSize ?? DEFAULT_GRAPH_STYLESHEET_SIZING.nodeSize;
   const labelPx = project.graphLabelFontPx ?? DEFAULT_GRAPH_STYLESHEET_SIZING.labelFontPx;
   const edgeW = project.graphEdgeWeight ?? DEFAULT_GRAPH_STYLESHEET_SIZING.edgeWeight;
-  const timeBias = project.graphTimeAxisWeightBias ?? 0;
-  const circleRefineOn = project.graphCircleRefineOrderWithForce !== false;
-  const coseDragRealtime = project.graphCoseDragRealtime !== false;
+  const edgeLabelPx = project.graphEdgeLabelFontPx ?? DEFAULT_GRAPH_STYLESHEET_SIZING.edgeLabelFontPx;
+  const timeBias = project.graphTimeAxisWeightBias ?? DEFAULT_GRAPH_TIME_AXIS_WEIGHT_BIAS;
+  const edgeCurve = project.graphEdgeCurve !== false;
 
   return (
     <div className="grid grid-cols-1 gap-x-3 gap-y-3 sm:grid-cols-2">
       <SettingsCompactSlider
-        label="节点大小"
+        label="节点最小尺寸"
         themeColor={themeColor}
         value={nodeSize}
         min={1}
@@ -50,7 +53,7 @@ export const GraphStyleSettingsBlock: React.FC<GraphStyleSettingsBlockProps> = (
       />
       <div className="min-w-0">
         <SettingsCompactSlider
-          label="连线粗细 / 边标签"
+          label="连线粗细"
           themeColor={themeColor}
           value={edgeW}
           min={0.1}
@@ -64,7 +67,21 @@ export const GraphStyleSettingsBlock: React.FC<GraphStyleSettingsBlockProps> = (
       </div>
       <div className="min-w-0">
         <SettingsCompactSlider
-          label="时间线 · 图层权重牵引"
+          label="边标签字号"
+          themeColor={themeColor}
+          value={edgeLabelPx}
+          min={3}
+          max={16}
+          step={1}
+          onChange={(v) => onPatch({ graphEdgeLabelFontPx: Math.round(Math.min(16, Math.max(3, v))) })}
+          formatValue={(v) => `${Math.round(v)}px`}
+          minCaption="小"
+          maxCaption="大"
+        />
+      </div>
+      <div className="min-w-0">
+        <SettingsCompactSlider
+          label="按Frame聚类"
           themeColor={themeColor}
           value={timeBias}
           min={0}
@@ -78,7 +95,7 @@ export const GraphStyleSettingsBlock: React.FC<GraphStyleSettingsBlockProps> = (
       </div>
 
       <label className="flex min-w-0 cursor-pointer items-center justify-between gap-3 sm:col-span-2">
-        <span className="text-xs font-medium text-gray-600">圆环 · 力传导重排</span>
+        <span className="text-xs font-medium text-gray-600">连线曲线</span>
         <span
           className="inline-flex shrink-0 rounded outline-none focus-within:outline focus-within:outline-2 focus-within:outline-offset-2"
           style={{ outlineColor: `${themeColor}66` }}
@@ -86,17 +103,17 @@ export const GraphStyleSettingsBlock: React.FC<GraphStyleSettingsBlockProps> = (
           <input
             type="checkbox"
             className="sr-only"
-            checked={circleRefineOn}
-            onChange={(e) => onPatch({ graphCircleRefineOrderWithForce: e.target.checked })}
+            checked={edgeCurve}
+            onChange={(e) => onPatch({ graphEdgeCurve: e.target.checked })}
           />
           <span
             className={`flex h-4 w-4 items-center justify-center rounded transition-colors ${
-              circleRefineOn ? '' : 'border border-gray-200/90 bg-white'
+              edgeCurve ? '' : 'border border-gray-200/90 bg-white'
             }`}
-            style={circleRefineOn ? { backgroundColor: themeColor } : undefined}
+            style={edgeCurve ? { backgroundColor: themeColor } : undefined}
             aria-hidden
           >
-            {circleRefineOn ? (
+            {edgeCurve ? (
               <svg viewBox="0 0 12 12" className="h-3 w-3 text-theme-chrome-fg" aria-hidden>
                 <path
                   d="M2.5 6l2.5 2.5L9.5 3"
@@ -111,42 +128,6 @@ export const GraphStyleSettingsBlock: React.FC<GraphStyleSettingsBlockProps> = (
           </span>
         </span>
       </label>
-
-      <label className="flex min-w-0 cursor-pointer items-center justify-between gap-3 sm:col-span-2">
-        <span className="text-xs font-medium text-gray-600">力传导布局 · 拖动实时重算</span>
-        <span
-          className="inline-flex shrink-0 rounded outline-none focus-within:outline focus-within:outline-2 focus-within:outline-offset-2"
-          style={{ outlineColor: `${themeColor}66` }}
-        >
-          <input
-            type="checkbox"
-            className="sr-only"
-            checked={coseDragRealtime}
-            onChange={(e) => onPatch({ graphCoseDragRealtime: e.target.checked })}
-          />
-          <span
-            className={`flex h-4 w-4 items-center justify-center rounded transition-colors ${
-              coseDragRealtime ? '' : 'border border-gray-200/90 bg-white'
-            }`}
-            style={coseDragRealtime ? { backgroundColor: themeColor } : undefined}
-            aria-hidden
-          >
-            {coseDragRealtime ? (
-              <svg viewBox="0 0 12 12" className="h-3 w-3 text-theme-chrome-fg" aria-hidden>
-                <path
-                  d="M2.5 6l2.5 2.5L9.5 3"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.75"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            ) : null}
-          </span>
-        </span>
-      </label>
-
     </div>
   );
 };

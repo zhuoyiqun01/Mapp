@@ -1,6 +1,10 @@
-import type { Frame, GraphLayerState, Note } from '../../types';
+import type { Frame, GraphLayerState, Note, TagVisibilityLogic } from '../../types';
 import { GRAPH_UNTAGGED_TAG_GROUP } from '../graph/graphRuntimeCore';
 import type { GraphLayerGroupStandard } from '../graph/graphRuntimeCore';
+
+export function normalizeTagVisibilityLogic(raw?: string | null): TagVisibilityLogic {
+  return raw === 'and' ? 'and' : 'or';
+}
 
 /**
  * 地图可绘制的地理坐标：有效数字且非占位 0,0（无坐标/仅白板数据的导入使用 0,0）。
@@ -22,6 +26,18 @@ export function truncateRawTextLabel(text: string, maxLen = 56): string {
   return singleLine.length > maxLen ? `${singleLine.slice(0, Math.max(0, maxLen - 1))}…` : singleLine;
 }
 
+export function noteTagLabels(note: Note): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of note.tags ?? []) {
+    const l = String(t.label ?? '').trim();
+    if (!l || seen.has(l)) continue;
+    seen.add(l);
+    out.push(l);
+  }
+  return out;
+}
+
 export function noteTagLayerGroupKey(note: Note): string {
   const raw = note.tags?.[0]?.label?.trim() ?? '';
   return raw === '' ? GRAPH_UNTAGGED_TAG_GROUP : raw;
@@ -29,18 +45,18 @@ export function noteTagLayerGroupKey(note: Note): string {
 
 export function noteFrameIdCandidates(note: Note): string[] {
   const raw = note.groupIds?.length
-    ? note.groupIds
+    ? note.groupIds.slice(0, 1)
     : note.groupId
       ? [note.groupId]
       : note.groupNames?.length
-        ? note.groupNames
+        ? note.groupNames.slice(0, 1)
         : note.groupName
           ? [note.groupName]
           : [];
   return raw.map((x) => String(x).trim()).filter((x) => x !== '');
 }
 
-/** 与图谱 frame 模式一致：取第一个未在 hiddenSet 中的帧；否则退回首候选 */
+/** 与图谱 frame 模式一致：取第一个未在 hiddenSet 中的簇；否则退回首候选 */
 export function effectiveFrameGroupKeyForNote(note: Note, hiddenSet: Set<string>): string {
   const candidates = noteFrameIdCandidates(note);
   if (candidates.length === 0) return '';
@@ -57,7 +73,9 @@ export function noteBelongsToLayerGroupKey(
 ): boolean {
   const k = String(groupKey).trim();
   if (standard === 'tag') {
-    return noteTagLayerGroupKey(note) === k;
+    const labels = noteTagLabels(note);
+    if (k === '' || k === GRAPH_UNTAGGED_TAG_GROUP) return labels.length === 0;
+    return labels.includes(k);
   }
   if (k === '') {
     return noteFrameIdCandidates(note).length === 0;
@@ -67,7 +85,8 @@ export function noteBelongsToLayerGroupKey(
 
 /**
  * 组级未隐藏 且 节点未 layerItemHidden 时可在各视图显示。
- * frame 模式与图谱一致：按 effectiveFrameGroupKey 判断是否被组隐藏。
+ * tag：按 tagVisibilityLogic（默认 or）；无标签看「无标签」组。
+ * frame：按 effectiveFrameGroupKey。
  */
 export function isNoteVisibleInUnifiedLayer(
   note: Note,
@@ -77,11 +96,30 @@ export function isNoteVisibleInUnifiedLayer(
   if (note.layerItemHidden) return false;
   const hiddenSet = new Set((merged.hidden ?? []).map((h) => String(h).trim()));
   if (standard === 'tag') {
-    const g = noteTagLayerGroupKey(note);
-    return !hiddenSet.has(g);
+    return noteVisibleByTagHiddenSet(
+      note,
+      hiddenSet,
+      normalizeTagVisibilityLogic(merged.tagVisibilityLogic)
+    );
   }
   const g = effectiveFrameGroupKeyForNote(note, hiddenSet);
   return !hiddenSet.has(g);
+}
+
+/**
+ * 标签层显隐。
+ * - or：任一标签未隐藏则可见
+ * - and：全部标签均未隐藏才可见（有一个隐藏就隐藏节点）
+ */
+export function noteVisibleByTagHiddenSet(
+  note: Note,
+  tagHidden: Set<string>,
+  logic: TagVisibilityLogic = 'or'
+): boolean {
+  const labels = noteTagLabels(note);
+  if (labels.length === 0) return !tagHidden.has(GRAPH_UNTAGGED_TAG_GROUP);
+  if (logic === 'and') return labels.every((l) => !tagHidden.has(l));
+  return labels.some((l) => !tagHidden.has(l));
 }
 
 export function groupDisplayLabel(
@@ -94,7 +132,7 @@ export function groupDisplayLabel(
     if (k === '' || k === GRAPH_UNTAGGED_TAG_GROUP) return '无标签';
     return k;
   }
-  if (k === '') return '无帧';
+  if (k === '') return '无簇';
   return framesById.get(k)?.title ?? k;
 }
 

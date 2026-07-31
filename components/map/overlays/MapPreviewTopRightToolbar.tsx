@@ -81,7 +81,7 @@ export function MapPreviewTopRightToolbar({
         layerGroupStandard={layerGroupStandard}
       />
       <ChromeIconButton
-        title="导出 Tab 预览独立网页"
+        tooltip="导出"
         chromeSurfaceStyle={chromeSurfaceStyle}
         chromeHoverBackground={chromeHoverBackground}
         onClick={onExportStandaloneTab}

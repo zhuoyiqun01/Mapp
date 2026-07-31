@@ -39,6 +39,8 @@ export function buildStandaloneMapTabHtml(payload: MapTabExportPayload): string 
     .mapping-preview-markdown blockquote { border-left: 3px solid #e5e7eb; padding-left: 0.8rem; color: #6b7280; font-style: italic; margin: 0.5rem 0; }
     .mapping-preview-markdown code { background: #f3f4f6; padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.85em; font-family: monospace; }
     .mapping-preview-markdown pre { background: #f9fafb; padding: 0.5rem; border-radius: 6px; overflow-x: auto; margin: 0.5rem 0; border: 1px solid #f3f4f6; }
+    .mapping-preview-markdown a { color: #2563eb; text-decoration: underline; text-underline-offset: 2px; word-break: break-all; }
+    .mapping-preview-markdown a:hover { color: #1d4ed8; }
   </style>
 </head>
 <body class="bg-gray-50 text-gray-800 antialiased">

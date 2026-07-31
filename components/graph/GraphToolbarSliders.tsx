@@ -9,6 +9,8 @@ interface GraphToolbarSlidersProps {
   setLabelSize: (value: number) => void;
   edgeWeight: number;
   setEdgeWeight: (value: number) => void;
+  edgeLabelSize: number;
+  setEdgeLabelSize: (value: number) => void;
   chainLength: number;
   setChainLength: (value: number) => void;
   themeColor: string;
@@ -23,6 +25,8 @@ export function GraphToolbarSliders({
   setLabelSize,
   edgeWeight,
   setEdgeWeight,
+  edgeLabelSize,
+  setEdgeLabelSize,
   chainLength,
   setChainLength,
   themeColor,
@@ -47,7 +51,7 @@ export function GraphToolbarSliders({
         e.stopPropagation();
       }}
     >
-      <ChromeLabeledSlider label="Node Size" chromeSurfaceStyle={chromeSurfaceStyle}>
+      <ChromeLabeledSlider label="Min Size" chromeSurfaceStyle={chromeSurfaceStyle}>
         <CustomHorizontalSlider
           value={nodeSize}
           min={4}
@@ -61,7 +65,7 @@ export function GraphToolbarSliders({
         />
       </ChromeLabeledSlider>
 
-      <ChromeLabeledSlider label="Label Size" chromeSurfaceStyle={chromeSurfaceStyle}>
+      <ChromeLabeledSlider label="Idle Label" chromeSurfaceStyle={chromeSurfaceStyle}>
         <CustomHorizontalSlider
           value={labelSize}
           min={4}
@@ -85,6 +89,20 @@ export function GraphToolbarSliders({
           themeColor={themeColor}
           width={90}
           formatValue={(v) => v.toFixed(1)}
+          mapInstance={null}
+        />
+      </ChromeLabeledSlider>
+
+      <ChromeLabeledSlider label="Idle Edge Label" chromeSurfaceStyle={chromeSurfaceStyle}>
+        <CustomHorizontalSlider
+          value={edgeLabelSize}
+          min={3}
+          max={16}
+          step={1}
+          onChange={setEdgeLabelSize}
+          themeColor={themeColor}
+          width={90}
+          formatValue={(v) => `${Math.round(v)}px`}
           mapInstance={null}
         />
       </ChromeLabeledSlider>

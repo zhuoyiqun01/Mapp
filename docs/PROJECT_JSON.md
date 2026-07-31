@@ -53,7 +53,7 @@
 | `id` | string | 导入会换新 id；可保留导出值作参考 |
 | `name` | string | **必填** |
 | `type` | `'map'` | 历史字段，固定写 `"map"` |
-| `projectKind` | `'mapping' \| 'graph'` | **推荐显式写出**。`mapping`=地图+看板+表；`graph`=图谱+看板+表。导出仅写出合法值；非法或缺省 → 导入后询问 |
+| `projectKind` | `'mapping' \| 'graph'` | **推荐显式写出**。`mapping`=地图+看板+表；`graph`=图谱+表。导出仅写出合法值；非法或缺省 → 导入后询问 |
 | `createdAt` | number | Unix ms；导入时常改成当前时间 |
 | `notes` | `Note[]` | 主内容；可 `[]` |
 | `frames` | `Frame[]` | 看板 Frame；可 `[]` |
@@ -66,13 +66,14 @@
 
 | 字段 | 说明 |
 |------|------|
-| `graphLayers` / `graphFrameLayers` | 标签 / 帧图层面板状态。时间线纵轴与帧簇主分区 **按 frame**；帧簇簇内位置另受 **tag 权重/层级** 影响（见 §3.5）。AI 不必写 `weights` |
+| `graphLayers` / `graphFrameLayers` | 标签 / 簇图层面板状态。标签层可用 `tagVisibilityLogic`: `'and'\|'or'`（多标签显隐）。时间线纵轴与簇布局主分区 **按 frame** |
 | `graphLayerStandard` | 地图/看板面板切换用；图谱布局不再依赖 |
-| `graphDefaultLayoutMode` | `'time' \| 'cose' \| 'frameCluster'`（已移除标签网格/环形） |
+| `graphDefaultLayoutMode` | `'time' \| 'cose' \| 'frameCluster'`（力传导模式使用 **fcose**） |
 | `graphNodeSize` | 节点直径 px，约 1–36 |
 | `graphLabelFontPx` | 空闲标签字号 4–16 |
 | `graphEdgeWeight` | 线粗 0.1–2 |
 | `graphEdgeLabelFontPx` | 边标签字号 3–16 |
+| `graphEdgeCurve` | 连线曲线；`true`/缺省 → unbundled-bezier，`false` → straight |
 | `graphTimeAxisWeightBias` 等 | 见 `types.ts` |
 
 导出当前会带上部分图谱字段；未列出的字段若手写进 JSON，导入时只要落在 `project` 上且后续 `saveProject` 能存，一般会保留（以当前导入代码拷贝的字段为准）。

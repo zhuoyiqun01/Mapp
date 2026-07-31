@@ -28,7 +28,11 @@ import { TagAddPanel } from './ui/TagAddPanel';
 import { SettingsPanel } from './SettingsPanel';
 import { BoardImportPreviewDialog } from './board/BoardImportPreviewDialog';
 import { useCsvImport } from '@/components/hooks/useCsvImport';
-import { buildNewNotesFromProjectJsonRaws, parseProjectJsonNotesPayload } from '../utils/import/projectDataImport';
+import { buildNewNotesFromProjectJsonRaws, parseProjectJsonNotesPayloadResult } from '../utils/import/projectDataImport';
+import {
+  formatImportErrorMessage,
+  formatUnexpectedImportError
+} from '../utils/import/importErrorFormat';
 import { BoardImageLightbox } from './board/BoardImageLightbox';
 import { BoardBrowseTagFilterPanel } from './board/BoardBrowseTagFilterPanel';
 import { BoardBrowseTimeFilterPanel } from './board/BoardBrowseTimeFilterPanel';
@@ -43,8 +47,6 @@ import { useSimpleConnectionPanel } from './hooks/useSimpleConnectionPanel';
 import { BoardTopCenterEditToolbar } from './board/BoardTopCenterEditToolbar';
 import { ChromeIconButton } from './ui/ChromeIconButton';
 import { LayerToolbarIcon } from './ui/LayerToolbarIcon';
-import { ChromeLabeledSlider } from './ui/ChromeLabeledSlider';
-import { CustomHorizontalSlider } from './ui/CustomHorizontalSlider';
 import ReactMarkdown from 'react-markdown';
 import {
   CONNECTION_OFFSET,
@@ -217,6 +219,7 @@ interface BoardViewProps {
   ) => void | Promise<void>;
   onSwitchToMapView?: (coords?: { lat: number; lng: number }) => void;
   onSwitchToBoardView?: (coords?: { x: number; y: number }) => void;
+  onSwitchToGraphView?: (noteId: string) => void;
   navigateToCoords?: { x: number; y: number } | null;
   projectId?: string;
   onNavigateComplete?: () => void;
@@ -254,6 +257,7 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
   onUpdateProject,
   onSwitchToMapView,
   onSwitchToBoardView,
+  onSwitchToGraphView,
   navigateToCoords,
   projectId,
   onNavigateComplete,
@@ -383,6 +387,7 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
   });
   const [showLayerPanel, setShowLayerPanel] = useState(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
+  const settingsButtonRef = useRef<HTMLButtonElement>(null);
 
   const projectFull = project as Project | undefined;
   const effectiveConnections = useMemo(
@@ -987,23 +992,21 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
            centerY <= frame.y + frame.height;
   };
 
-  // 更新所有Note的分组信息（支持多frame归属）
+  // 更新所有 Note 的分组信息（一便签只属于一个 frame：重叠时取第一个）
   const updateNoteGroups = () => {
     let changed = false;
     const updatedNotes = notes.map(note => {
-      // 找到所有包含此Note的Frames
       const containingFrames = frames.filter(frame => isNoteInFrame(note, frame));
-      
-      const newGroupIds = containingFrames.length > 0 ? containingFrames.map(f => f.id) : undefined;
-      const newGroupNames = containingFrames.length > 0 ? containingFrames.map(f => f.title) : undefined;
-      const newGroupId = containingFrames.length > 0 ? containingFrames[0].id : undefined;
-      const newGroupName = containingFrames.length > 0 ? containingFrames[0].title : undefined;
+      const primary = containingFrames[0];
+      const newGroupIds = primary ? [primary.id] : undefined;
+      const newGroupNames = primary ? [primary.title] : undefined;
+      const newGroupId = primary?.id;
+      const newGroupName = primary?.title;
 
-      // 检查是否有变化
       const oldGroupIds = note.groupIds || (note.groupId ? [note.groupId] : []);
       const currentNewGroupIds = newGroupIds || [];
       
-      const hasNoteChanges = JSON.stringify(oldGroupIds.sort()) !== JSON.stringify(currentNewGroupIds.sort());
+      const hasNoteChanges = JSON.stringify(oldGroupIds) !== JSON.stringify(currentNewGroupIds);
 
       if (hasNoteChanges) {
         changed = true;
@@ -1011,8 +1014,8 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
           ...note,
           groupIds: newGroupIds,
           groupNames: newGroupNames,
-          groupId: newGroupId, // 向后兼容
-          groupName: newGroupName // 向后兼容
+          groupId: newGroupId,
+          groupName: newGroupName
         };
       }
       return note;
@@ -1412,30 +1415,6 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
     return createRoundedPath(cleanedPoints, CONNECTION_LINE_CORNER_RADIUS);
   };
 
-  // 使用 useMemo 缓存连接线路径计算
-  const connectionPaths = useMemo(() => {
-    return effectiveConnections.map(conn => {
-      const fromNote = notes.find(n => n.id === conn.fromNoteId);
-      const toNote = notes.find(n => n.id === conn.toNoteId);
-      if (!fromNote || !toNote) return null;
-      
-      const fromIsDragging = draggingNoteId === conn.fromNoteId;
-      const toIsDragging = draggingNoteId === conn.toNoteId;
-      const fromPoint = getConnectionPoint(fromNote, conn.fromSide, fromIsDragging, dragOffset);
-      const toPoint = getConnectionPoint(toNote, conn.toSide, toIsDragging, dragOffset);
-      
-      const pathD = calculateConnectionPath(fromPoint, toPoint, conn.fromSide, conn.toSide);
-      const midX = (fromPoint.x + toPoint.x) / 2;
-      const midY = (fromPoint.y + toPoint.y) / 2;
-      return {
-        id: conn.id,
-        pathD,
-        midX,
-        midY
-      };
-    }).filter((p): p is NonNullable<typeof p> => p !== null);
-  }, [effectiveConnections, notes, draggingNoteId, dragOffset]);
-
   // Apply initial transform when project changes or container is ready
   const lastProjectIdRef = useRef<string | null>(null);
   useEffect(() => {
@@ -1801,9 +1780,9 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
   const handleDataImport = async (file: File) => {
     try {
       const text = await file.text();
-      const parsed = parseProjectJsonNotesPayload(text);
-      if (!parsed) {
-        alert('无效的项目 JSON：需要包含 project.notes 数组');
+      const parsed = parseProjectJsonNotesPayloadResult(text);
+      if (parsed.ok === false) {
+        alert(formatImportErrorMessage(parsed.error, file.name));
         return;
       }
 
@@ -1811,7 +1790,16 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
       const uniqueImportedNotes = buildNewNotesFromProjectJsonRaws(parsed.rawNotes, existingNotes);
 
       if (uniqueImportedNotes.length === 0) {
-        alert('没有可导入的新便签（可能全部重复或文件为空）');
+        alert(
+          formatImportErrorMessage(
+            {
+              title: '没有可导入的新便签',
+              location: 'project.notes',
+              detail: '可能全部重复或文件为空'
+            },
+            file.name
+          )
+        );
         return;
       }
 
@@ -1899,7 +1887,7 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
       }
     } catch (error) {
       console.error('Failed to import data:', error);
-      alert('导入失败，请检查文件格式。');
+      alert(formatUnexpectedImportError(error, file.name));
     }
   };
 
@@ -2791,19 +2779,17 @@ const createNoteAtCenter = () => {
 
           onUpdateFrames?.([...frames, newFrame]);
 
-          // 为被框选的便签添加新frame的groupIds
+          // 被框选的便签归属到新 frame（单簇）
           if (selectedNoteIds.size > 0) {
             selectedNoteIds.forEach(noteId => {
               const note = notes.find(n => n.id === noteId);
               if (note) {
-                const currentGroupIds = note.groupIds || (note.groupId ? [note.groupId] : []);
-                const newGroupIds = [...currentGroupIds, newFrame.id];
-                const newGroupNames = [...(note.groupNames || []), newFrame.title];
-
                 const updatedNote = {
                   ...note,
-                  groupIds: newGroupIds,
-                  groupNames: newGroupNames
+                  groupIds: [newFrame.id],
+                  groupNames: [newFrame.title],
+                  groupId: newFrame.id,
+                  groupName: newFrame.title
                 };
                 onUpdateNote(updatedNote);
               }
@@ -3057,15 +3043,13 @@ const createNoteAtCenter = () => {
               
               // 更新便签对象
               if (containingFrames.length > 0) {
-                const groupIds = containingFrames.map(f => f.id);
-                const groupNames = containingFrames.map(f => f.title);
                 const singleFrame = containingFrames[0];
                 updatedNotes[noteIndex] = {
                   ...selectedNote,
                   boardX: newBoardX,
                   boardY: newBoardY,
-                  groupIds,
-                  groupNames,
+                  groupIds: [singleFrame.id],
+                  groupNames: [singleFrame.title],
                   groupId: singleFrame.id,
                   groupName: singleFrame.title
                 };
@@ -3135,19 +3119,17 @@ const createNoteAtCenter = () => {
                     centerY <= frame.y + frame.height
                   );
                   
-                  // 更新便签，包括位置和frame关系（支持多frame）
+                  // 更新便签：单簇归属（重叠取第一个）
                   if (containingFrames.length > 0) {
-                    const groupIds = containingFrames.map(f => f.id);
-                    const groupNames = containingFrames.map(f => f.title);
                     const singleFrame = containingFrames[0];
               onUpdateNote({
                   ...note,
                       boardX: newBoardX,
                       boardY: newBoardY,
-                      groupIds,
-                      groupNames,
-                      groupId: singleFrame.id, // 向后兼容
-                      groupName: singleFrame.title // 向后兼容
+                      groupIds: [singleFrame.id],
+                      groupNames: [singleFrame.title],
+                      groupId: singleFrame.id,
+                      groupName: singleFrame.title
                     });
                   } else {
                     onUpdateNote({
@@ -4432,42 +4414,7 @@ const createNoteAtCenter = () => {
             </React.Fragment>
           )          })}
 
-          {workspaceEditMode && connectionPaths.length > 0 ? (
-            <svg
-              className="absolute top-0 left-0 z-[180] overflow-visible pointer-events-auto"
-              style={{ width: '100%', height: '100%' }}
-              aria-hidden
-            >
-              {connectionPaths.map((cp) => {
-                const selected = selectedConnectionId === cp.id;
-                return (
-                  <path
-                    key={cp.id}
-                    d={cp.pathD}
-                    fill="none"
-                    stroke={selected ? themeColor : 'rgba(100, 116, 139, 0.42)'}
-                    strokeWidth={selected ? 7 : 5}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="cursor-pointer"
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedConnectionId(cp.id);
-                      setSelectedNoteId(null);
-                      setSelectedNoteIds(new Set());
-                      setSelectedFrameId(null);
-                      const c = effectiveConnections.find((x) => x.id === cp.id);
-                      if (c) {
-                        setEditingConnectionLabel(c.label || '');
-                        editingConnectionLabelRef.current = c.label || '';
-                      }
-                    }}
-                  />
-                );
-              })}
-            </svg>
-          ) : null}
+          {/* Board 视图不渲染连线（连线仅在 Graph 等视图展示） */}
 
           {notes
             .filter((note) => notePassesBoardVisibilityFilters(note))
@@ -4758,7 +4705,7 @@ const createNoteAtCenter = () => {
                                                     onSwitchToMapView(note.coords);
                                                 }}
                                                 className="p-1.5 rounded-full bg-white/80 hover:bg-white shadow-sm transition-colors opacity-0 group-hover:opacity-100 pointer-events-auto"
-                                                title="定位到地图视图"
+                                                title="定位到地图"
                                             >
                                                 <Locate size={14} className="text-gray-700" />
                                             </button>
@@ -5060,18 +5007,22 @@ const createNoteAtCenter = () => {
         {isUIVisible && (
             <div
                 data-allow-context-menu
-                className="fixed top-2 sm:top-4 left-2 sm:left-4 z-[500] pointer-events-auto flex h-10 sm:h-12 items-center gap-1.5 sm:gap-2"
+                className="fixed top-2 sm:top-4 ui-workspace-left z-[500] pointer-events-auto flex h-10 sm:h-12 items-center gap-1.5 sm:gap-2"
                 onPointerDown={(e) => e.stopPropagation()}
             >
                 <ChromeIconButton
+                  ref={settingsButtonRef}
+                  themeColor={themeColor}
                   chromeSurfaceStyle={ch}
                   chromeHoverBackground={chHover}
                   nonChromeIdleHover="imperative-gray100"
+                  active={showSettingsPanel}
+                  pressThemeFlash
                   onClick={() => {
-                    setShowSettingsPanel(true);
+                    setShowSettingsPanel((v) => !v);
                     setShowLayerPanel(false);
                   }}
-                  title="设置"
+                  tooltip="设置"
                 >
                   <Settings size={18} className="sm:w-5 sm:h-5" />
                 </ChromeIconButton>
@@ -5088,11 +5039,7 @@ const createNoteAtCenter = () => {
                             setShowLayerPanel(!showLayerPanel);
                             setShowSettingsPanel(false);
                         }}
-                        title={
-                          graphLayerGroupStandard === 'tag'
-                            ? '图层（标签组顺序、显隐、半径权重）'
-                            : '图层（帧组顺序、显隐、半径权重）'
-                        }
+                        tooltip="图层"
                     >
                         <LayerToolbarIcon layerGroupStandard={graphLayerGroupStandard} />
                     </ChromeIconButton>
@@ -5115,47 +5062,6 @@ const createNoteAtCenter = () => {
                         />
                     ) : null}
                 </div>
-                )}
-                {workspaceEditMode && (
-                  <div
-                    className="flex flex-wrap gap-1.5 sm:gap-2 pointer-events-auto"
-                    onPointerDown={(e) => {
-                      const target = e.target as Element;
-                      if (target.closest('.custom-horizontal-slider')) return;
-                      e.stopPropagation();
-                    }}
-                    onPointerMove={(e) => {
-                      const target = e.target as Element;
-                      if (target.closest('.custom-horizontal-slider')) return;
-                      e.stopPropagation();
-                    }}
-                    onPointerUp={(e) => {
-                      const target = e.target as Element;
-                      if (target.closest('.custom-horizontal-slider')) return;
-                      e.stopPropagation();
-                    }}
-                  >
-                    <ChromeLabeledSlider label="便签尺寸" chromeSurfaceStyle={ch}>
-                      <CustomHorizontalSlider
-                        value={project?.standardSizeScale || 1}
-                        min={0.5}
-                        max={1}
-                        step={0.1}
-                        onChange={(targetScale) => {
-                          if (!onUpdateProject || !project) return;
-                          const clamped = Math.max(0.5, Math.min(1, targetScale));
-                          const rounded = Math.round(clamped * 10) / 10;
-                          const currentScale = project?.standardSizeScale || 1;
-                          if (Math.abs(rounded - currentScale) < 0.0001) return;
-                          onUpdateProject({ ...project, standardSizeScale: rounded });
-                        }}
-                        themeColor={themeColor}
-                        width={90}
-                        formatValue={(v) => `${Math.round(v * 100)}%`}
-                        mapInstance={null}
-                      />
-                    </ChromeLabeledSlider>
-                  </div>
                 )}
             </div>
         )}
@@ -5277,7 +5183,7 @@ const createNoteAtCenter = () => {
               initialNote={notes.find(n => n.id === editingNote.id) || editingNote}
               onDelete={onDeleteNote}
               onSwitchToMapView={onSwitchToMapView}
-              onSwitchToBoardView={onSwitchToBoardView}
+              onSwitchToGraphView={onSwitchToGraphView}
               themeColor={themeColor}
               panelChromeStyle={panelChromeStyle}
               onSave={(updated) => {
@@ -5405,6 +5311,7 @@ const createNoteAtCenter = () => {
       <SettingsPanel
         isOpen={showSettingsPanel}
         onClose={() => setShowSettingsPanel(false)}
+        anchorRef={settingsButtonRef}
         settingsContextView="board"
         themeColor={themeColor}
         onThemeColorChange={onThemeColorChange ?? (() => {})}

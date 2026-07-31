@@ -4,6 +4,7 @@
     "id": "builtin-starter-placeholder",
     "name": "上海",
     "type": "map",
+    "projectKind": "mapping",
     "createdAt": 0,
     "notes": [
       {

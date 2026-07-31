@@ -1,0 +1,36 @@
+---
+description: 玻璃面板上的小图标按钮使用无框样式
+globs: components/**/*.{tsx,ts}
+alwaysApply: false
+---
+
+# 玻璃面板小 Icon 按钮
+
+## 规则
+
+玻璃面板（详情卡、检查器侧栏、浮层玻璃 chrome 等）上的**小图标按钮**使用**无框**样式：
+
+- 无填充底色、无描边、无阴影
+- 默认灰色图标；hover 时浅灰底 + 图标略加深
+- 使用共享类：`chromePanelGhostIconButtonClass`（`components/ui/chromePanelIconButton.ts`）
+
+## 适用范围
+
+- 详情窗口右上角编辑（铅笔）
+- 检查器标题栏铅笔 / 眼睛等内嵌小 icon
+- 同类「面板标题栏 / 内容区旁」的辅助 icon 操作
+
+## 不适用
+
+- 顶栏独立的 `ChromeIconButton`（按钮自身即玻璃面，需要边框与阴影）
+- 主 CTA、主题色实心按钮、表单主操作
+
+## 示例
+
+```tsx
+import { chromePanelGhostIconButtonClass } from '../ui/chromePanelIconButton';
+
+<button type="button" className={chromePanelGhostIconButtonClass} aria-label="编辑">
+  <Pencil size={14} strokeWidth={2} />
+</button>
+```

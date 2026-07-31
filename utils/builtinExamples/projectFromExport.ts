@@ -1,5 +1,6 @@
 import type { Note, Project } from '../../types';
 import { generateId } from '../../utils';
+import { sanitizeProjectKind } from '../projectKind';
 
 /**
  * 将「应用导出的 JSON」里的 project 转为可 `saveProject` 的新项目（重新分配 id，避免与本地冲突）。
@@ -15,6 +16,8 @@ export function buildFreshProjectFromExportedProject(
     id: newProjectId,
     name: displayName,
     type: 'map',
+    // 保留合法 projectKind；无效/缺失 → undefined，首次打开时询问
+    projectKind: sanitizeProjectKind(importedProject.projectKind),
     createdAt: Date.now(),
     notes: importedProject.notes || [],
     frames: importedProject.frames || [],

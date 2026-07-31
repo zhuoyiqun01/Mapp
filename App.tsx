@@ -9,7 +9,7 @@ import { TableView } from './components/TableView';
 import { GraphView } from './components/GraphView';
 import { ProjectManager } from './components/ProjectManager';
 import { HomePhysicsPlayground } from './components/HomePhysicsPlayground';
-import { Note, ViewMode, Project } from './types';
+import { Note, ViewMode, Project, ProjectKind } from './types';
 import { get, set } from 'idb-keyval';
 import {
   MAP_STYLE_OPTIONS,
@@ -23,6 +23,14 @@ import {
 import { useProjectState } from './components/hooks/useProjectState';
 import { useViewState } from './components/hooks/useViewState';
 import { useAppState } from './components/hooks/useAppState';
+import { ProjectKindPromptDialog } from './components/ProjectKindPromptDialog';
+import {
+  needsProjectKindPrompt,
+  defaultViewModeForKind,
+  isViewModeAllowedForKind,
+  resolveProjectKind,
+  isProjectKind
+} from './utils/projectKind';
 import { 
   syncProjectsToCloud, 
   loadProjectsFromCloud, 
@@ -116,16 +124,22 @@ export default function App() {
     mappingWorkspaceEditMode,
     navigateToMapCoords,
     navigateToBoardCoords,
+    navigateToGraphNoteId,
     setViewMode,
     setIsEditorOpen,
     setMappingWorkspaceEditMode,
     navigateToMap,
     navigateToBoard,
+    navigateToGraphNote,
     clearMapNavigation,
     clearBoardNavigation,
+    clearGraphNavigation,
     saveMapPosition,
     saveBoardPosition
   } = viewState;
+
+  const projectKind = resolveProjectKind(activeProject);
+  const [kindPromptProject, setKindPromptProject] = useState<Project | null>(null);
 
   /**
    * selectProject 会先 setCurrentProjectId(新 id)、异步 load 完成后再 setActiveProject。
@@ -137,6 +151,50 @@ export default function App() {
     !!activeProject &&
     !!currentProjectId &&
     activeProject.id !== currentProjectId;
+
+  /** 打开已加载项目：未分型则询问；已分型则校正默认/非法视图 */
+  useEffect(() => {
+    if (!activeProject || !currentProjectId) {
+      setKindPromptProject(null);
+      return;
+    }
+    if (activeProject.id !== currentProjectId) return;
+    if (isLoadingProject) return;
+
+    if (needsProjectKindPrompt(activeProject)) {
+      setKindPromptProject((prev) => (prev?.id === activeProject.id ? prev : activeProject));
+      return;
+    }
+
+    setKindPromptProject(null);
+    const kind = resolveProjectKind(activeProject);
+    if (!kind) return;
+    if (!isViewModeAllowedForKind(kind, viewMode)) {
+      setViewMode(defaultViewModeForKind(kind));
+    }
+  }, [activeProject, currentProjectId, isLoadingProject, viewMode, setViewMode]);
+
+  const handleConfirmProjectKind = useCallback(
+    async (kind: ProjectKind) => {
+      const target = kindPromptProject;
+      if (!target) return;
+      const next = { ...target, projectKind: kind };
+      await projectState.updateProject(next);
+      setKindPromptProject(null);
+      setViewMode(defaultViewModeForKind(kind));
+    },
+    [kindPromptProject, projectState, setViewMode]
+  );
+
+  const handleCancelProjectKind = useCallback(() => {
+    setKindPromptProject(null);
+    setCurrentProjectId(null);
+    setActiveProject(null);
+    setPendingEnterWorkspaceFromHome(false);
+    setSidebarDockedInline(false);
+    setIsSidebarOpen(false);
+    setSidebarExpandForProjectSwitch(false);
+  }, [setCurrentProjectId, setActiveProject]);
 
   // 安装内置示例项目（首次打开/未安装时）
   useEffect(() => {
@@ -552,6 +610,7 @@ export default function App() {
     setSidebarExpandingToHome(false);
     clearMapNavigation();
     clearBoardNavigation();
+    clearGraphNavigation();
 
     if (fromHome) {
       setSidebarExpandForProjectSwitch(false);
@@ -591,6 +650,7 @@ export default function App() {
     projectState,
     clearMapNavigation,
     clearBoardNavigation,
+    clearGraphNavigation,
     closeProjectSidebar
   ]);
 
@@ -675,6 +735,31 @@ export default function App() {
 
   // UI Visibility State (Tab key toggle)
   const [isUIVisible, setIsUIVisible] = useState(true);
+
+  /** 侧栏打开且非全宽时，工作区 UI 以侧栏右缘为左界（CSS --workspace-ui-left-inset） */
+  useEffect(() => {
+    const root = document.documentElement;
+    const computeInsetPx = () => {
+      const sidebarVisible = isUIVisible && isSidebarOpen && !projectSidebarIsFullWidth;
+      if (!sidebarVisible) return 0;
+      if (projectSidebarLargeViewport) return PROJECT_LIST_MAX_WIDTH_PX;
+      return Math.min(window.innerWidth * 0.62, PROJECT_LIST_MAX_WIDTH_PX);
+    };
+    const apply = () => {
+      root.style.setProperty('--workspace-ui-left-inset', `${Math.round(computeInsetPx())}px`);
+    };
+    apply();
+    window.addEventListener('resize', apply);
+    return () => {
+      window.removeEventListener('resize', apply);
+      root.style.setProperty('--workspace-ui-left-inset', '0px');
+    };
+  }, [
+    isUIVisible,
+    isSidebarOpen,
+    projectSidebarIsFullWidth,
+    projectSidebarLargeViewport
+  ]);
 
   /** 侧栏 docked：全宽启动页与项目内联共用同一壳，不再切换到单独「全屏 ProjectManager」 */
   const showDockedProjectSidebar =
@@ -1225,7 +1310,6 @@ export default function App() {
 
     if (hasImportedPayload) {
       await projectState.loadProjects();
-      setViewMode('map');
       setSidebarExpandingToHome(false);
       setSidebarExpandForProjectSwitch(false);
       if (enteringFromHome) {
@@ -1239,11 +1323,13 @@ export default function App() {
       return;
     }
 
+    const kind: ProjectKind = isProjectKind(project.projectKind) ? project.projectKind : 'mapping';
     const projectId = await projectState.createProject({
-      name: project.name
+      name: project.name,
+      projectKind: kind
     });
 
-    setViewMode('map');
+    setViewMode(defaultViewModeForKind(kind));
     setSidebarExpandingToHome(false);
     setSidebarExpandForProjectSwitch(false);
     if (enteringFromHome) {
@@ -1337,6 +1423,15 @@ export default function App() {
 
   return (
     <EditInspectorProvider>
+      {kindPromptProject ? (
+        <ProjectKindPromptDialog
+          projectName={kindPromptProject.name}
+          themeColor={themeColor}
+          chromeSurfaceStyle={panelChromeStyle}
+          onConfirm={(kind) => void handleConfirmProjectKind(kind)}
+          onCancel={handleCancelProjectKind}
+        />
+      ) : null}
     <div
       className="w-full h-screen flex flex-col overflow-hidden relative bg-gray-50"
       style={{
@@ -1667,7 +1762,7 @@ export default function App() {
           </button>
         )}
 
-        {viewMode === 'map' ? (
+        {viewMode === 'map' && projectKind === 'mapping' ? (
           isWorkspaceProjectDataStale ? (
           <div className="flex h-full w-full min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-gray-100 text-gray-600">
             <Loader2 size={32} className="animate-spin shrink-0" aria-hidden />
@@ -1738,7 +1833,7 @@ export default function App() {
             }}
           />
           )
-        ) : viewMode === 'board' ? (
+        ) : viewMode === 'board' && projectKind === 'mapping' ? (
           isWorkspaceProjectDataStale ? (
           <div className="flex h-full w-full min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-gray-100 text-gray-600">
             <Loader2 size={32} className="animate-spin shrink-0" aria-hidden />
@@ -1771,34 +1866,39 @@ export default function App() {
                 saveBoardPositionDirect(currentProjectId, x, y, scale);
               }
             }}
-            onSwitchToMapView={(coords?: { lat: number; lng: number; zoom?: number }) => {
-              // Close editor first to ensure UI state is correct
-              setIsEditorOpen(false);
+            onSwitchToMapView={
+              projectKind === 'mapping'
+                ? (coords?: { lat: number; lng: number; zoom?: number }) => {
+                    // Close editor first to ensure UI state is correct
+                    setIsEditorOpen(false);
 
-              // Prepare navigation coordinates
-              let navigationCoords = coords;
-              if (!navigationCoords && currentProjectId) {
-                // Read cached position from previous map session
-                const cached = getViewPositionCache(currentProjectId, 'map');
-                if (cached?.center && cached.zoom) {
-                  navigationCoords = {
-                    lat: cached.center[0],
-                    lng: cached.center[1],
-                    zoom: cached.zoom
-                  };
-                }
-              }
+                    // Prepare navigation coordinates
+                    let navigationCoords = coords;
+                    if (!navigationCoords && currentProjectId) {
+                      // Read cached position from previous map session
+                      const cached = getViewPositionCache(currentProjectId, 'map');
+                      if (cached?.center && cached.zoom) {
+                        navigationCoords = {
+                          lat: cached.center[0],
+                          lng: cached.center[1],
+                          zoom: cached.zoom
+                        };
+                      }
+                    }
 
-              // Set navigation coordinates and switch view
-              navigateToMap(navigationCoords || undefined);
-              setViewMode('map');
-            }}
+                    // Set navigation coordinates and switch view
+                    navigateToMap(navigationCoords || undefined);
+                    setViewMode('map');
+                  }
+                : undefined
+            }
             onSwitchToBoardView={(coords?: { x: number; y: number }) => {
               if (coords) {
                 navigateToBoard(coords);
               }
               setViewMode('board');
             }}
+            onSwitchToGraphView={undefined}
             mapViewFileInputRef={mapViewFileInputRef}
             themeColor={themeColor}
             panelChromeStyle={panelChromeStyle}
@@ -1817,7 +1917,7 @@ export default function App() {
             }}
           />
           )
-        ) : viewMode === 'graph' ? (
+        ) : viewMode === 'graph' && projectKind === 'graph' ? (
           isWorkspaceProjectDataStale ? (
           <div className="flex h-full w-full min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-gray-100 text-gray-600">
             <Loader2 size={32} className="animate-spin shrink-0" aria-hidden />
@@ -1838,28 +1938,10 @@ export default function App() {
               if (!currentProjectId || !activeProject) return;
               await projectState.updateProject({ ...activeProject, connections });
             }}
-            onSwitchToBoardView={(coords?: { x: number; y: number }) => {
-              if (coords) {
-                navigateToBoard(coords);
-              }
-              setViewMode('board');
-            }}
-            onSwitchToMapView={(coords?: { lat: number; lng: number; zoom?: number }) => {
-              setIsEditorOpen(false);
-              let navigationCoords = coords;
-              if (!navigationCoords && currentProjectId) {
-                const cached = getViewPositionCache(currentProjectId, 'map');
-                if (cached?.center && cached.zoom) {
-                  navigationCoords = {
-                    lat: cached.center[0],
-                    lng: cached.center[1],
-                    zoom: cached.zoom
-                  };
-                }
-              }
-              navigateToMap(navigationCoords || undefined);
-              setViewMode('map');
-            }}
+            onSwitchToBoardView={undefined}
+            onSwitchToMapView={undefined}
+            navigateToGraphNoteId={navigateToGraphNoteId}
+            onClearGraphNavigation={clearGraphNavigation}
             panelChromeStyle={panelChromeStyle}
             chromeHoverBackground={mapChromeHoverBg}
             onThemeColorChange={handleThemeColorChange}
@@ -1878,7 +1960,7 @@ export default function App() {
             <Loader2 size={32} className="animate-spin shrink-0" aria-hidden />
             <span className="text-sm font-medium">加载项目…</span>
           </div>
-          ) : (
+          ) : projectKind ? (
           <TableView 
             project={activeProject}
             onUpdateNote={updateNote}
@@ -1891,12 +1973,34 @@ export default function App() {
               if (!currentProjectId || !activeProject) return;
               await projectState.updateProject({ ...activeProject, connections });
             }}
-            onSwitchToBoardView={(coords?: { x: number; y: number }) => {
-              if (coords) {
-                navigateToBoard(coords);
-              }
-              setViewMode('board');
-            }}
+            onSwitchToBoardView={
+              projectKind === 'mapping'
+                ? (coords?: { x: number; y: number }) => {
+                    if (coords) {
+                      navigateToBoard(coords);
+                    }
+                    setViewMode('board');
+                  }
+                : undefined
+            }
+            onSwitchToMapView={
+              projectKind === 'mapping'
+                ? (coords?: { lat: number; lng: number; zoom?: number }) => {
+                    setIsEditorOpen(false);
+                    navigateToMap(coords);
+                    setViewMode('map');
+                  }
+                : undefined
+            }
+            onSwitchToGraphView={
+              projectKind === 'graph'
+                ? (noteId: string) => {
+                    setIsEditorOpen(false);
+                    navigateToGraphNote(noteId);
+                    setViewMode('graph');
+                  }
+                : undefined
+            }
             themeColor={themeColor}
             panelChromeStyle={panelChromeStyle}
             isUIVisible={isUIVisible}
@@ -1911,6 +2015,10 @@ export default function App() {
             projectId={currentProjectId ?? ''}
             onUpdateProject={handleUpdateProject}
           />
+          ) : (
+            <div className="flex h-full w-full min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-gray-100 text-gray-600">
+              <span className="text-sm font-medium">请选择项目类型…</span>
+            </div>
           )
         )}
           </>
@@ -1927,29 +2035,49 @@ export default function App() {
       {!isEditorOpen &&
         activeProject &&
         (!mappingWorkspaceEditMode || viewMode === 'board') &&
-        isUIVisible && (
+        isUIVisible && projectKind && (
         <div
           data-allow-context-menu
-          className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-50 max-w-[min(100vw-1rem,28rem)] p-1.5 rounded-2xl shadow-xl border flex flex-wrap justify-center gap-1 animate-in slide-in-from-bottom-4 fade-in ${
+          className={`fixed bottom-4 ui-workspace-center-x -translate-x-1/2 z-50 max-w-[min(100vw-1rem,28rem)] p-1.5 rounded-2xl shadow-xl border flex flex-wrap justify-center gap-1 animate-in slide-in-from-bottom-4 fade-in ${
             panelChromeStyle ? 'border-gray-200/80 ring-1 ring-black/[0.04]' : 'border-white/50 map-chrome-surface-fallback'
           }`}
           style={panelChromeStyle}
         >
-          <button
-            onClick={() => !isImportDialogOpen && setViewMode('map')}
-            disabled={isImportDialogOpen}
-            className={`
+          {projectKind === 'mapping' ? (
+            <button
+              onClick={() => !isImportDialogOpen && setViewMode('map')}
+              disabled={isImportDialogOpen}
+              className={`
               flex items-center gap-2 ${viewMode === 'map' ? 'px-4' : 'px-3'} py-2 rounded-xl transition-all font-bold text-sm
               ${viewMode === 'map' 
                 ? 'text-theme-chrome-fg shadow-md scale-105' 
                 : 'hover:bg-gray-100 text-gray-500'}
               ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
             `}
-            style={viewMode === 'map' ? { backgroundColor: themeColor } : undefined}
+              style={viewMode === 'map' ? { backgroundColor: themeColor } : undefined}
+            >
+              <MapIcon size={20} />
+              {viewMode === 'map' && 'Mapping'}
+            </button>
+          ) : null}
+          {projectKind === 'graph' ? (
+          <button
+            onClick={() => !isImportDialogOpen && setViewMode('graph')}
+            disabled={isImportDialogOpen}
+            className={`
+              flex items-center gap-2 ${viewMode === 'graph' ? 'px-4' : 'px-3'} py-2 rounded-xl transition-all font-bold text-sm
+              ${viewMode === 'graph' 
+                ? 'text-theme-chrome-fg shadow-md scale-105' 
+                : 'hover:bg-gray-100 text-gray-500'}
+              ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
+            `}
+            style={viewMode === 'graph' ? { backgroundColor: themeColor } : undefined}
           >
-            <MapIcon size={20} />
-            {viewMode === 'map' && 'Mapping'}
+            <GitBranch size={20} />
+            {viewMode === 'graph' && 'graph'}
           </button>
+          ) : null}
+          {projectKind === 'mapping' ? (
           <button
             onClick={() => {
               if (!isImportDialogOpen) {
@@ -1969,21 +2097,7 @@ export default function App() {
             <Grid size={20} />
             {viewMode === 'board' && 'Board'}
           </button>
-          <button
-            onClick={() => !isImportDialogOpen && setViewMode('graph')}
-            disabled={isImportDialogOpen}
-            className={`
-              flex items-center gap-2 ${viewMode === 'graph' ? 'px-4' : 'px-3'} py-2 rounded-xl transition-all font-bold text-sm
-              ${viewMode === 'graph' 
-                ? 'text-theme-chrome-fg shadow-md scale-105' 
-                : 'hover:bg-gray-100 text-gray-500'}
-              ${isImportDialogOpen ? 'opacity-50 cursor-not-allowed' : ''}
-            `}
-            style={viewMode === 'graph' ? { backgroundColor: themeColor } : undefined}
-          >
-            <GitBranch size={20} />
-            {viewMode === 'graph' && 'graph'}
-          </button>
+          ) : null}
           <button
             onClick={() => !isImportDialogOpen && setViewMode('table')}
             disabled={isImportDialogOpen}

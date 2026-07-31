@@ -23,6 +23,7 @@ interface UseViewStateReturn {
   // Navigation state
   navigateToMapCoords: NavigationCoords | null;
   navigateToBoardCoords: BoardCoords | null;
+  navigateToGraphNoteId: string | null;
 
   // Actions
   setViewMode: (mode: ViewMode) => void;
@@ -32,8 +33,10 @@ interface UseViewStateReturn {
   // Navigation actions
   navigateToMap: (coords?: NavigationCoords) => void;
   navigateToBoard: (coords?: BoardCoords) => void;
+  navigateToGraphNote: (noteId: string) => void;
   clearMapNavigation: () => void;
   clearBoardNavigation: () => void;
+  clearGraphNavigation: () => void;
 
   // Position saving
   saveMapPosition: (projectId: string, mapInstance: any) => void;
@@ -47,6 +50,7 @@ export const useViewState = (): UseViewStateReturn => {
 
   const [navigateToMapCoords, setNavigateToMapCoords] = useState<NavigationCoords | null>(null);
   const [navigateToBoardCoords, setNavigateToBoardCoords] = useState<BoardCoords | null>(null);
+  const [navigateToGraphNoteId, setNavigateToGraphNoteId] = useState<string | null>(null);
 
   // Navigation actions
   const navigateToMap = useCallback((coords?: NavigationCoords) => {
@@ -57,12 +61,20 @@ export const useViewState = (): UseViewStateReturn => {
     setNavigateToBoardCoords(coords || null);
   }, []);
 
+  const navigateToGraphNote = useCallback((noteId: string) => {
+    setNavigateToGraphNoteId(noteId);
+  }, []);
+
   const clearMapNavigation = useCallback(() => {
     setNavigateToMapCoords(null);
   }, []);
 
   const clearBoardNavigation = useCallback(() => {
     setNavigateToBoardCoords(null);
+  }, []);
+
+  const clearGraphNavigation = useCallback(() => {
+    setNavigateToGraphNoteId(null);
   }, []);
 
   // Position saving
@@ -84,7 +96,6 @@ export const useViewState = (): UseViewStateReturn => {
   const saveBoardPosition = useCallback((projectId: string, x: number, y: number, scale: number) => {
     if (!projectId) return;
     setViewPositionCache(projectId, 'board', { x, y, scale });
-    console.log('[ViewState] Saved board position:', { x, y, scale, projectId });
   }, []);
 
   return {
@@ -93,13 +104,16 @@ export const useViewState = (): UseViewStateReturn => {
     mappingWorkspaceEditMode,
     navigateToMapCoords,
     navigateToBoardCoords,
+    navigateToGraphNoteId,
     setViewMode,
     setIsEditorOpen,
     setMappingWorkspaceEditMode,
     navigateToMap,
     navigateToBoard,
+    navigateToGraphNote,
     clearMapNavigation,
     clearBoardNavigation,
+    clearGraphNavigation,
     saveMapPosition,
     saveBoardPosition
   };

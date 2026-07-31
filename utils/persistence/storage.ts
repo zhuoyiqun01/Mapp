@@ -1,7 +1,11 @@
 import { get, set, del, keys } from 'idb-keyval';
 import { Project, Note } from '../../types';
+import type { ProjectKind } from '../../types';
 import type { GraphLayoutMode } from '../graph/graphRuntimeCore';
 import { normalizeProjectConnections } from '../graph/graphData';
+import { sanitizeProjectKind } from '../projectKind';
+import { normalizeNotesToSingleFrame } from '../frame/noteFrameMembership';
+import { coerceGraphLayoutMode } from '../graph/graphRuntimeCore';
 
 // Storage keys
 const PROJECT_LIST_KEY = 'mapp-project-list';
@@ -48,7 +52,9 @@ export function getGraphLayoutCache(projectId: string): GraphLayoutMode | null {
   if (!projectId) return null;
   try {
     const raw = sessionStorage.getItem(getGraphLayoutCacheKey(projectId));
-    if (raw === 'tagGrid' || raw === 'circle' || raw === 'time' || raw === 'cose') return raw;
+    if (raw === 'time' || raw === 'cose') return raw;
+    // 历史 frameCluster → 由 coerceGraphLayoutMode 统一回退
+    if (raw === 'frameCluster') return coerceGraphLayoutMode(raw);
   } catch (err) {
     console.warn('Failed to load graph layout cache', err);
   }
@@ -1524,9 +1530,12 @@ export async function cleanBrokenReferences(notes: Note[]): Promise<Note[]> {
 function ensureProjectCompatibility(project: Project): Project {
   const fixedProject = { ...project };
   
-  // 始终使用 map 类型（图片模式已移除）
+  // 历史图片背景模式已移除；保留合法 projectKind，无效值清掉以便首次打开询问（不静默猜测）
   fixedProject.type = 'map';
   delete fixedProject.backgroundImage;
+  const kind = sanitizeProjectKind(fixedProject.projectKind);
+  if (kind) fixedProject.projectKind = kind;
+  else delete fixedProject.projectKind;
   
   // 确保 notes 数组存在
   if (!fixedProject.notes) {
@@ -1534,7 +1543,11 @@ function ensureProjectCompatibility(project: Project): Project {
   }
   
   // 修复所有 notes 的兼容性问题
-  fixedProject.notes = fixedProject.notes.map(ensureNoteVariant);
+  fixedProject.notes = normalizeNotesToSingleFrame(fixedProject.notes.map(ensureNoteVariant));
+
+  if (fixedProject.graphDefaultLayoutMode != null) {
+    fixedProject.graphDefaultLayoutMode = coerceGraphLayoutMode(fixedProject.graphDefaultLayoutMode);
+  }
 
   const { project: withConnections, mutated: connectionsMutated } = normalizeProjectConnections(fixedProject);
   if (connectionsMutated) {
@@ -1632,6 +1645,7 @@ export interface ProjectSummary {
   id: string;
   name: string;
   type: 'map';
+  projectKind?: ProjectKind;
   createdAt: number;
   notesCount: number;
   hasImages: boolean;
@@ -1665,6 +1679,7 @@ export async function loadProjectSummaries(): Promise<ProjectSummary[]> {
           id: project.id,
           name: project.name,
           type: project.type,
+          projectKind: project.projectKind,
           createdAt: project.createdAt,
           notesCount: project.notes.length,
           hasImages,

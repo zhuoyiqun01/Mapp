@@ -16,19 +16,20 @@ import {
 } from 'lucide-react';
 import { TAG_COLORS } from '../../../constants';
 import type { Connection, Coordinates, Frame, Note } from '../../../types';
+import { chromePanelGhostIconButtonClass } from '../../ui/chromePanelIconButton';
 import { connectionToGraphDirection } from '../../../utils/graph/graphData';
 import { generateId, parseNoteContent } from '../../../utils';
 
 export type EditInspectorCoordMode = 'map' | 'board' | 'graph';
 
-/** 簇 / 多选 / 图谱帧簇预览 等成组选择 */
+/** 簇 / 多选 / 图谱簇预览 等成组选择 */
 export type InspectorGroupContext = {
   kind: 'cluster' | 'multi' | 'framePeek';
   title: string;
   members: Note[];
   centroidMap?: { lat: number; lng: number };
   centroidBoard?: { x: number; y: number };
-  /** 图谱 frameCluster 临时预览的帧 id */
+  /** 图谱 framePeek（历史）临时预览的簇 id */
   peekFrameIds?: string[];
 };
 
@@ -56,7 +57,8 @@ function edgeDirectionHint(c: Connection): string {
 }
 
 function patchNoteFrameMembership(note: Note, frameIds: string[], frames: Frame[]): Note {
-  const ordered = frameIds.filter((id) => frames.some((f) => f.id === id));
+  // 单簇：只保留最后一个选中的 id（或空）
+  const ordered = frameIds.filter((id) => frames.some((f) => f.id === id)).slice(-1);
   const names = ordered.map((id) => frames.find((f) => f.id === id)!.title);
   const first = ordered[0];
   return {
@@ -79,9 +81,8 @@ const inspectorSectionSurfaceClass =
 const inspectorNestedCardClass =
   'rounded-lg border border-gray-100/90 bg-white/90 shadow-sm';
 
-/** 侧栏标题栏右侧铅笔按钮（各视图便签 / Edge 关联编辑入口同款） */
-const inspectorHeaderPencilButtonClass =
-  'mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white shadow-sm outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40';
+/** 侧栏标题栏右侧铅笔按钮（各视图便签 / Edge 关联编辑入口同款）：玻璃面板上小 icon → 无框 */
+const inspectorHeaderPencilButtonClass = `${chromePanelGhostIconButtonClass} mt-0.5`;
 
 function InspectorCollapsibleSection({
   title,
@@ -121,7 +122,7 @@ function InspectorCollapsibleSection({
 
 export interface EditInspectorPanelProps {
   note: Note | null;
-  /** 簇 / 多选 / 帧簇预览（与 note 互斥展示：有单选 note 时不传） */
+  /** 簇 / 多选 / 簇预览（与 note 互斥展示：有单选 note 时不传） */
   groupContext?: InspectorGroupContext | null;
   /** 看板：选中 Frame（与 note / group / connection 互斥由调用方保证） */
   inspectorFrame?: Frame | null;
@@ -145,6 +146,8 @@ export interface EditInspectorPanelProps {
   onFocusPeerInView?: (noteId: string) => void;
   /** 各视图：侧栏标题栏铅笔按钮，打开完整便签编辑器（NoteEditor） */
   onOpenFullNoteEditor?: (noteId: string) => void;
+  /** Graph：侧栏创建 Frame（无看板时） */
+  onUpdateFrames?: (frames: Frame[]) => void;
 }
 
 function EditInspectorEmpty({
@@ -159,7 +162,7 @@ function EditInspectorEmpty({
       ? '点击便签、框选或展开簇标签'
       : coordMode === 'board'
         ? '在画布上点击或框选便签'
-        : '在图谱中单击节点或帧簇';
+        : '在图谱中单击节点';
   return (
     <aside
       className={asideShellClass}
@@ -423,11 +426,6 @@ function EditInspectorEdgeOnly({
           type="button"
           disabled={!hasConnectionWrite}
           className={inspectorHeaderPencilButtonClass}
-          style={
-            hasConnectionWrite
-              ? { backgroundColor: themeColor, ['--tw-ring-color' as string]: themeColor }
-              : { backgroundColor: themeColor }
-          }
           title={hasConnectionWrite ? '在关联面板中编辑' : '当前项目无连线写入权限'}
           aria-label={hasConnectionWrite ? '在关联面板中编辑' : '无连线写入权限'}
           onClick={() => hasConnectionWrite && onEditConnection(connection)}
@@ -631,7 +629,7 @@ function EditInspectorGroupOnly({
         ) : null}
 
         {coordMode === 'graph' && peekFrameIds && peekFrameIds.length > 0 ? (
-          <InspectorCollapsibleSection title="帧簇预览" icon={<Layers size={14} className="text-gray-500" />} themeColor={themeColor}>
+          <InspectorCollapsibleSection title="簇预览" icon={<Layers size={14} className="text-gray-500" />} themeColor={themeColor}>
             <ul className="space-y-1 text-xs text-gray-700">
               {framePeekLabels.map((label, i) => (
                 <li key={`${peekFrameIds[i]}-${i}`} className="truncate">
@@ -716,7 +714,8 @@ function EditInspectorPanelInner({
   onClearCoordOverride,
   onFocusPeerOnMap,
   onFocusPeerInView,
-  onOpenFullNoteEditor
+  onOpenFullNoteEditor,
+  onUpdateFrames
 }: EditInspectorPanelProps & { note: Note }) {
   const effectiveMapCoords = noteCoordOverrides[note.id] ?? note.coords;
   const [latStr, setLatStr] = useState(String(effectiveMapCoords.lat));
@@ -784,13 +783,29 @@ function EditInspectorPanelInner({
 
   const toggleFrame = useCallback(
     (frameId: string) => {
-      const set = new Set(groupIds);
-      if (set.has(frameId)) set.delete(frameId);
-      else set.add(frameId);
-      onUpdateNote(patchNoteFrameMembership(note, Array.from(set), frames));
+      if (groupIds.includes(frameId)) {
+        onUpdateNote(patchNoteFrameMembership(note, [], frames));
+      } else {
+        onUpdateNote(patchNoteFrameMembership(note, [frameId], frames));
+      }
     },
     [frames, groupIds, note, onUpdateNote]
   );
+
+  const createFrameAndAssign = useCallback(() => {
+    if (!onUpdateFrames) return;
+    const newFrame: Frame = {
+      id: generateId(),
+      title: `Frame ${(frames.length || 0) + 1}`,
+      x: 0,
+      y: 0,
+      width: 480,
+      height: 360,
+      color: TAG_COLORS[(frames.length || 0) % TAG_COLORS.length] ?? 'rgba(255, 255, 255, 0.5)'
+    };
+    onUpdateFrames([...(frames ?? []), newFrame]);
+    onUpdateNote(patchNoteFrameMembership(note, [newFrame.id], [...frames, newFrame]));
+  }, [frames, note, onUpdateFrames, onUpdateNote]);
 
   const removeTag = useCallback(
     (tagId: string) => {
@@ -844,7 +859,7 @@ function EditInspectorPanelInner({
             </span>
             <button
               type="button"
-              className="shrink-0 rounded-md p-1 text-gray-500 hover:bg-gray-100"
+              className={chromePanelGhostIconButtonClass}
               draggable={false}
               aria-label={!note.layerItemHidden ? '在图层中隐藏' : '在图层中显示'}
               title={!note.layerItemHidden ? '在图层中隐藏' : '在图层中显示'}
@@ -864,7 +879,6 @@ function EditInspectorPanelInner({
           <button
             type="button"
             className={inspectorHeaderPencilButtonClass}
-            style={{ backgroundColor: themeColor, ['--tw-ring-color' as string]: themeColor }}
             title="编辑便签"
             aria-label="编辑便签"
             onClick={() => onOpenFullNoteEditor(note.id)}
@@ -972,7 +986,11 @@ function EditInspectorPanelInner({
 
         <InspectorCollapsibleSection title="Frame" icon={<Layers size={14} className="text-gray-500" />} themeColor={themeColor}>
           {frames.length === 0 ? (
-            <p className="text-xs text-gray-400">项目中暂无帧；可在看板创建 Frame 后在此勾选归属。</p>
+            <p className="text-xs text-gray-400">
+              {coordMode === 'graph'
+                ? '项目中暂无 Frame；可在下方新建并归属当前便签。'
+                : '项目中暂无簇；可在看板创建 Frame 后在此勾选归属。'}
+            </p>
           ) : (
             <ul className="space-y-1.5">
               {frames.map((f) => (
@@ -994,6 +1012,16 @@ function EditInspectorPanelInner({
               ))}
             </ul>
           )}
+          {coordMode === 'graph' && onUpdateFrames ? (
+            <button
+              type="button"
+              onClick={createFrameAndAssign}
+              className="mt-2 inline-flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-gray-200 px-2 py-1.5 text-[11px] font-medium text-gray-600 hover:bg-gray-50"
+            >
+              <Plus size={12} aria-hidden />
+              新建 Frame 并归属
+            </button>
+          ) : null}
         </InspectorCollapsibleSection>
 
         <InspectorCollapsibleSection title="标签" icon={<TagIcon size={14} className="text-gray-500" />} themeColor={themeColor}>
