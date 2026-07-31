@@ -6,6 +6,7 @@ import {
 } from '../map/mapChromeStyle';
 import type { GraphExportPayload } from './graphData';
 import type { Frame, GraphLayerState, Note } from '../../types';
+import { groupTagsByHierarchyPrefix } from '../layer/tagHierarchy';
 // Cytoscape 的 style stylesheet 类型导出在当前工具链下不稳定，这里用宽类型避免无关的类型检查阻塞。
 type Stylesheet = any;
 
@@ -46,12 +47,15 @@ function graphLayerWeightNorm(wgt: number): number {
   return (clampGraphLayerWeight(wgt) - GRAPH_LAYER_WEIGHT_MIN) / GRAPH_LAYER_WEIGHT_SPAN;
 }
 
-/** frameCluster 簇内：标签权重→半径比例的非线形（>1 时高权重更靠外圈、指数越大对比越强） */
-const FRAME_CLUSTER_TAG_WEIGHT_TO_RADIUS_EXP = 1.85;
+/**
+ * frameCluster 簇内：标签权重→「靠圆心程度」的非线形。
+ * 与 LayerRegistry / 圆环约定一致：权重越大越靠近簇心；指数 >1 时高权重更贴圆心、对比更强。
+ */
+const FRAME_CLUSTER_TAG_WEIGHT_TO_CENTER_EXP = 1.85;
 
-function frameClusterTagWeightRadiusFactor(norm01: number): number {
+function frameClusterTagWeightCenterFactor(norm01: number): number {
   const u = Math.min(1, Math.max(0, norm01));
-  return Math.pow(u, FRAME_CLUSTER_TAG_WEIGHT_TO_RADIUS_EXP);
+  return Math.pow(u, FRAME_CLUSTER_TAG_WEIGHT_TO_CENTER_EXP);
 }
 
 /** 稳定字符串哈希：用于给每个标签组分配固定相位，避免全组重叠在同一角度。 */
@@ -1223,7 +1227,10 @@ export function applyGraphTimeLayout(
  * frameCluster（cluster+members）：
  * 1) 按当前 `frame` hidden 规则计算每个节点的 effective frame key（跳过已隐藏的前序 frame）
  * 2) 构建“簇图”（簇为节点、跨簇边为边），用 cose-bilkent 布局得到簇中心（簇更近）
- * 3) 簇内：参考圆环布局，用标签分层顺序与权重做多环半径；无 tag 面板数据时退化为单环。
+ * 3) 簇内：Frame 定区域；Tag 定相对位置——
+ *    - 角向：按标签层级前缀（` · ` 前）分扇区，同前缀相邻；扇区内再按完整 tag 切分
+ *    - 径向：`graphLayers.weights`（越大越靠近簇心，与 LayerRegistry 一致）
+ *    无 tag 面板数据时退化为单环均分。
  * 4) 每簇增加略大于最外圈的玻璃感圆形底衬。
  */
 /** 簇内标签多环所占外圈半径比例；相对原 0.26 加倍，使权重对应的半径上下限跨度约 2 倍 */
@@ -1439,8 +1446,8 @@ export function applyGraphFrameClusterMembersLayout(
         return;
       }
 
-      const useTagRings = tagGraphLayers != null;
-      if (!useTagRings) {
+      const useTagPlacement = tagGraphLayers != null;
+      if (!useTagPlacement) {
         const phase = stableAngleSeed(`frameCluster::${clusterKey}`) * 2 * Math.PI - Math.PI / 2;
         for (let i = 0; i < n; i += 1) {
           const angle = phase + (2 * Math.PI * i) / Math.max(1, n);
@@ -1461,23 +1468,40 @@ export function applyGraphFrameClusterMembersLayout(
       }
       const allTagKeys = new Set(byTag.keys());
       const tagKeysOrdered = orderedTagGroupKeysFromState(allTagKeys, tagLayersState);
+      const hierarchy = groupTagsByHierarchyPrefix(tagKeysOrdered, GRAPH_UNTAGGED_TAG_GROUP);
       const innerR = outerR * (1 - FRAME_CLUSTER_TAG_RING_DEPTH);
+      // 簇相位稳定，避免每次重排扇区整体旋转
+      let angleCursor =
+        stableAngleSeed(`frameCluster::sectors::${clusterKey}`) * 2 * Math.PI - Math.PI / 2;
 
-      for (const tagKey of tagKeysOrdered) {
-        const groupNodes = byTag.get(tagKey);
-        if (!groupNodes?.length) continue;
-        const tw = tagLayersState.weights?.[tagKey] ?? 0.5;
-        const tNorm = frameClusterTagWeightRadiusFactor(graphLayerWeightNorm(tw));
-        const r = innerR + tNorm * (outerR - innerR);
-        const phase = stableAngleSeed(`frameCluster::${clusterKey}::${tagKey}`) * 2 * Math.PI - Math.PI / 2;
-        const gn = groupNodes.length;
-        for (let i = 0; i < gn; i += 1) {
-          const angle = phase + (2 * Math.PI * i) / Math.max(1, gn);
-          memberPos.set(groupNodes[i].id(), {
-            x: center.x + r * Math.cos(angle),
-            y: center.y + r * Math.sin(angle)
-          });
+      for (const { tags: prefixTags } of hierarchy) {
+        let prefixCount = 0;
+        for (const tagKey of prefixTags) {
+          prefixCount += byTag.get(tagKey)?.length ?? 0;
         }
+        if (prefixCount === 0) continue;
+        const prefixSpan = (2 * Math.PI * prefixCount) / n;
+        let tagCursor = angleCursor;
+
+        for (const tagKey of prefixTags) {
+          const groupNodes = byTag.get(tagKey);
+          if (!groupNodes?.length) continue;
+          const gn = groupNodes.length;
+          const tagSpan = (prefixSpan * gn) / prefixCount;
+          const tw = tagLayersState.weights?.[tagKey] ?? 0.5;
+          // 权重越大 → 越靠近簇心（与 LayerRegistry「半径权重」一致）
+          const centerFactor = frameClusterTagWeightCenterFactor(graphLayerWeightNorm(tw));
+          const r = innerR + (1 - centerFactor) * (outerR - innerR);
+          for (let i = 0; i < gn; i += 1) {
+            const angle = tagCursor + (tagSpan * (i + 0.5)) / gn;
+            memberPos.set(groupNodes[i].id(), {
+              x: center.x + r * Math.cos(angle),
+              y: center.y + r * Math.sin(angle)
+            });
+          }
+          tagCursor += tagSpan;
+        }
+        angleCursor += prefixSpan;
       }
     });
 
