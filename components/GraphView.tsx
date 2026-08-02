@@ -46,9 +46,18 @@ import {
   applyGraphNodeStackZIndex,
   setGraphCoseTimeXBias,
   setGraphEdgeElasticity,
-  syncGraphEdgeCurveDistances
+  syncGraphEdgeCurveDistances,
+  GRAPH_UNTAGGED_TAG_GROUP
 } from '../utils/graph/graphRuntimeCore';
 import { getGraphLayoutCache, setGraphLayoutCache } from '../utils/persistence/storage';
+import {
+  GRAPH_CLUSTER_BASIS_FRAME,
+  isFrameClusterBasis,
+  normalizeGraphClusterBasis,
+  noteFirstTag,
+  resolveNoteClusterGroupKey
+} from '../utils/graph/graphClusterBasis';
+import { tagHierarchyPrefix, tagHierarchySuffix } from '../utils/layer/tagHierarchy';
 import { GraphConnectionPanel, connectionToPanelDraft, type ConnectionDraft } from './graph/GraphConnectionPanel';
 import { GraphHighlightChromeLabels } from './graph/GraphHighlightChromeLabels';
 import { GraphRelatedHighlightPanel } from './graph/GraphRelatedHighlightPanel';
@@ -264,14 +273,28 @@ export const GraphView: React.FC<GraphViewProps> = ({
     );
   }, []);
 
-  /** 时间线布局固定使用簇图层 */
-  const mergedGraphLayers = mergedFrameGraphLayers;
+  /** 时间线聚类依据：簇图层或某一级标签前缀 */
+  const clusterBasis = useMemo(() => {
+    const raw = normalizeGraphClusterBasis(project.graphClusterBasis);
+    if (isFrameClusterBasis(raw)) return GRAPH_CLUSTER_BASIS_FRAME;
+    const prefixes = new Set(
+      (mergedTagGraphLayers.order ?? [])
+        .map((k) => tagHierarchyPrefix(String(k).trim()))
+        .filter((p) => p && p !== GRAPH_UNTAGGED_TAG_GROUP)
+    );
+    return prefixes.has(raw) ? raw : GRAPH_CLUSTER_BASIS_FRAME;
+  }, [project.graphClusterBasis, mergedTagGraphLayers.order]);
+
+  const timeClusterLayers = isFrameClusterBasis(clusterBasis)
+    ? mergedFrameGraphLayers
+    : mergedTagGraphLayers;
 
   const timeLayoutOpts = useMemo(
     (): GraphTimeLayoutOptions => ({
-      weightBias: project.graphTimeAxisWeightBias ?? DEFAULT_GRAPH_TIME_AXIS_WEIGHT_BIAS
+      weightBias: project.graphTimeAxisWeightBias ?? DEFAULT_GRAPH_TIME_AXIS_WEIGHT_BIAS,
+      clusterBasis
     }),
-    [project.graphTimeAxisWeightBias]
+    [project.graphTimeAxisWeightBias, clusterBasis]
   );
 
   const coseTimeXBias =
@@ -279,57 +302,111 @@ export const GraphView: React.FC<GraphViewProps> = ({
   const edgeElasticity =
     project.graphEdgeElasticity ?? DEFAULT_GRAPH_EDGE_ELASTICITY;
 
-  /** 节点颜色图例：按 Frame 颜色（与图谱节点着色一致） */
+  /** 节点颜色图例：随聚类依据（簇 / 一级前缀下的首标签） */
   const nodeColorLegendItems = useMemo(() => {
-    const frames = project.frames ?? [];
-    const framesById = new Map(frames.map((f) => [String(f.id).trim(), f]));
-    const usedFrameIds = new Set<string>();
-    let hasUnframed = false;
-    for (const note of notes) {
-      const fid = String(note.groupIds?.[0] ?? note.groupId ?? '').trim();
-      if (fid && framesById.has(fid)) usedFrameIds.add(fid);
-      else hasUnframed = true;
+    if (isFrameClusterBasis(clusterBasis)) {
+      const frames = project.frames ?? [];
+      const framesById = new Map(frames.map((f) => [String(f.id).trim(), f]));
+      const usedFrameIds = new Set<string>();
+      let hasUnframed = false;
+      for (const note of notes) {
+        const fid = String(note.groupIds?.[0] ?? note.groupId ?? '').trim();
+        if (fid && framesById.has(fid)) usedFrameIds.add(fid);
+        else hasUnframed = true;
+      }
+
+      const keysInOrder = mergedFrameGraphLayers.order ?? [];
+      const seen = new Set<string>();
+      const ordered: string[] = [];
+      for (const k of keysInOrder) {
+        const key = String(k).trim();
+        if (!key) continue;
+        if (usedFrameIds.has(key) && !seen.has(key)) {
+          ordered.push(key);
+          seen.add(key);
+        }
+      }
+      const rest = [...usedFrameIds]
+        .filter((k) => !seen.has(k))
+        .sort((a, b) => {
+          const ta = framesById.get(a)?.title ?? a;
+          const tb = framesById.get(b)?.title ?? b;
+          return ta.localeCompare(tb, 'zh-Hans-CN');
+        });
+
+      const items = [...ordered, ...rest].map((id) => {
+        const f = framesById.get(id);
+        const color = (f?.color ?? themeColor).toString().trim() || themeColor;
+        return {
+          key: id,
+          label: f?.title?.trim() || id,
+          colors: [color]
+        };
+      });
+
+      if (hasUnframed) {
+        items.push({
+          key: '__no_frame__',
+          label: '无簇',
+          colors: [themeColor]
+        });
+      }
+      return items;
     }
 
-    const keysInOrder = mergedFrameGraphLayers.order ?? [];
+    const usedKeys = new Set<string>();
+    let hasOther = false;
+    const colorByKey = new Map<string, string>();
+    for (const note of notes) {
+      const key = resolveNoteClusterGroupKey(note, clusterBasis);
+      if (!key) {
+        hasOther = true;
+        continue;
+      }
+      usedKeys.add(key);
+      if (!colorByKey.has(key)) {
+        const c = noteFirstTag(note)?.color?.trim();
+        if (c) colorByKey.set(key, c);
+      }
+    }
+
+    const keysInOrder = mergedTagGraphLayers.order ?? [];
     const seen = new Set<string>();
     const ordered: string[] = [];
     for (const k of keysInOrder) {
       const key = String(k).trim();
-      if (!key) continue;
-      if (usedFrameIds.has(key) && !seen.has(key)) {
+      if (!key || tagHierarchyPrefix(key) !== clusterBasis) continue;
+      if (usedKeys.has(key) && !seen.has(key)) {
         ordered.push(key);
         seen.add(key);
       }
     }
-    const rest = [...usedFrameIds]
+    const rest = [...usedKeys]
       .filter((k) => !seen.has(k))
-      .sort((a, b) => {
-        const ta = framesById.get(a)?.title ?? a;
-        const tb = framesById.get(b)?.title ?? b;
-        return ta.localeCompare(tb, 'zh-Hans-CN');
-      });
+      .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
 
-    const items = [...ordered, ...rest].map((id) => {
-      const f = framesById.get(id);
-      const color = (f?.color ?? themeColor).toString().trim() || themeColor;
-      return {
-        key: id,
-        label: f?.title?.trim() || id,
-        colors: [color]
-      };
-    });
+    const items = [...ordered, ...rest].map((id) => ({
+      key: id,
+      label: tagHierarchySuffix(id) || id,
+      colors: [colorByKey.get(id) ?? themeColor]
+    }));
 
-    if (hasUnframed) {
+    if (hasOther) {
       items.push({
-        key: '__no_frame__',
-        label: '无簇',
+        key: '__no_cluster_tag__',
+        label: '无/其他',
         colors: [themeColor]
       });
     }
-
     return items;
-  }, [notes, themeColor, project.frames, mergedFrameGraphLayers.order]);
+  }, [
+    notes,
+    themeColor,
+    project.frames,
+    clusterBasis,
+    mergedFrameGraphLayers.order,
+    mergedTagGraphLayers.order
+  ]);
 
   const legendLabelFontPx = graphStylesheetSizing.labelFontPx;
 
@@ -376,13 +453,13 @@ export const GraphView: React.FC<GraphViewProps> = ({
   );
 
   const graphLayersHiddenKey = useMemo(
-    () => mergedGraphLayers.hidden.slice().sort().join('\u0001'),
-    [mergedGraphLayers.hidden]
+    () => timeClusterLayers.hidden.slice().sort().join('\u0001'),
+    [timeClusterLayers.hidden]
   );
 
   const graphLayersOrderKey = useMemo(
-    () => (mergedGraphLayers.order ?? []).join('\u0001'),
-    [mergedGraphLayers.order]
+    () => (timeClusterLayers.order ?? []).join('\u0001'),
+    [timeClusterLayers.order]
   );
 
   const tagGraphLayersHiddenKey = useMemo(
@@ -412,6 +489,16 @@ export const GraphView: React.FC<GraphViewProps> = ({
   const frameGraphLayersOrderKey = useMemo(
     () => (mergedFrameGraphLayers.order ?? []).join('\u0001'),
     [mergedFrameGraphLayers.order]
+  );
+
+  /** 首标签 / 簇归属变化时重跑时间线分层 */
+  const notesClusterKeySig = useMemo(
+    () =>
+      notes
+        .map((n) => `${n.id}:${resolveNoteClusterGroupKey(n, clusterBasis)}`)
+        .sort()
+        .join('\u0001'),
+    [notes, clusterBasis]
   );
 
   const selectedConn = useMemo(
@@ -1074,7 +1161,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
         graphStylesheetSizing.edgeWeight,
         mergedTagGraphLayers.weights,
         project.frames ?? [],
-        graphStylesheetSizing.nodeSize
+        graphStylesheetSizing.nodeSize,
+        clusterBasis
       ),
       style: getGraphStylesheet(
         themeColor,
@@ -1099,8 +1187,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
     applyGraphLayoutMode(cy, initialMode, {
       silentTimeFallback: true,
       timeLayout: timeLayoutOpts,
-      graphLayers: mergedFrameGraphLayers,
-      graphLayerGroupStandard: 'frame'
+      graphLayers: timeClusterLayers,
+      graphLayerGroupStandard: isFrameClusterBasis(clusterBasis) ? 'frame' : 'tag'
     });
     if (initialMode === 'time') {
       const valid = cy.nodes().filter((n) => n.data('timeSort') != null);
@@ -1175,7 +1263,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
       graphStylesheetSizing.edgeWeight,
       mergedTagGraphLayers.weights,
       project.frames ?? [],
-      graphStylesheetSizing.nodeSize
+      graphStylesheetSizing.nodeSize,
+      clusterBasis
     );
     const desiredEdges = elements.filter((el) => {
       const d = (el as any).data as any;
@@ -1233,7 +1322,9 @@ export const GraphView: React.FC<GraphViewProps> = ({
     mapUiChromeOpacity,
     mapUiChromeBlurPx,
     tagGraphLayersWeightsKey,
-    syncDualLayerVisibility
+    syncDualLayerVisibility,
+    clusterBasis,
+    project.frames
   ]);
 
   /** 边标签筛选变化时单独刷新高亮（避免整图数据重同步） */
@@ -1318,8 +1409,14 @@ export const GraphView: React.FC<GraphViewProps> = ({
     if (!cy) return;
     const valid = cy.nodes().filter((n) => n.data('timeSort') != null);
     if (valid.length === 0) return;
-    applyGraphTimeLayout(cy, () => {}, timeLayoutOpts, mergedFrameGraphLayers, 'frame');
-  }, [activeGraphLayout, timeLayoutOpts, graphLayersOrderKey, graphLayersHiddenKey, mergedFrameGraphLayers]);
+    applyGraphTimeLayout(
+      cy,
+      () => {},
+      timeLayoutOpts,
+      timeClusterLayers,
+      isFrameClusterBasis(clusterBasis) ? 'frame' : 'tag'
+    );
+  }, [activeGraphLayout, timeLayoutOpts, graphLayersOrderKey, graphLayersHiddenKey, timeClusterLayers, clusterBasis, notesClusterKeySig]);
 
   /** 力导布局下：同步 X 轴时间分布权重；用户改百分比时重跑 fcose */
   const coseTimeXBiasRef = useRef(coseTimeXBias);
@@ -1387,13 +1484,19 @@ export const GraphView: React.FC<GraphViewProps> = ({
   const applyTimeLayout = useCallback(() => {
     const cy = cyRef.current;
     if (!cy) return;
-    applyGraphTimeLayout(cy, undefined, timeLayoutOpts, mergedFrameGraphLayers, 'frame');
+    applyGraphTimeLayout(
+      cy,
+      undefined,
+      timeLayoutOpts,
+      timeClusterLayers,
+      isFrameClusterBasis(clusterBasis) ? 'frame' : 'tag'
+    );
     const valid = cy.nodes().filter((n) => n.data('timeSort') != null);
     if (valid.length > 0) {
       setActiveGraphLayout('time');
       persistGraphLayout('time');
     }
-  }, [persistGraphLayout, timeLayoutOpts, mergedFrameGraphLayers]);
+  }, [persistGraphLayout, timeLayoutOpts, timeClusterLayers, clusterBasis]);
 
   const saveEdgeLabel = useCallback(() => {
     if (!selectedConn || !onUpdateConnections) return;

@@ -423,7 +423,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
 
   return (
     <div
-      className="fixed left-0 top-0 w-full h-screen h-[100dvh] z-[1000] flex items-center justify-center p-4 touch-none cursor-auto"
+      className="fixed left-0 top-0 w-full h-[100dvh] max-h-dvh z-[1000] flex items-center justify-center p-4 touch-none cursor-auto"
       onPointerDown={(e) => e.stopPropagation()}
       onPointerMove={(e) => e.stopPropagation()}
       onPointerUp={(e) => e.stopPropagation()}

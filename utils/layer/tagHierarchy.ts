@@ -27,7 +27,7 @@ export function tagHasHierarchySep(label: string): boolean {
 
 /**
  * 将扁平标签 order 收成一级前缀 → 完整标签列表。
- * 一级按 locale 排序；组内完整标签保持传入 order 的相对顺序（已是首字母序）。
+ * 前缀顺序与组内完整标签均保持传入 order 的相对顺序（首次出现为准；字母序仅作新键默认插入）。
  */
 export function groupTagsByHierarchyPrefix(
   order: string[],
@@ -41,10 +41,42 @@ export function groupTagsByHierarchyPrefix(
     if (!map.has(prefix)) map.set(prefix, []);
     map.get(prefix)!.push(tag);
   }
-  const prefixes = [...map.keys()].sort((a, b) => {
-    if (a === untaggedKey && b !== untaggedKey) return 1;
-    if (b === untaggedKey && a !== untaggedKey) return -1;
-    return a.localeCompare(b, 'zh-Hans-CN');
-  });
-  return prefixes.map((prefix) => ({ prefix, tags: map.get(prefix)! }));
+  return [...map.keys()].map((prefix) => ({ prefix, tags: map.get(prefix)! }));
+}
+
+/** 在 order 中把 fromKey 插到 toKey 前/后（图层拖拽共用） */
+export function insertLayerOrderRelative(
+  order: string[],
+  fromKey: string,
+  toKey: string,
+  place: 'before' | 'after'
+): string[] {
+  const next = [...order];
+  const fromIdx = next.indexOf(fromKey);
+  let toIdx = next.indexOf(toKey);
+  if (fromIdx < 0 || toIdx < 0 || fromKey === toKey) return order;
+  next.splice(fromIdx, 1);
+  toIdx = next.indexOf(toKey);
+  if (toIdx < 0) return order;
+  const insertAt = place === 'after' ? toIdx + 1 : toIdx;
+  next.splice(insertAt, 0, fromKey);
+  return next;
+}
+
+/** 把 fromKeys 整块移到 toKey 前/后（前缀组拖拽） */
+export function insertLayerOrderBlockRelative(
+  order: string[],
+  fromKeys: string[],
+  toKey: string,
+  place: 'before' | 'after'
+): string[] {
+  const block = fromKeys.map((k) => String(k).trim()).filter(Boolean);
+  if (block.length === 0) return order;
+  if (block.includes(toKey)) return order;
+  const next = order.filter((k) => !block.includes(k));
+  const toIdx = next.indexOf(toKey);
+  if (toIdx < 0) return order;
+  const insertAt = place === 'after' ? toIdx + 1 : toIdx;
+  next.splice(insertAt, 0, ...block);
+  return next;
 }

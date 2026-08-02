@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Map as LeafletMap } from 'leaflet';
+import { Reorder } from 'framer-motion';
 import {
   ChevronDown,
   Crosshair,
@@ -15,8 +16,9 @@ import {
   X
 } from 'lucide-react';
 import { TAG_COLORS } from '../../../constants';
-import type { Connection, Coordinates, Frame, Note } from '../../../types';
+import type { Connection, Coordinates, Frame, Note, Tag } from '../../../types';
 import { chromePanelGhostIconButtonClass } from '../../ui/chromePanelIconButton';
+import { TagAddPanel } from '../../ui/TagAddPanel';
 import { connectionToGraphDirection } from '../../../utils/graph/graphData';
 import { generateId, parseNoteContent } from '../../../utils';
 
@@ -723,7 +725,8 @@ function EditInspectorPanelInner({
   const [bxStr, setBxStr] = useState(String(note.boardX));
   const [byStr, setByStr] = useState(String(note.boardY));
   const [tagLabel, setTagLabel] = useState('');
-  const [tagColorIdx, setTagColorIdx] = useState(0);
+  const [tagColor, setTagColor] = useState(TAG_COLORS[0] ?? '#94a3b8');
+  const [tagColorPortal, setTagColorPortal] = useState<{ top: number; left: number } | null>(null);
 
   useEffect(() => {
     const c = noteCoordOverrides[note.id] ?? note.coords;
@@ -814,16 +817,31 @@ function EditInspectorPanelInner({
     [note, onUpdateNote]
   );
 
+  const reorderTags = useCallback(
+    (next: Tag[]) => {
+      onUpdateNote({ ...note, tags: next });
+    },
+    [note, onUpdateNote]
+  );
+
   const addTag = useCallback(() => {
     const label = tagLabel.trim();
     if (!label) return;
     const next: Note = {
       ...note,
-      tags: [...note.tags, { id: generateId(), label, color: TAG_COLORS[tagColorIdx % TAG_COLORS.length] }]
+      tags: [...note.tags, { id: generateId(), label, color: tagColor }]
     };
     onUpdateNote(next);
     setTagLabel('');
-  }, [note, onUpdateNote, tagColorIdx, tagLabel]);
+  }, [note, onUpdateNote, tagColor, tagLabel]);
+
+  const openTagColorPortal = useCallback((anchor: HTMLElement) => {
+    const r = anchor.getBoundingClientRect();
+    const panelW = 260;
+    const top = Math.min(r.bottom + 6, window.innerHeight - 12);
+    const left = Math.min(Math.max(8, r.left), window.innerWidth - panelW - 8);
+    setTagColorPortal({ top, left });
+  }, []);
 
   const focusPeer = useCallback(
     (noteId: string) => {
@@ -992,12 +1010,10 @@ function EditInspectorPanelInner({
                 : '项目中暂无簇；可在看板创建 Frame 后在此勾选归属。'}
             </p>
           ) : (
-            <ul className="space-y-1.5">
+            <ul className="space-y-1">
               {frames.map((f) => (
                 <li key={f.id}>
-                  <label
-                    className={`flex cursor-pointer items-center gap-2 ${inspectorNestedCardClass} px-2 py-1.5 text-xs hover:bg-gray-50`}
-                  >
+                  <label className="flex cursor-pointer items-center gap-2 px-0.5 py-1 text-xs hover:bg-gray-50/80 rounded-md">
                     <input
                       type="checkbox"
                       checked={groupIds.includes(f.id)}
@@ -1025,25 +1041,64 @@ function EditInspectorPanelInner({
         </InspectorCollapsibleSection>
 
         <InspectorCollapsibleSection title="标签" icon={<TagIcon size={14} className="text-gray-500" />} themeColor={themeColor}>
-          <div className="flex flex-wrap gap-1.5">
-            {note.tags.map((t) => (
-              <span
-                key={t.id}
-                className="inline-flex max-w-full items-center gap-1 rounded-full border border-gray-200/80 bg-white pl-2 pr-1 py-0.5 text-[11px]"
-              >
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: t.color }} />
-                <span className="truncate text-gray-800">{t.label}</span>
-                <button
-                  type="button"
-                  onClick={() => removeTag(t.id)}
-                  className="shrink-0 rounded-full p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
-                  aria-label={`移除标签 ${t.label}`}
+          {note.tags.length > 1 ? (
+            <Reorder.Group
+              axis="x"
+              values={note.tags}
+              onReorder={reorderTags}
+              as="div"
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                gap: '0.375rem'
+              }}
+            >
+              {note.tags.map((t) => (
+                <Reorder.Item
+                  key={t.id}
+                  value={t}
+                  className="list-none"
+                  whileDrag={{ scale: 1.04, zIndex: 20, cursor: 'grabbing' }}
+                  style={{ cursor: 'grab' }}
                 >
-                  <X size={12} />
-                </button>
-              </span>
-            ))}
-          </div>
+                  <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-gray-200/80 bg-white pl-2 pr-1 py-0.5 text-[11px]">
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: t.color }} />
+                    <span className="truncate text-gray-800">{t.label}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeTag(t.id)}
+                      className="shrink-0 rounded-full p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                      aria-label={`移除标签 ${t.label}`}
+                    >
+                      <X size={12} />
+                    </button>
+                  </span>
+                </Reorder.Item>
+              ))}
+            </Reorder.Group>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {note.tags.map((t) => (
+                <span
+                  key={t.id}
+                  className="inline-flex max-w-full items-center gap-1 rounded-full border border-gray-200/80 bg-white pl-2 pr-1 py-0.5 text-[11px]"
+                >
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: t.color }} />
+                  <span className="truncate text-gray-800">{t.label}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeTag(t.id)}
+                    className="shrink-0 rounded-full p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                    aria-label={`移除标签 ${t.label}`}
+                  >
+                    <X size={12} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <p className="mt-1 text-[10px] text-gray-400">拖动标签可改顺序；首标签决定时间线分层与节点色</p>
           <div className="mt-2 flex flex-wrap items-end gap-2">
             <input
               value={tagLabel}
@@ -1053,20 +1108,14 @@ function EditInspectorPanelInner({
               className="min-w-[6rem] flex-1 rounded-lg border border-gray-200 px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-offset-0"
               style={{ ['--tw-ring-color' as string]: themeColor }}
             />
-            <div className="flex gap-0.5 pb-0.5">
-              {TAG_COLORS.slice(0, 8).map((c, i) => (
-                <button
-                  key={c}
-                  type="button"
-                  title={c}
-                  onClick={() => setTagColorIdx(i)}
-                  className={`h-4 w-4 rounded-full ring-2 ring-offset-1 ${
-                    tagColorIdx % TAG_COLORS.length === i ? 'ring-gray-800' : 'ring-transparent'
-                  }`}
-                  style={{ backgroundColor: c }}
-                />
-              ))}
-            </div>
+            <button
+              type="button"
+              title={`选色：${tagColor}`}
+              aria-label="选择标签颜色"
+              onClick={(e) => openTagColorPortal(e.currentTarget)}
+              className="h-7 w-7 shrink-0 rounded-full border border-white/90 shadow-sm ring-1 ring-gray-200/80 transition-transform hover:scale-105"
+              style={{ backgroundColor: tagColor }}
+            />
             <button
               type="button"
               onClick={addTag}
@@ -1076,6 +1125,24 @@ function EditInspectorPanelInner({
               添加
             </button>
           </div>
+          {tagColorPortal ? (
+            <TagAddPanel
+              themeColor={themeColor}
+              panelChromeStyle={panelChromeStyle}
+              title="选择标签颜色"
+              label=""
+              hideLabelInput
+              selectedColor={tagColor}
+              onLabelChange={() => {}}
+              onColorChange={setTagColor}
+              onApply={() => setTagColorPortal(null)}
+              onDismissOutside={() => setTagColorPortal(null)}
+              portalPlacement={tagColorPortal}
+              applyLabel="完成"
+              autoFocus={false}
+              closeOnInteractOutside
+            />
+          ) : null}
         </InspectorCollapsibleSection>
 
         <InspectorCollapsibleSection

@@ -107,6 +107,7 @@ export const GraphHighlightChromeLabels: React.FC<GraphHighlightChromeLabelsProp
   return (
     <div
       ref={layerRef}
+      data-mapp-export-keep="true"
       className="absolute inset-0 z-[15] overflow-hidden pointer-events-none"
       aria-hidden
     />

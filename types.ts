@@ -131,9 +131,15 @@ export interface Project {
   graphLayers?: GraphLayerState;
   /**
    * 历史字段：地图/看板图层面板仍可切换 tag|frame。
-   * 图谱时间线固定按 frame，不再依赖此字段切换布局。
+   * 图谱时间线聚类依据见 graphClusterBasis。
    */
   graphLayerStandard?: 'tag' | 'frame';
+  /**
+   * 图谱时间线「按聚类分层」的依据：
+   * - `'frame'`（默认）：簇图层
+   * - 其它字符串：标签图层中的一级标签前缀（节点取 tags[0]）
+   */
+  graphClusterBasis?: 'frame' | string;
   /** 图谱视图：簇组排序与显隐 / 半径权重 */
   graphFrameLayers?: GraphLayerState;
   /** 图谱节点圆直径下限（px，1～36）；实际大小按关联节点数放大，上限 36 */
@@ -145,8 +151,8 @@ export interface Project {
   /** 图谱边标签字号（px，3～16）；未设置时由样式默认值决定，不再与连线粗细联动 */
   graphEdgeLabelFontPx?: number;
   /**
-   * 时间线布局：纵轴（Y）按 Frame 图层权重聚类的强度，0～1。
-   * 0 为均匀随机；越大则高权重 Frame 越靠上、纵向散布越小。
+   * 时间线布局：纵轴（Y）按聚类依据分层的聚拢强度，0～1。
+   * 0 为均匀随机；越大则同层越靠齐、纵向散布越小。
    * 未设置时默认 0.8（80%）。
    */
   graphTimeAxisWeightBias?: number;

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type { Project } from '../types';
 import {
   DEFAULT_GRAPH_COSE_TIME_X_BIAS,
@@ -6,6 +6,12 @@ import {
   DEFAULT_GRAPH_STYLESHEET_SIZING,
   DEFAULT_GRAPH_TIME_AXIS_WEIGHT_BIAS
 } from '../utils/graph/graphData';
+import {
+  GRAPH_CLUSTER_BASIS_FRAME,
+  normalizeGraphClusterBasis
+} from '../utils/graph/graphClusterBasis';
+import { GRAPH_UNTAGGED_TAG_GROUP, mergeGraphLayerState } from '../utils/graph/graphRuntimeCore';
+import { groupTagsByHierarchyPrefix } from '../utils/layer/tagHierarchy';
 import { SettingsCompactSlider } from './ui/SettingsCompactSlider';
 
 export interface GraphStyleSettingsBlockProps {
@@ -14,7 +20,7 @@ export interface GraphStyleSettingsBlockProps {
   onPatch: (patch: Partial<Project>) => void;
 }
 
-/** 设置面板「Graph Style」：节点/边视觉、时间线 Frame 聚类、力导时间分布 */
+/** 设置面板「Graph Style」：节点/边视觉、时间线聚类分层、力导时间分布 */
 export const GraphStyleSettingsBlock: React.FC<GraphStyleSettingsBlockProps> = ({
   themeColor,
   project,
@@ -28,6 +34,19 @@ export const GraphStyleSettingsBlock: React.FC<GraphStyleSettingsBlockProps> = (
   const coseTimeXBias = project.graphCoseTimeXBias ?? DEFAULT_GRAPH_COSE_TIME_X_BIAS;
   const edgeElasticity = project.graphEdgeElasticity ?? DEFAULT_GRAPH_EDGE_ELASTICITY;
   const edgeCurve = project.graphEdgeCurve !== false;
+
+  const tagPrefixes = useMemo(() => {
+    const merged = mergeGraphLayerState(project.notes ?? [], project.graphLayers ?? null, 'tag');
+    return groupTagsByHierarchyPrefix(merged.order ?? [], GRAPH_UNTAGGED_TAG_GROUP)
+      .map((g) => g.prefix)
+      .filter((p) => p && p !== GRAPH_UNTAGGED_TAG_GROUP);
+  }, [project.notes, project.graphLayers]);
+
+  const clusterBasisRaw = normalizeGraphClusterBasis(project.graphClusterBasis);
+  const clusterBasis =
+    clusterBasisRaw === GRAPH_CLUSTER_BASIS_FRAME || tagPrefixes.includes(clusterBasisRaw)
+      ? clusterBasisRaw
+      : GRAPH_CLUSTER_BASIS_FRAME;
 
   // 力导相关：拖动只改本地显示，抬起再写回项目（避免拖动过程中反复重算布局）
   const [coseTimeXDraft, setCoseTimeXDraft] = useState(coseTimeXBias);
@@ -96,7 +115,7 @@ export const GraphStyleSettingsBlock: React.FC<GraphStyleSettingsBlockProps> = (
       </div>
       <div className="min-w-0">
         <SettingsCompactSlider
-          label="按Frame聚类"
+          label="按聚类分层"
           themeColor={themeColor}
           value={timeBias}
           min={0}
@@ -108,6 +127,23 @@ export const GraphStyleSettingsBlock: React.FC<GraphStyleSettingsBlockProps> = (
           maxCaption="强"
         />
         <p className="mt-1 text-[10px] leading-snug text-gray-400">时间线 · Y 轴</p>
+      </div>
+      <div className="min-w-0">
+        <label className="mb-1 block text-xs font-medium text-gray-600">聚类依据</label>
+        <select
+          className="w-full rounded-lg border border-gray-200/90 bg-white px-2 py-1.5 text-xs text-gray-800 outline-none focus:border-gray-300"
+          style={{ accentColor: themeColor }}
+          value={clusterBasis}
+          onChange={(e) => onPatch({ graphClusterBasis: normalizeGraphClusterBasis(e.target.value) })}
+        >
+          <option value={GRAPH_CLUSTER_BASIS_FRAME}>簇图层</option>
+          {tagPrefixes.map((p) => (
+            <option key={p} value={p}>
+              {p}
+            </option>
+          ))}
+        </select>
+        <p className="mt-1 text-[10px] leading-snug text-gray-400">时间线分层 · 图例 · 节点色</p>
       </div>
       <div className="min-w-0">
         <SettingsCompactSlider

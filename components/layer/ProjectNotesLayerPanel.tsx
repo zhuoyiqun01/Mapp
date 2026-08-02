@@ -27,18 +27,10 @@ import { SettingsCompactSlider } from '../ui/SettingsCompactSlider';
 import { TagAddPanel } from '../ui/TagAddPanel';
 import { NoteTimeRangeControl } from '../note-editor/NoteTimeRangeControl';
 import { TagLayerHierarchyList } from './TagLayerHierarchyList';
+import { insertLayerOrderRelative } from '../../utils/layer/tagHierarchy';
 
 function insertRelative(order: string[], fromKey: string, toKey: string, place: 'before' | 'after'): string[] {
-  const next = [...order];
-  const fromIdx = next.indexOf(fromKey);
-  let toIdx = next.indexOf(toKey);
-  if (fromIdx < 0 || toIdx < 0 || fromKey === toKey) return order;
-  next.splice(fromIdx, 1);
-  toIdx = next.indexOf(toKey);
-  if (toIdx < 0) return order;
-  const insertAt = place === 'after' ? toIdx + 1 : toIdx;
-  next.splice(insertAt, 0, fromKey);
-  return next;
+  return insertLayerOrderRelative(order, fromKey, toKey, place);
 }
 
 function normalizeTagLabel(v: string | undefined | null): string {
@@ -1070,10 +1062,10 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
               }))
             }
             formatValue={(v) => v.toFixed(2)}
+            // frame：时间线纵轴靠前更靠上（「按聚类分层」强度另见设置项）
             // tag：与 LayerRegistry 一致——权重大 → 靠圆心
-            // frame：时间线纵轴权重大 → 更靠上（「按Frame聚类」强度另见设置项）
-            minCaption={layerGroupStandard === 'tag' ? '远心' : '近心'}
-            maxCaption={layerGroupStandard === 'tag' ? '近心' : '远心'}
+            minCaption={layerGroupStandard === 'tag' ? '远心' : '靠上'}
+            maxCaption={layerGroupStandard === 'tag' ? '近心' : '靠下'}
             trackWidth="stretch"
             className="min-w-0"
           />

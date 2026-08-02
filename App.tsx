@@ -1411,7 +1411,7 @@ export default function App() {
     return (
       <>
         <div
-          className="w-full min-h-screen flex flex-col items-center justify-center text-theme-chrome-fg"
+          className="w-full min-h-dvh flex flex-col items-center justify-center text-theme-chrome-fg"
           style={{ backgroundColor: themeColor }}
         >
           <Loader2 size={48} className="animate-spin mb-4" />
@@ -1433,7 +1433,7 @@ export default function App() {
         />
       ) : null}
     <div
-      className="w-full h-screen flex flex-col overflow-hidden relative bg-gray-50"
+      className="app-root w-full h-dvh max-h-dvh flex flex-col overflow-hidden relative bg-gray-50"
       style={{
         touchAction: 'manipulation'
       }}
@@ -2038,7 +2038,7 @@ export default function App() {
         isUIVisible && projectKind && (
         <div
           data-allow-context-menu
-          className={`fixed bottom-4 ui-workspace-center-x -translate-x-1/2 z-50 max-w-[min(100vw-1rem,28rem)] p-1.5 rounded-2xl shadow-xl border flex flex-wrap justify-center gap-1 animate-in slide-in-from-bottom-4 fade-in ${
+          className={`fixed bottom-4 ui-workspace-center-x -translate-x-1/2 z-50 max-w-[min(100vw-1rem,32rem)] p-1.5 rounded-2xl shadow-xl border flex flex-wrap justify-center gap-1 animate-in slide-in-from-bottom-4 fade-in ${
             panelChromeStyle ? 'border-gray-200/80 ring-1 ring-black/[0.04]' : 'border-white/50 map-chrome-surface-fallback'
           }`}
           style={panelChromeStyle}

@@ -3,6 +3,12 @@ import type { Connection, Frame, Note, Project } from '../../types';
 import { parseNoteContent } from '../../utils';
 import { DEFAULT_MAP_UI_CHROME_BLUR_PX, DEFAULT_MAP_UI_CHROME_OPACITY } from '../map/mapChromeStyle';
 import { GRAPH_UNTAGGED_TAG_GROUP, mergeGraphLayerState } from './graphRuntimeCore';
+import {
+  GRAPH_CLUSTER_BASIS_FRAME,
+  noteColorForClusterBasis,
+  normalizeGraphClusterBasis,
+  type GraphClusterBasis
+} from './graphClusterBasis';
 
 // Cytoscape 的 style stylesheet 类型在当前工具链下可能不可用，这里用宽类型避免无关类型检查阻塞。
 type Stylesheet = any[];
@@ -92,21 +98,13 @@ export function normalizeProjectConnections(project: Project): { project: Projec
   return { project: { ...project, connections: next }, mutated: true };
 }
 
-function noteNodeColor(note: Note, fallback: string, framesById?: Map<string, Frame>): string {
-  const frameId =
-    note.groupIds?.[0]?.trim() ||
-    note.groupId?.trim() ||
-    '';
-  if (frameId && framesById?.has(frameId)) {
-    const fc = framesById.get(frameId)?.color?.trim();
-    if (fc) return fc;
-  }
-  if (note.tags?.length) {
-    const t = note.tags[0];
-    if (t.color) return t.color;
-  }
-  if (note.color) return note.color;
-  return fallback;
+function noteNodeColor(
+  note: Note,
+  fallback: string,
+  framesById?: Map<string, Frame>,
+  clusterBasis: GraphClusterBasis = GRAPH_CLUSTER_BASIS_FRAME
+): string {
+  return noteColorForClusterBasis(note, fallback, clusterBasis, framesById);
 }
 
 /** 首行（换行符前），与 parseNoteContent 一致 */
@@ -207,7 +205,8 @@ export function buildGraphElements(
   edgeWeightBase?: number,
   tagLayerWeights?: Record<string, number>,
   frames?: Frame[],
-  nodeSizeMin?: number
+  nodeSizeMin?: number,
+  clusterBasis: GraphClusterBasis = GRAPH_CLUSTER_BASIS_FRAME
 ): ElementDefinition[] {
   const noteById = new Map<string, Note>();
   notes.forEach((n) => noteById.set(n.id, n));
@@ -215,6 +214,7 @@ export function buildGraphElements(
   const framesById = new Map((frames ?? []).map((f) => [String(f.id).trim(), f]));
   const sizeMin = nodeSizeMin ?? DEFAULT_GRAPH_STYLESHEET_SIZING.nodeSize;
   const degreeSizes = attachNodeDegreeSizes(notes, connections, noteIds, sizeMin);
+  const basis = normalizeGraphClusterBasis(clusterBasis);
   const favScale = 1.5;
   const coreScale = GRAPH_FOCUS_CORE_NODE_SCALE;
 
@@ -335,7 +335,7 @@ export function buildGraphElements(
           fullTitle: parseNoteContent(note.text || '').title || '便签',
           year: yl,
           timeSort: note.startYear != null ? note.startYear : undefined,
-          color: noteNodeColor(note, themeColor, framesById),
+          color: noteNodeColor(note, themeColor, framesById, basis),
           layerItemHidden: Boolean(note.layerItemHidden),
           stackZ: stackZById.get(note.id) ?? 2,
           /** 0~1：图中“相对层级(level)”归一化分数（后续在本函数末尾填充） */
@@ -586,7 +586,7 @@ export const DEFAULT_GRAPH_STYLESHEET_SIZING: GraphStylesheetSizing = {
   edgeLabelFontPx: 6
 };
 
-/** 时间线「按Frame聚类」（Y 轴）默认强度（未设置时） */
+/** 时间线「按聚类分层」（Y 轴）默认强度（未设置时） */
 export const DEFAULT_GRAPH_TIME_AXIS_WEIGHT_BIAS = 0.8;
 
 /** 力导「按时间分布」（X 轴）默认强度（未设置时） */
@@ -1231,8 +1231,10 @@ export interface GraphExportPayload {
   graphLayers?: import('../../types').GraphLayerState;
   /** 独立页圆环/时间轴的分组标准：标签或簇（frame） */
   graphLayerGroupStandard?: 'tag' | 'frame';
-  /** 独立页时间线纵轴按 Frame 聚类强度（0～1；默认 0.8） */
+  /** 独立页时间线纵轴聚类强度（0～1；默认 0.8） */
   graphTimeAxisWeightBias?: number;
+  /** 独立页时间线聚类依据：frame 或一级标签前缀 */
+  graphClusterBasis?: string;
   /** 独立页力导横轴按时间分布强度（0～1；默认 0.8） */
   graphCoseTimeXBias?: number;
   /** 独立页力导边弹性基数（默认 0.45） */
@@ -1320,6 +1322,7 @@ export function buildGraphExportPayload(
     graphLayerGroupStandard: standard,
     graphTimeAxisWeightBias:
       project.graphTimeAxisWeightBias ?? DEFAULT_GRAPH_TIME_AXIS_WEIGHT_BIAS,
+    graphClusterBasis: project.graphClusterBasis ?? GRAPH_CLUSTER_BASIS_FRAME,
     graphCoseTimeXBias: project.graphCoseTimeXBias ?? DEFAULT_GRAPH_COSE_TIME_X_BIAS,
     graphEdgeElasticity: project.graphEdgeElasticity ?? DEFAULT_GRAPH_EDGE_ELASTICITY,
     notePreviews: buildNotePreviewsFromNotes(project.notes || []),

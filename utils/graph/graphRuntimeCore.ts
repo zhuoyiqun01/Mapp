@@ -9,6 +9,14 @@ import {
   compareTagLayerKeysForAutoOrder,
   defaultWeightForTagLayer
 } from '../layer/layerRegistry';
+import {
+  GRAPH_CLUSTER_BASIS_FRAME,
+  isFrameClusterBasis,
+  normalizeGraphClusterBasis,
+  resolveCyClusterGroupKey,
+  type GraphClusterBasis
+} from './graphClusterBasis';
+import { tagHierarchyPrefix } from '../layer/tagHierarchy';
 // Cytoscape 的 style stylesheet 类型导出在当前工具链下不稳定，这里用宽类型避免无关的类型检查阻塞。
 type Stylesheet = any;
 
@@ -1372,21 +1380,12 @@ export function mergeGraphLayerState(
   const prevOrder = saved?.order ?? [];
   const ordered: string[] = [];
   const seen = new Set<string>();
-  if (standard === 'tag') {
-    // 标签面板：全部标签按首字母顺序（不沿用拖拽顺序）
-    [...allKeys]
-      .sort((a, b) => compareTagLayerKeysForAutoOrder(a, b, GRAPH_UNTAGGED_TAG_GROUP))
-      .forEach((k) => {
-        ordered.push(k);
-        seen.add(k);
-      });
-  } else {
-    for (const k of prevOrder) {
-      const key = String(k).trim();
-      if (allKeys.has(key) && !seen.has(key)) {
-        ordered.push(key);
-        seen.add(key);
-      }
+  // 标签 / 簇：均保留已存拖拽顺序；新键按默认规则追加（标签用首字母，「无标签」靠后）
+  for (const k of prevOrder) {
+    const key = String(k).trim();
+    if (allKeys.has(key) && !seen.has(key)) {
+      ordered.push(key);
+      seen.add(key);
     }
   }
   const rest = [...allKeys]
@@ -1418,9 +1417,11 @@ export function mergeGraphLayerState(
   };
 }
 
-/** 时间线 preset：横轴年份；纵轴可选受图层面板权重与 bias 牵引 */
+/** 时间线 preset：横轴年份；纵轴按聚类依据分层，受 bias 牵引 */
 export interface GraphTimeLayoutOptions {
   weightBias?: number;
+  /** `'frame'` 或一级标签前缀；默认 frame */
+  clusterBasis?: GraphClusterBasis;
 }
 
 /**
@@ -1435,18 +1436,22 @@ export function applyGraphLayoutMode(
     /** @deprecated 圆环已移除；保留以免旧调用方报错 */
     circleRefineWithForce?: boolean;
     /**
-     * 时间轴分组依据；图谱时间线固定传 `frame`。
+     * 时间轴分组标准（frame / tag）；若提供 clusterBasis 则以之为准。
      */
     graphLayerGroupStandard?: GraphLayerGroupStandard;
     /**
-     * 合并后的分层面板状态（时间线用簇层）
+     * 合并后的分层面板状态（簇层或标签层，与聚类依据一致）
      */
     graphLayers?: GraphLayerState | null;
   }
 ): void {
   const silent = options?.silentTimeFallback ?? false;
   const gl = options?.graphLayers ?? null;
-  const groupStandard = options?.graphLayerGroupStandard ?? 'frame';
+  const groupStandard: GraphLayerGroupStandard =
+    options?.graphLayerGroupStandard ??
+    (isFrameClusterBasis(normalizeGraphClusterBasis(options?.timeLayout?.clusterBasis))
+      ? 'frame'
+      : 'tag');
   if (mode === 'cose') {
     applyGraphLayout(cy, 'fcose');
     return;
@@ -1478,6 +1483,13 @@ export function applyGraphTimeLayout(
   }
   const biasRaw = layoutOpts?.weightBias ?? DEFAULT_GRAPH_TIME_AXIS_WEIGHT_BIAS;
   const bias = Math.max(0, Math.min(1, Number.isFinite(biasRaw) ? biasRaw : 0));
+  const hasExplicitBasis = layoutOpts?.clusterBasis != null;
+  const clusterBasis = hasExplicitBasis
+    ? normalizeGraphClusterBasis(layoutOpts!.clusterBasis)
+    : standard === 'frame'
+      ? GRAPH_CLUSTER_BASIS_FRAME
+      : null;
+
   const times = valid.map((n) => Number(n.data('timeSort')));
   const minT = Math.min(...times);
   const maxT = Math.max(...times);
@@ -1489,21 +1501,43 @@ export function applyGraphTimeLayout(
   const bandH = bandB - bandT;
 
   const hiddenSet = new Set((graphLayers?.hidden ?? []).map((h) => String(h).trim()));
+
+  const resolveKey = (node: NodeSingular): string => {
+    if (clusterBasis == null) {
+      return getGraphLayerEffectiveGroupKey(node, standard, hiddenSet);
+    }
+    if (isFrameClusterBasis(clusterBasis)) {
+      return getGraphLayerEffectiveGroupKey(node, 'frame', hiddenSet);
+    }
+    return resolveCyClusterGroupKey(
+      String(node.data('tagGroup') ?? '').trim(),
+      String(node.data('frameGroup') ?? '').trim(),
+      clusterBasis
+    );
+  };
+
   const groupKeysFromNodes = new Set<string>();
   valid.forEach((node) => {
-    const groupKey = getGraphLayerEffectiveGroupKey(node, standard, hiddenSet);
-    if (standard === 'tag' && groupKey === '') return; // 无标签不参与时间线纵轴
+    const groupKey = resolveKey(node);
+    // 旧 tag 全量模式：无标签不占纵轴层
+    if (clusterBasis == null && standard === 'tag' && groupKey === '') return;
     groupKeysFromNodes.add(groupKey);
   });
   const allKeys = groupKeysFromNodes;
-  const keysOrdered = graphLayers
+  let keysOrdered = graphLayers
     ? orderedTagGroupKeysFromState(allKeys, graphLayers)
     : [...allKeys].sort((a, b) => {
         if (a === '' && b !== '') return 1;
         if (b === '' && a !== '') return -1;
         return a.localeCompare(b, GRAPH_SORT_LOCALE);
       });
-  const keysVisible = keysOrdered.filter((k) => !hiddenSet.has(k));
+  if (clusterBasis != null && !isFrameClusterBasis(clusterBasis)) {
+    const nonempty = keysOrdered.filter(
+      (k) => k !== '' && tagHierarchyPrefix(k) === clusterBasis
+    );
+    keysOrdered = allKeys.has('') ? [...nonempty, ''] : nonempty;
+  }
+  const keysVisible = keysOrdered.filter((k) => k === '' || !hiddenSet.has(k));
   const keysForY = keysVisible.length > 0 ? keysVisible : keysOrdered;
   const idxByKey = new Map<string, number>();
   keysForY.forEach((k, i) => idxByKey.set(k, i));
@@ -1511,9 +1545,8 @@ export function applyGraphTimeLayout(
 
   // 小斥力：在 preset 布局动画完成后，做一次近邻碰撞的轻推，避免点重叠。
   const applySmallRepulsion = (): void => {
-    // 仅处理可见的纵轴分组节点，避免把 tagGroup 为空的“隐藏节点”也挤开。
     const repulseNodes =
-      standard === 'tag'
+      clusterBasis == null && standard === 'tag'
         ? cy.nodes().filter((n) => String(n.data('tagGroup') ?? '').trim() !== '')
         : cy.nodes();
     if (repulseNodes.length < 2) return;
@@ -1528,16 +1561,14 @@ export function applyGraphTimeLayout(
     const minDist = Math.max(10, baseSize * 0.92);
     const minDist2 = minDist * minDist;
 
-    // x 推开权重小，尽量沿 y 维度“分层”以贴合时间视图直觉。
     const xScale = 0.18;
     const yScale = 1.0;
     const iterations = 3;
-    const step = 0.42 * (0.2 + 0.8 * (1 - bias)); // bias 越弱(抖动越大)推开越多一点
+    const step = 0.42 * (0.2 + 0.8 * (1 - bias));
 
     const wLocal = cy.width();
     const hLocal = cy.height();
 
-    // 用数组快照避免在迭代时读写 cytoscape 位置带来的抖动/性能问题。
     const pos = nodesArr.map((n) => ({ x: n.position('x'), y: n.position('y') }));
 
     for (let iter = 0; iter < iterations; iter += 1) {
@@ -1546,14 +1577,12 @@ export function applyGraphTimeLayout(
           const dx = pos[j].x - pos[i].x;
           const dy = pos[j].y - pos[i].y;
 
-          // 过滤：x 距离过远的碰撞基本不需要处理
           if (Math.abs(dx) > minDist * 1.1) continue;
 
           const dist2 = dx * dx + dy * dy;
           if (dist2 <= 1e-9 || dist2 >= minDist2) continue;
           const dist = Math.sqrt(dist2);
 
-          // overlap 比例越大推开越多
           const overlap = (minDist - dist) / dist;
           const push = overlap * step;
 
@@ -1586,15 +1615,12 @@ export function applyGraphTimeLayout(
       const t = node.data('timeSort');
       if (t == null) return { x: w / 2, y: h / 2 };
       const x = 80 + ((Number(t) - minT) / range) * (w - 160);
-        const groupKey = getGraphLayerEffectiveGroupKey(node, standard, hiddenSet);
+      const groupKey = resolveKey(node);
       const idx = idxByKey.get(groupKey) ?? 0;
       const norm = keysForY.length <= 1 ? 0 : idx / denom;
-      // order 控制：越靠前的 groupKey 越靠上
       const yTarget = bandT + norm * bandH;
       const maxJitter = bandH * 0.48 * (1 - bias);
       const yRaw = yTarget + (Math.random() - 0.5) * 2 * maxJitter;
-      // 不对 y 进行 bandT/bandB 裁剪：避免边界处抖动被“卡住”，导致同一 group
-      // 的节点在边界上出现更明显的重叠/堆叠。
       const y = yRaw;
       return { x, y };
     }

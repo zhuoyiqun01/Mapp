@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { ChevronDown, ChevronLeft, ChevronRight, Eye, EyeOff } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Eye, EyeOff, GripVertical } from 'lucide-react';
 import type { GraphLayerState, Note, TagVisibilityLogic } from '../../types';
 import { GRAPH_UNTAGGED_TAG_GROUP } from '../../utils/graph/graphRuntimeCore';
 import {
@@ -10,6 +10,8 @@ import {
 } from '../../utils/layer/unifiedNoteLayer';
 import {
   groupTagsByHierarchyPrefix,
+  insertLayerOrderBlockRelative,
+  insertLayerOrderRelative,
   tagHasHierarchySep,
   tagHierarchySuffix
 } from '../../utils/layer/tagHierarchy';
@@ -30,6 +32,7 @@ type Props = {
 /**
  * 标签图层三级：前缀（· 之前）→ 二级后缀（· 之后）→ 节点。
  * 无「 · 」的标签：一级展开后直接到节点。
+ * 拖拽顺序写入 graphLayers.order（图例 / 时间线 Y 轴）。
  */
 export const TagLayerHierarchyList: React.FC<Props> = ({
   themeColor,
@@ -57,6 +60,10 @@ export const TagLayerHierarchyList: React.FC<Props> = ({
 
   const [expandedPrefix, setExpandedPrefix] = useState<string | null>(null);
   const [expandedTag, setExpandedTag] = useState<string | null>(null);
+  const [dragTagKey, setDragTagKey] = useState<string | null>(null);
+  const [dragPrefixKeys, setDragPrefixKeys] = useState<string[] | null>(null);
+  const [overTagKey, setOverTagKey] = useState<string | null>(null);
+  const [dropPlace, setDropPlace] = useState<'before' | 'after'>('before');
 
   const patch = useCallback(
     (fn: (p: GraphLayerState) => GraphLayerState) => {
@@ -80,6 +87,10 @@ export const TagLayerHierarchyList: React.FC<Props> = ({
       }
       return { ...p, hidden: [...h] };
     });
+  };
+
+  const clearDrop = () => {
+    setOverTagKey(null);
   };
 
   const prefixColors = (tags: string[]) => {
@@ -151,6 +162,41 @@ export const TagLayerHierarchyList: React.FC<Props> = ({
     );
   };
 
+  const onTagDragOver = (e: React.DragEvent, k: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragTagKey == null && dragPrefixKeys == null) return;
+    if (dragTagKey === k) return;
+    if (dragPrefixKeys?.includes(k)) return;
+    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+    const before = e.clientY < rect.top + rect.height / 2;
+    setOverTagKey(k);
+    setDropPlace(before ? 'before' : 'after');
+  };
+
+  const onTagDrop = (e: React.DragEvent, k: string) => {
+    e.preventDefault();
+    const place = dropPlace;
+    const fromTag = dragTagKey;
+    const fromBlock = dragPrefixKeys;
+    setDragTagKey(null);
+    setDragPrefixKeys(null);
+    clearDrop();
+    if (fromTag != null && fromTag !== k) {
+      patch((p) => ({
+        ...p,
+        order: insertLayerOrderRelative(p.order, fromTag, k, place)
+      }));
+      return;
+    }
+    if (fromBlock != null && fromBlock.length > 0 && !fromBlock.includes(k)) {
+      patch((p) => ({
+        ...p,
+        order: insertLayerOrderBlockRelative(p.order, fromBlock, k, place)
+      }));
+    }
+  };
+
   const renderTagRow = (k: string, opts: { nested?: boolean }) => {
     const visible = !hiddenSet.has(k);
     const weightOpen = weightOpenKey === k;
@@ -159,10 +205,28 @@ export const TagLayerHierarchyList: React.FC<Props> = ({
     const fullLabel = k === GRAPH_UNTAGGED_TAG_GROUP ? '无标签' : k;
     const displayLabel =
       opts.nested && k !== GRAPH_UNTAGGED_TAG_GROUP ? tagHierarchySuffix(k) : fullLabel;
+    const isDragging = dragTagKey === k;
+    const isOver = overTagKey === k && (dragTagKey != null || dragPrefixKeys != null) && dragTagKey !== k;
+    const showLineBefore = isOver && dropPlace === 'before';
+    const showLineAfter = isOver && dropPlace === 'after';
 
     return (
       <div key={k} className={opts.nested ? 'ml-3 border-l border-gray-100 pl-1' : undefined}>
-        <div className="flex items-center gap-1 px-2 py-1">
+        {showLineBefore ? (
+          <div className="mx-2 h-0.5 rounded-full" style={{ backgroundColor: themeColor }} />
+        ) : null}
+        <div
+          onDragOver={(e) => onTagDragOver(e, k)}
+          onDragLeave={(e) => {
+            const related = e.relatedTarget as Node | null;
+            if (related && (e.currentTarget as HTMLElement).contains(related)) return;
+            if (overTagKey === k) clearDrop();
+          }}
+          onDrop={(e) => onTagDrop(e, k)}
+          className={`flex items-center gap-1 px-2 py-1 transition-[opacity,transform] ${
+            isDragging ? 'opacity-45 scale-[0.98]' : ''
+          } ${isOver ? 'bg-gray-50/90' : ''}`}
+        >
           <button
             type="button"
             className="shrink-0 rounded-md p-0.5 text-gray-500 hover:bg-gray-100"
@@ -171,11 +235,35 @@ export const TagLayerHierarchyList: React.FC<Props> = ({
           >
             {expanded ? <ChevronDown size={16} strokeWidth={2} /> : <ChevronRight size={16} strokeWidth={2} />}
           </button>
+          <div
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.effectAllowed = 'move';
+              e.dataTransfer.setData('text/plain', k);
+              setDragTagKey(k);
+              setDragPrefixKeys(null);
+              try {
+                e.dataTransfer.setDragImage(e.currentTarget, 12, 12);
+              } catch {
+                /* ignore */
+              }
+            }}
+            onDragEnd={() => {
+              setDragTagKey(null);
+              setDragPrefixKeys(null);
+              clearDrop();
+            }}
+            className="shrink-0 cursor-grab text-gray-400 active:cursor-grabbing"
+            aria-hidden
+          >
+            <GripVertical size={16} strokeWidth={2} />
+          </div>
           <div className="flex flex-shrink-0 items-center gap-1 pr-0.5">
             {(tagColorsByKey.get(k) ?? []).slice(0, 6).map((c) => (
               <button
                 key={`${k}:${c}`}
                 type="button"
+                draggable={false}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -212,6 +300,9 @@ export const TagLayerHierarchyList: React.FC<Props> = ({
             {weightOpen ? <ChevronLeft size={16} strokeWidth={2} /> : <ChevronRight size={16} strokeWidth={2} />}
           </button>
         </div>
+        {showLineAfter ? (
+          <div className="mx-2 h-0.5 rounded-full" style={{ backgroundColor: themeColor }} />
+        ) : null}
         {expanded ? renderNotes(k) : null}
       </div>
     );
@@ -261,10 +352,36 @@ export const TagLayerHierarchyList: React.FC<Props> = ({
         const allHidden = tags.every((t) => hiddenSet.has(t));
         const colors = leafOnly ? prefixColors(tags) : [];
         const prefixLabel = prefix === GRAPH_UNTAGGED_TAG_GROUP ? '无标签' : prefix;
+        const dropAnchor = tags[0];
+        const isPrefixDragging =
+          dragPrefixKeys != null &&
+          dragPrefixKeys.length === tags.length &&
+          tags.every((t) => dragPrefixKeys.includes(t));
+        const isOverPrefix =
+          overTagKey === dropAnchor &&
+          (dragTagKey != null || dragPrefixKeys != null) &&
+          !isPrefixDragging &&
+          dragTagKey !== dropAnchor;
+        const showPrefixLineBefore = isOverPrefix && dropPlace === 'before';
+        const showPrefixLineAfter = isOverPrefix && dropPlace === 'after';
 
         return (
           <div key={prefixKey} className="flex flex-col rounded-lg">
-            <div className="flex items-center gap-1 px-2 py-1">
+            {showPrefixLineBefore ? (
+              <div className="mx-2 h-0.5 rounded-full" style={{ backgroundColor: themeColor }} />
+            ) : null}
+            <div
+              onDragOver={(e) => onTagDragOver(e, dropAnchor)}
+              onDragLeave={(e) => {
+                const related = e.relatedTarget as Node | null;
+                if (related && (e.currentTarget as HTMLElement).contains(related)) return;
+                if (overTagKey === dropAnchor) clearDrop();
+              }}
+              onDrop={(e) => onTagDrop(e, dropAnchor)}
+              className={`flex items-center gap-1 px-2 py-1 ${isPrefixDragging ? 'opacity-45' : ''} ${
+                isOverPrefix ? 'bg-gray-50/90' : ''
+              }`}
+            >
               <button
                 type="button"
                 className="shrink-0 rounded-md p-0.5 text-gray-500 hover:bg-gray-100"
@@ -279,6 +396,34 @@ export const TagLayerHierarchyList: React.FC<Props> = ({
                   <ChevronRight size={18} strokeWidth={2} />
                 )}
               </button>
+              <div
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = 'move';
+                  e.dataTransfer.setData('text/plain', prefix);
+                  if (leafOnly) {
+                    setDragTagKey(tags[0]);
+                    setDragPrefixKeys(null);
+                  } else {
+                    setDragTagKey(null);
+                    setDragPrefixKeys([...tags]);
+                  }
+                  try {
+                    e.dataTransfer.setDragImage(e.currentTarget, 12, 12);
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+                onDragEnd={() => {
+                  setDragTagKey(null);
+                  setDragPrefixKeys(null);
+                  clearDrop();
+                }}
+                className="shrink-0 cursor-grab text-gray-400 active:cursor-grabbing"
+                aria-hidden
+              >
+                <GripVertical size={16} strokeWidth={2} />
+              </div>
               {leafOnly ? (
                 <div className="flex flex-shrink-0 items-center gap-1 pr-0.5">
                   {colors.map((c) => (
@@ -321,6 +466,9 @@ export const TagLayerHierarchyList: React.FC<Props> = ({
                 </button>
               ) : null}
             </div>
+            {showPrefixLineAfter ? (
+              <div className="mx-2 h-0.5 rounded-full" style={{ backgroundColor: themeColor }} />
+            ) : null}
 
             {prefixOpen && leafOnly ? renderNotes(tags[0]) : null}
 

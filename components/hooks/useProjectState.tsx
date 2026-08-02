@@ -255,6 +255,7 @@ export const useProjectState = (): UseProjectStateReturn => {
       themeColor: project.themeColor,
       graphLayers: project.graphLayers,
       graphLayerStandard: project.graphLayerStandard,
+      graphClusterBasis: project.graphClusterBasis,
       graphFrameLayers: project.graphFrameLayers,
       graphNodeSize: project.graphNodeSize,
       graphLabelFontPx: project.graphLabelFontPx,

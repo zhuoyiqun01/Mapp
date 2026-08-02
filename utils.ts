@@ -402,6 +402,13 @@ export const exportToJpegCentered = async (
     uiElements.forEach((el, index) => {
       const htmlEl = el as HTMLElement;
       originalUIDisplays[index] = htmlEl.style.display;
+      // 图谱节点 HTML label 等需进截图，勿当控件隐藏
+      if (
+        htmlEl.hasAttribute('data-mapp-export-keep') ||
+        htmlEl.closest('[data-mapp-export-keep]')
+      ) {
+        return;
+      }
       // 只隐藏按钮、控件、下拉菜单等UI元素，不隐藏地图容器
       if (htmlEl.tagName === 'BUTTON' || 
           htmlEl.className.includes('pointer-events-auto') ||
