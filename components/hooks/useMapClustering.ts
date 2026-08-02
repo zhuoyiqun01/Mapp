@@ -233,7 +233,14 @@ export function useMapClustering({
         cancelAnimationFrame(rafId);
         rafId = null;
       }
-      /** 缩放完全结束后再聚类一次；略延迟便于底图/视图稳定 */
+      /**
+       * 等 smooth pinch/wheel 的 view 完全 commit 后再聚类。
+       * 移动端略加长，避免与 touchend 后最后几帧 zoomanim 抢跑导致点位跳一下。
+       */
+      const settleMs =
+        typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches
+          ? 320
+          : 180;
       updateTimeoutId = setTimeout(() => {
         const el = mapInstanceRef.current?.getContainer();
         el?.classList.add('map-cluster-settling');
@@ -241,8 +248,8 @@ export function useMapClustering({
         settleRemoveTimer = setTimeout(() => {
           mapInstanceRef.current?.getContainer()?.classList.remove('map-cluster-settling');
           settleRemoveTimer = null;
-        }, 340);
-      }, 220);
+        }, 80);
+      }, settleMs);
     };
 
     const handleMoveEnd = () => {

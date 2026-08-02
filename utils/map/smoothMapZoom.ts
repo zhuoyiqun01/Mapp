@@ -26,19 +26,23 @@ L.Map.mergeOptions({
   smoothZoomCenter: false
 });
 
-/** Subpixel marker positions during zoomanim (Leaflet rounds by default → jitter). */
+/** Subpixel marker positions (Leaflet rounds by default → visible jitter, especially on pinch zoom). */
 const markerProto = L.Marker.prototype;
 if (!markerProto._mappSmoothZoomPatched) {
   markerProto._mappSmoothZoomPatched = true;
-  const _animateZoomOrig = markerProto._animateZoom;
   markerProto._animateZoom = function (opt) {
     if (!this._map) return;
-    if (this._map._mappSmoothZooming) {
-      var pos = this._map._latLngToNewLayerPoint(this._latlng, opt.zoom, opt.center);
+    var pos = this._map._latLngToNewLayerPoint(this._latlng, opt.zoom, opt.center);
+    this._setPos(pos);
+  };
+  const _updateOrig = markerProto.update;
+  markerProto.update = function () {
+    if (this._icon && this._map) {
+      var pos = this._map.latLngToLayerPoint(this._latlng);
       this._setPos(pos);
-      return;
+      return this;
     }
-    return _animateZoomOrig.call(this, opt);
+    return _updateOrig.call(this);
   };
 }
 
@@ -147,6 +151,8 @@ L.Map.SmoothMapZoom = L.Handler.extend({
     var center = this._center;
     var zoom = map._limitZoom(this._goalZoom);
 
+    // 让 React 图层在 commit 后短时跳过 remount，避免与 Leaflet 重投影抢同一帧
+    map._mappZoomCommitGuard = true;
     this._clearAnimFlags();
 
     // Reset map pane pan offset like `_resetView`, then fire a clean end sequence.
@@ -156,6 +162,13 @@ L.Map.SmoothMapZoom = L.Handler.extend({
     map.fire('move');
     map.fire('viewreset');
     map._moveEnd(true);
+
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        map._mappZoomCommitGuard = false;
+        map.fire('mappzoomcommitdone');
+      });
+    });
   },
 
   _limitGoal: function () {
@@ -290,7 +303,7 @@ L.Map.SmoothMapZoom = L.Handler.extend({
     }
 
     this._pinchLastDist = dist;
-    this._setAnchor(p1.add(p2)._divideBy(2));
+    // 固定 pinch 起点中点为缩放锚：每帧跟手指中点会因触点噪声导致地图/点位微抖
     L.DomEvent.preventDefault(e);
   },
 

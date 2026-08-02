@@ -2038,7 +2038,7 @@ export default function App() {
         isUIVisible && projectKind && (
         <div
           data-allow-context-menu
-          className={`fixed bottom-4 ui-workspace-center-x -translate-x-1/2 z-50 max-w-[min(100vw-1rem,32rem)] p-1.5 rounded-2xl shadow-xl border flex flex-wrap justify-center gap-1 animate-in slide-in-from-bottom-4 fade-in ${
+          className={`fixed bottom-4 ui-workspace-center-x -translate-x-1/2 z-50 max-w-[min(100vw-1rem,42rem)] p-1.5 rounded-2xl shadow-xl border flex flex-wrap justify-center gap-1 animate-in slide-in-from-bottom-4 fade-in ${
             panelChromeStyle ? 'border-gray-200/80 ring-1 ring-black/[0.04]' : 'border-white/50 map-chrome-surface-fallback'
           }`}
           style={panelChromeStyle}

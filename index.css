@@ -62,10 +62,13 @@ html, body, #root {
   width: 100%;
   overflow: hidden;
   overscroll-behavior: none;
+  /* 移动端底部空隙 / overscroll 露出主题色，而非灰底 */
+  background-color: var(--theme-color);
 }
 
 body {
-  @apply bg-gray-50 text-gray-800 antialiased;
+  @apply text-gray-800 antialiased;
+  background-color: var(--theme-color);
   /* 避免移动端地址栏显隐时整页被拖出可视区 */
   position: relative;
   touch-action: manipulation;
@@ -212,7 +215,8 @@ body {
   opacity: 0;
 }
 
-/* 缩放结束、聚类重算后短时开启：marker 屏幕位移用 transform 过渡（由 useMapClustering 给 .leaflet-container 加类） */
+/* 缩放结束聚类重算时勿对 marker transform 做 CSS 过渡：
+ * Leaflet 用 transform 定位，过渡会与落点取整/重投影打架，移动端 pinch 后尤其明显。 */
 .leaflet-container.map-cluster-settling .leaflet-marker-pane .leaflet-marker-icon {
-  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: none;
 }

@@ -60,11 +60,19 @@ function ClusterMarkerLayerInner({
   const rafRef = useRef<number | null>(null);
 
   useMapEvents({
-    zoomend: () => bump((n) => n + 1),
-    moveend: () => bump((n) => n + 1),
+    zoomend: () => {
+      if (map._mappSmoothZooming || map._animatingZoom || map._mappZoomCommitGuard) return;
+      bump((n) => n + 1);
+    },
+    moveend: () => {
+      if (map._mappSmoothZooming || map._animatingZoom || map._mappZoomCommitGuard) return;
+      bump((n) => n + 1);
+    },
+    // @ts-expect-error custom event from smoothMapZoom commit
+    mappzoomcommitdone: () => bump((n) => n + 1),
     move: () => {
       // During smooth CSS zoom, Leaflet markers follow zoomanim — don't remount via React.
-      if (map._mappSmoothZooming || map._animatingZoom) return;
+      if (map._mappSmoothZooming || map._animatingZoom || map._mappZoomCommitGuard) return;
       if (rafRef.current != null) return;
       rafRef.current = requestAnimationFrame(() => {
         rafRef.current = null;

@@ -103,9 +103,20 @@ export const MapConnectionLinesOverlay: React.FC<MapConnectionLinesOverlayProps>
   const [viewEpoch, setViewEpoch] = useState(0);
 
   useMapEvents({
-    zoomend: () => setViewEpoch((n) => n + 1),
-    moveend: () => setViewEpoch((n) => n + 1),
-    viewreset: () => setViewEpoch((n) => n + 1)
+    zoomend: () => {
+      if (map._mappSmoothZooming || map._animatingZoom || map._mappZoomCommitGuard) return;
+      setViewEpoch((n) => n + 1);
+    },
+    moveend: () => {
+      if (map._mappSmoothZooming || map._animatingZoom || map._mappZoomCommitGuard) return;
+      setViewEpoch((n) => n + 1);
+    },
+    viewreset: () => {
+      if (map._mappSmoothZooming || map._animatingZoom || map._mappZoomCommitGuard) return;
+      setViewEpoch((n) => n + 1);
+    },
+    // @ts-expect-error custom event from smoothMapZoom commit
+    mappzoomcommitdone: () => setViewEpoch((n) => n + 1)
   });
 
   const noteById = useMemo(() => {
