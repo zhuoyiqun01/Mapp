@@ -1,6 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, Link2, Minus, MousePointer2, Plus, X } from 'lucide-react';
 import type { Connection, Note } from '../../types';
+import {
+  clampConnectionWeight,
+  DEFAULT_CONNECTION_WEIGHT
+} from '../../utils/graph/graphData';
 
 export interface ConnectionDraft {
   fromNoteId: string;
@@ -8,6 +12,8 @@ export interface ConnectionDraft {
   label: string;
   fromArrow: 'arrow' | 'none';
   toArrow: 'arrow' | 'none';
+  /** 连线权重；旧数据缺省为 1 */
+  weight: number;
 }
 
 /** 与 `connectionToGraphDirection` 一致：从存储的 Connection 还原面板上的起终点箭头选项 */
@@ -21,7 +27,8 @@ export function connectionToPanelDraft(c: Connection): ConnectionDraft {
     toNoteId: c.toNoteId,
     label: c.label || '',
     fromArrow,
-    toArrow
+    toArrow,
+    weight: clampConnectionWeight(c.weight)
   };
 }
 
@@ -536,14 +543,38 @@ export const GraphConnectionPanel: React.FC<GraphConnectionPanelProps> = ({
           )}
         </div>
 
-        <div className="space-y-1">
-          <label className="text-xs font-semibold text-gray-500 tracking-wide">关系</label>
-          <input
-            value={draft.label}
-            onChange={(e) => onDraftChange({ label: e.target.value })}
-            className="w-full h-9 px-3 py-0 rounded-xl border border-gray-200/80 bg-white text-sm leading-normal outline-none focus:ring-2 focus:ring-offset-0"
-            style={{ ['--tw-ring-color' as string]: themeColor }}
-          />
+        <div className="flex gap-2">
+          <div className="min-w-0 flex-[2] space-y-1">
+            <label className="text-xs font-semibold text-gray-500 tracking-wide">关系</label>
+            <input
+              value={draft.label}
+              onChange={(e) => onDraftChange({ label: e.target.value })}
+              className="w-full h-9 px-3 py-0 rounded-xl border border-gray-200/80 bg-white text-sm leading-normal outline-none focus:ring-2 focus:ring-offset-0"
+              style={{ ['--tw-ring-color' as string]: themeColor }}
+            />
+          </div>
+          <div className="w-[5.5rem] shrink-0 space-y-1">
+            <label className="text-xs font-semibold text-gray-500 tracking-wide">权重</label>
+            <input
+              type="number"
+              min={0.1}
+              max={10}
+              step={0.1}
+              value={Number.isFinite(draft.weight) ? draft.weight : DEFAULT_CONNECTION_WEIGHT}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                onDraftChange({
+                  weight: Number.isFinite(v) ? v : DEFAULT_CONNECTION_WEIGHT
+                });
+              }}
+              onBlur={() =>
+                onDraftChange({ weight: clampConnectionWeight(draft.weight) })
+              }
+              className="w-full h-9 px-2 py-0 rounded-xl border border-gray-200/80 bg-white text-sm leading-normal tabular-nums outline-none focus:ring-2 focus:ring-offset-0"
+              style={{ ['--tw-ring-color' as string]: themeColor }}
+              title="连线权重（旧数据默认 1）；越大力导弹簧越硬"
+            />
+          </div>
         </div>
 
         <div className="flex gap-2">

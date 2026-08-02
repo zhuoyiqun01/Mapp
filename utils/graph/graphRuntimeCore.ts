@@ -390,77 +390,20 @@ export function animateGraphCenterOnNode(cy: Core, nodeId: string): void {
   });
 }
 
-const GRAPH_COSE_EDGE_LENGTH_MIN = 64;
-const GRAPH_COSE_EDGE_LENGTH_MAX = 276;
-const GRAPH_COSE_EDGE_WEIGHT_MIN = 0.1;
-const GRAPH_COSE_EDGE_WEIGHT_MAX = 3.2;
-const GRAPH_COSE_REPULSION_MIN = 3200;
-const GRAPH_COSE_REPULSION_MAX = 9200;
+const GRAPH_COSE_EDGE_LENGTH_MIN = 60;
+const GRAPH_COSE_EDGE_LENGTH_MAX = 400;
+/** 与 Connection.weight / clampConnectionWeight 一致 */
+const GRAPH_COSE_CONN_WEIGHT_MIN = 0.1;
+const GRAPH_COSE_CONN_WEIGHT_MAX = 10;
+/** 固定节点排斥（不跟中心度 / 边权挂钩） */
+const GRAPH_COSE_NODE_REPULSION = 5500;
+/** 边弹性：弱边软、强边硬（压缩动态范围，不再直接 / w） */
+const GRAPH_COSE_ELASTICITY_WEAK = 0.75;
+const GRAPH_COSE_ELASTICITY_STRONG = 0.25;
+/** 与设置默认边弹性一致；用于把滑块相对缩放到弱/强带子上 */
+const GRAPH_COSE_ELASTICITY_SLIDER_REF = 0.45;
 const GRAPH_COSE_CROSSING_OPT_MAX_EDGES = 220;
 const GRAPH_COSE_FLOW_BIAS_MAX_EDGES = 500;
-
-type GraphCoseCentralityStats = {
-  normByNodeId: Map<string, number>;
-  avgNormByEdgeId: Map<string, number>;
-};
-
-function graphCoseBuildWeightedDegreeCentrality(cy: Core): GraphCoseCentralityStats {
-  const degreeByNodeId = new Map<string, number>();
-  cy.nodes().forEach((n) => {
-    degreeByNodeId.set(n.id(), 0);
-  });
-
-  cy.edges().forEach((e) => {
-    const raw = Number(e.data('edgeWeight'));
-    const edgeW = Number.isFinite(raw) ? Math.max(GRAPH_COSE_EDGE_WEIGHT_MIN, raw) : 0.3;
-    const s = e.source().id();
-    const t = e.target().id();
-    degreeByNodeId.set(s, (degreeByNodeId.get(s) ?? 0) + edgeW);
-    degreeByNodeId.set(t, (degreeByNodeId.get(t) ?? 0) + edgeW);
-  });
-
-  let maxDeg = 0;
-  degreeByNodeId.forEach((v) => {
-    if (v > maxDeg) maxDeg = v;
-  });
-  const denom = maxDeg > 0 ? maxDeg : 1;
-
-  const normByNodeId = new Map<string, number>();
-  degreeByNodeId.forEach((v, k) => {
-    normByNodeId.set(k, Math.max(0, Math.min(1, v / denom)));
-  });
-
-  const avgNormByEdgeId = new Map<string, number>();
-  cy.edges().forEach((e) => {
-    const sNorm = normByNodeId.get(e.source().id()) ?? 0;
-    const tNorm = normByNodeId.get(e.target().id()) ?? 0;
-    avgNormByEdgeId.set(e.id(), (sNorm + tNorm) / 2);
-  });
-
-  return { normByNodeId, avgNormByEdgeId };
-}
-
-/** 与「加权度归一化」对比：邻居中心度高于该阈值视为 hub，用于多 hub 竞争拉长辐条边 */
-const GRAPH_COSE_HUB_CENTRALITY_THRESHOLD = 0.52;
-
-function graphCoseBuildHubNeighborCounts(cy: Core, normByNodeId: Map<string, number>): Map<string, number> {
-  const counts = new Map<string, number>();
-  cy.nodes().forEach((n) => {
-    counts.set(n.id(), 0);
-  });
-  cy.edges().forEach((e) => {
-    const s = e.source();
-    const t = e.target();
-    if (s.empty() || t.empty()) return;
-    const sId = s.id();
-    const tId = t.id();
-    const sN = normByNodeId.get(sId) ?? 0;
-    const tN = normByNodeId.get(tId) ?? 0;
-    if (sN >= GRAPH_COSE_HUB_CENTRALITY_THRESHOLD) counts.set(tId, (counts.get(tId) ?? 0) + 1);
-    if (tN >= GRAPH_COSE_HUB_CENTRALITY_THRESHOLD) counts.set(sId, (counts.get(sId) ?? 0) + 1);
-  });
-  return counts;
-}
 
 type GraphCoseSegment = {
   sourceId: string;
@@ -590,225 +533,433 @@ function runGraphCoseCrossingPostProcess(cy: Core): void {
   }
 }
 
-function runGraphCoseLeftFlowPostProcess(cy: Core): void {
-  const edges = cy.edges();
-  if (edges.length < 2 || edges.length > GRAPH_COSE_FLOW_BIAS_MAX_EDGES) return;
-
-  const nodes = cy
-    .nodes()
-    .filter((n) => n.style('display') !== 'none' && !n.hasClass('frame-cluster-label') && !n.hasClass('frame-cluster-halo'));
-  if (nodes.length < 2) return;
-
-  const nodeIds = nodes.map((n) => n.id());
-  const nodeSet = new Set(nodeIds);
-  const outAdj = new Map<string, Array<{ to: string; w: number }>>();
-  const inAdj = new Map<string, Array<{ from: string; w: number }>>();
-  nodeIds.forEach((id) => {
-    outAdj.set(id, []);
-    inAdj.set(id, []);
+/**
+ * 收集语义有向边 (from → to)。forward / backward；both、none 跳过。
+ */
+function graphCoseCollectDirectedPairs(cy: Core): Array<{ from: string; to: string }> {
+  const visible = new Set<string>();
+  cy.nodes().forEach((n) => {
+    if (n.style('display') === 'none') return;
+    if (n.hasClass('frame-cluster-label') || n.hasClass('frame-cluster-halo')) return;
+    visible.add(n.id());
   });
 
-  const normW = (raw: unknown) => {
-    const v = Number(raw);
-    const safe = Number.isFinite(v) ? Math.max(0.1, Math.min(4.5, v)) : 0.3;
-    return 0.45 + ((safe - 0.1) / (4.5 - 0.1)) * 0.55;
-  };
-
-  const pushDirEdge = (from: string, to: string, w: number) => {
-    if (!nodeSet.has(from) || !nodeSet.has(to) || from === to) return;
-    outAdj.get(from)!.push({ to, w });
-    inAdj.get(to)!.push({ from, w });
-  };
-
-  edges.forEach((e) => {
+  const pairs: Array<{ from: string; to: string }> = [];
+  cy.edges().forEach((e) => {
+    if (e.style('display') === 'none') return;
     const dir = String(e.data('direction') ?? 'none');
     const s = e.source().id();
     const t = e.target().id();
-    const w = normW(e.data('edgeWeight'));
+    if (!visible.has(s) || !visible.has(t) || s === t) return;
     if (dir === 'forward') {
-      pushDirEdge(s, t, w);
-      return;
-    }
-    if (dir === 'backward') {
-      pushDirEdge(t, s, w);
-      return;
-    }
-    if (dir === 'both') {
-      pushDirEdge(s, t, w);
-      pushDirEdge(t, s, w);
+      pairs.push({ from: s, to: t });
+    } else if (dir === 'backward') {
+      pairs.push({ from: t, to: s });
     }
   });
+  return pairs.length > GRAPH_COSE_FLOW_BIAS_MAX_EDGES
+    ? pairs.slice(0, GRAPH_COSE_FLOW_BIAS_MAX_EDGES)
+    : pairs;
+}
 
-  // 完整链路累加：不是只看一步 out-in，而是沿有向图多步传播（带衰减）估计“源头性”。
-  const ITER = 12;
-  const DECAY = 0.72;
-  let downstream = new Map<string, number>();
-  let upstream = new Map<string, number>();
-  nodeIds.forEach((id) => {
-    downstream.set(id, 1);
-    upstream.set(id, 1);
+/** 历史：源头靠左（X）——有向边纠错；与时间分布抢 X 时默认关 */
+function runGraphCoseLeftFlowPostProcess(cy: Core): void {
+  const pairs = graphCoseCollectDirectedPairs(cy);
+  if (pairs.length < 1) return;
+
+  const ids = new Set<string>();
+  for (const p of pairs) {
+    ids.add(p.from);
+    ids.add(p.to);
+  }
+  const pos = new Map<string, { x: number; y: number }>();
+  ids.forEach((id) => {
+    const n = cy.getElementById(id);
+    if (n.empty() || !n.isNode()) return;
+    const p = n.position();
+    pos.set(id, { x: p.x, y: p.y });
   });
 
-  for (let i = 0; i < ITER; i += 1) {
-    const nextDown = new Map<string, number>();
-    const nextUp = new Map<string, number>();
-    nodeIds.forEach((id) => {
-      let downVal = 1;
-      let upVal = 1;
-      const outs = outAdj.get(id) ?? [];
-      const ins = inAdj.get(id) ?? [];
-      for (const e of outs) {
-        downVal += DECAY * e.w * (downstream.get(e.to) ?? 1);
-      }
-      for (const e of ins) {
-        upVal += DECAY * e.w * (upstream.get(e.from) ?? 1);
-      }
-      nextDown.set(id, downVal);
-      nextUp.set(id, upVal);
-    });
-    downstream = nextDown;
-    upstream = nextUp;
+  const minGap = 36;
+  const strength = 0.5;
+  const passes = 8;
+  for (let pass = 0; pass < passes; pass += 1) {
+    for (const { from, to } of pairs) {
+      const a = pos.get(from);
+      const b = pos.get(to);
+      if (!a || !b) continue;
+      // 源头应在左：from.x < to.x - minGap
+      if (a.x <= b.x - minGap) continue;
+      const excess = a.x - b.x + minGap;
+      const half = excess * 0.5 * strength;
+      a.x -= half;
+      b.x += half;
+    }
   }
 
-  const scoreByNodeId = new Map<string, number>();
-  nodeIds.forEach((id) => {
-    const s = (downstream.get(id) ?? 1) - (upstream.get(id) ?? 1);
-    scoreByNodeId.set(id, s);
-  });
-
-  let minScore = Infinity;
-  let maxScore = -Infinity;
-  scoreByNodeId.forEach((v) => {
-    if (v < minScore) minScore = v;
-    if (v > maxScore) maxScore = v;
-  });
-  if (!Number.isFinite(minScore) || !Number.isFinite(maxScore)) return;
-
-  const width = cy.width();
-  const left = width * 0.08;
-  const right = width * 0.92;
-  const range = Math.max(1e-6, maxScore - minScore);
-  const strength = 0.6; // 提升约束强度，让“源头靠左”更明显
-
-  // 非线性放大两端差异，避免中段节点都堆在中间带。
-  const remapNorm = (u: number) => 0.5 + Math.sign(u - 0.5) * Math.pow(Math.abs(u - 0.5) * 2, 0.72) * 0.5;
-
-  for (let pass = 0; pass < 2; pass += 1) {
-    nodes.forEach((n) => {
-      const s = scoreByNodeId.get(n.id()) ?? 0;
-      const norm = remapNorm(Math.max(0, Math.min(1, (s - minScore) / range)));
-      // 分数越高（更像源头）越靠左
-      const xTarget = right - norm * (right - left);
-      const p = n.position();
-      n.position({ x: p.x + (xTarget - p.x) * strength, y: p.y });
+  cy.batch(() => {
+    pos.forEach((p, id) => {
+      const n = cy.getElementById(id);
+      if (n.empty() || !n.isNode()) return;
+      n.position({ x: p.x, y: p.y });
     });
+  });
+}
+
+/**
+ * 源头靠上（Y）：对每条有向边纠错——起点应在终点上方。
+ * 只修正违反的边，保留 fcose 散开；不做深度分层。
+ */
+function runGraphCoseTopFlowPostProcess(cy: Core): void {
+  const pairs = graphCoseCollectDirectedPairs(cy);
+  if (pairs.length < 1) return;
+
+  const ids = new Set<string>();
+  for (const p of pairs) {
+    ids.add(p.from);
+    ids.add(p.to);
   }
+  const pos = new Map<string, { x: number; y: number }>();
+  ids.forEach((id) => {
+    const n = cy.getElementById(id);
+    if (n.empty() || !n.isNode()) return;
+    const p = n.position();
+    pos.set(id, { x: p.x, y: p.y });
+  });
+
+  const minGap = 36;
+  const strength = 0.5;
+  const passes = 10;
+  for (let pass = 0; pass < passes; pass += 1) {
+    for (const { from, to } of pairs) {
+      const a = pos.get(from);
+      const b = pos.get(to);
+      if (!a || !b) continue;
+      // 源头应在上：from.y < to.y - minGap（y 向下为正）
+      if (a.y <= b.y - minGap) continue;
+      const excess = a.y - b.y + minGap;
+      const half = excess * 0.5 * strength;
+      a.y -= half;
+      b.y += half;
+    }
+  }
+
+  cy.batch(() => {
+    pos.forEach((p, id) => {
+      const n = cy.getElementById(id);
+      if (n.empty() || !n.isNode()) return;
+      n.position({ x: p.x, y: p.y });
+    });
+  });
 }
 
 type GraphCosePostProcessOptions = {
   enableCrossingPostProcess?: boolean;
   enableLeftFlowPostProcess?: boolean;
+  /** 布局后按边方向把源头往上推（Y）；默认可与时间 X 并存 */
+  enableTopFlowPostProcess?: boolean;
+  /** 布局后硬防节点重叠；默认开 */
+  enableOverlapSeparationPostProcess?: boolean;
+  /** 布局后仅用 timeSort 在 X 上分离；默认开 */
+  enableDirectedAlignPostProcess?: boolean;
+  /** X 时间分布强度 0～1；未传则读 cy scratch / 默认 0.8 */
+  timeXStrength?: number;
 };
 
-function graphCoseIdealEdgeLengthFromWeight(edgeWeightRaw: number): number {
-  const w = Number.isFinite(edgeWeightRaw) ? edgeWeightRaw : 0.3;
-  const clamped = Math.max(GRAPH_COSE_EDGE_WEIGHT_MIN, Math.min(GRAPH_COSE_EDGE_WEIGHT_MAX, w));
-  const tLinear =
-    (clamped - GRAPH_COSE_EDGE_WEIGHT_MIN) / (GRAPH_COSE_EDGE_WEIGHT_MAX - GRAPH_COSE_EDGE_WEIGHT_MIN);
-  // 非线性放大低-中区间差异，让 tag 赋权对边长的影响更明显。
-  const t = Math.pow(Math.max(0, Math.min(1, tLinear)), 0.58);
-  return GRAPH_COSE_EDGE_LENGTH_MIN + t * (GRAPH_COSE_EDGE_LENGTH_MAX - GRAPH_COSE_EDGE_LENGTH_MIN);
+const GRAPH_COSE_TIME_X_BIAS_SCRATCH = '_graphCoseTimeXBias';
+const DEFAULT_GRAPH_COSE_TIME_X_STRENGTH = 0.8;
+const GRAPH_EDGE_ELASTICITY_SCRATCH = '_graphEdgeElasticity';
+const DEFAULT_GRAPH_EDGE_ELASTICITY_RUNTIME = 0.45;
+
+function clampUnitInterval(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
+
+function clampGraphEdgeElasticity(v: number): number {
+  return Math.max(0.05, Math.min(2, Math.round(v * 100) / 100));
+}
+
+/** 写入力导「按时间分布」强度，供布局后处理读取 */
+export function setGraphCoseTimeXBias(cy: Core, bias: number): void {
+  cy.scratch(GRAPH_COSE_TIME_X_BIAS_SCRATCH, clampUnitInterval(bias));
+}
+
+/** 写入力导全局边弹性（fCoSE edgeElasticity 基数） */
+export function setGraphEdgeElasticity(cy: Core, elasticity: number): void {
+  cy.scratch(GRAPH_EDGE_ELASTICITY_SCRATCH, clampGraphEdgeElasticity(elasticity));
+}
+
+function resolveGraphCoseTimeXStrength(cy: Core, override?: number): number {
+  if (override != null && Number.isFinite(override)) return clampUnitInterval(override);
+  const fromScratch = cy.scratch(GRAPH_COSE_TIME_X_BIAS_SCRATCH);
+  if (typeof fromScratch === 'number' && Number.isFinite(fromScratch)) {
+    return clampUnitInterval(fromScratch);
+  }
+  return DEFAULT_GRAPH_COSE_TIME_X_STRENGTH;
+}
+
+function resolveGraphEdgeElasticity(cy: Core): number {
+  const fromScratch = cy.scratch(GRAPH_EDGE_ELASTICITY_SCRATCH);
+  if (typeof fromScratch === 'number' && Number.isFinite(fromScratch)) {
+    return clampGraphEdgeElasticity(fromScratch);
+  }
+  return DEFAULT_GRAPH_EDGE_ELASTICITY_RUNTIME;
 }
 
 /**
- * 力导布局参数：让 edgeWeight 越大的边有更长的理想长度，帮助降低中心拥挤与交叉。
- * 可通过 overrides 覆盖默认项（如 animate/numIter 等）。
+ * 力导硬防重叠：按节点外接尺寸推开过近的点（XY 均衡）。
+ * 放在时间 X / 源头靠上 / 交叉优化之后，避免后处理再把点挤叠。
+ */
+function runGraphCoseOverlapSeparationPostProcess(cy: Core): void {
+  const nodes = cy
+    .nodes()
+    .filter(
+      (n) =>
+        n.style('display') !== 'none' &&
+        !n.hasClass('frame-cluster-label') &&
+        !n.hasClass('frame-cluster-halo')
+    );
+  const n = nodes.length;
+  if (n < 2) return;
+  // 过大图 O(n²) 过贵：跳过硬分离，仍靠 nodeRepulsion
+  if (n > 280) return;
+
+  const nodesArr = nodes.toArray().filter((el): el is NodeSingular => el.isNode());
+  const radii = nodesArr.map((node) => {
+    const w = node.outerWidth();
+    const h = node.outerHeight();
+    const r = 0.5 * Math.max(w, h, 12);
+    return Number.isFinite(r) ? r : 14;
+  });
+  const pos = nodesArr.map((node) => {
+    const p = node.position();
+    return { x: p.x, y: p.y };
+  });
+
+  const pad = 1.05;
+  const iterations = 10;
+  const step = 0.55;
+  const maxPushPerIter = 28;
+  // 防重叠略偏 X，少打乱纵向源头顺序（源头靠上会在其后再次校正 Y）
+  const xScale = 1.0;
+  const yScale = 0.45;
+  const wLocal = cy.width();
+  const hLocal = cy.height();
+
+  for (let iter = 0; iter < iterations; iter += 1) {
+    let moved = false;
+    for (let i = 0; i < nodesArr.length; i += 1) {
+      for (let j = i + 1; j < nodesArr.length; j += 1) {
+        const minDist = (radii[i] + radii[j]) * pad;
+        const dx = pos[j].x - pos[i].x;
+        const dy = pos[j].y - pos[i].y;
+        // 粗筛：轴对齐过远则跳过
+        if (Math.abs(dx) > minDist && Math.abs(dy) > minDist) continue;
+
+        let dist2 = dx * dx + dy * dy;
+        if (dist2 >= minDist * minDist) continue;
+
+        let ux: number;
+        let uy: number;
+        let dist: number;
+        if (dist2 <= 1e-8) {
+          // 完全重合：沿稳定方向弹开
+          const ang = ((i * 37 + j * 17 + iter * 13) % 360) * (Math.PI / 180);
+          ux = Math.cos(ang);
+          uy = Math.sin(ang);
+          dist = 1e-3;
+        } else {
+          dist = Math.sqrt(dist2);
+          ux = dx / dist;
+          uy = dy / dist;
+        }
+
+        const overlap = minDist - dist;
+        let push = overlap * step * 0.5;
+        if (push > maxPushPerIter) push = maxPushPerIter;
+        if (push <= 1e-6) continue;
+
+        pos[i].x -= ux * push * xScale;
+        pos[i].y -= uy * push * yScale;
+        pos[j].x += ux * push * xScale;
+        pos[j].y += uy * push * yScale;
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+
+  cy.batch(() => {
+    nodesArr.forEach((node, idx) => {
+      const p = pos[idx];
+      node.position({
+        x: Math.max(8, Math.min(wLocal - 8, p.x)),
+        y: Math.max(8, Math.min(hLocal - 8, p.y))
+      });
+    });
+  });
+}
+
+/** X 方向：按 timeSort（年份）加权分离——早左晚右；Y 不动，交给 fCoSE */
+function runGraphCoseTimeWeightedXSeparate(cy: Core, strengthRaw?: number): void {
+  const strength = resolveGraphCoseTimeXStrength(cy, strengthRaw);
+  if (strength <= 1e-6) return;
+
+  const nodes = cy
+    .nodes()
+    .filter(
+      (n) =>
+        n.style('display') !== 'none' &&
+        !n.hasClass('frame-cluster-label') &&
+        !n.hasClass('frame-cluster-halo')
+    );
+  if (nodes.length < 2) return;
+
+  const timed: Array<{ n: (typeof nodes)[0]; t: number }> = [];
+  nodes.forEach((n) => {
+    const raw = n.data('timeSort');
+    if (raw == null) return;
+    const t = Number(raw);
+    if (!Number.isFinite(t)) return;
+    timed.push({ n, t });
+  });
+  if (timed.length < 2) return;
+
+  let minT = Infinity;
+  let maxT = -Infinity;
+  for (const { t } of timed) {
+    if (t < minT) minT = t;
+    if (t > maxT) maxT = t;
+  }
+  const range = Math.max(1e-6, maxT - minT);
+  const width = cy.width();
+  const left = width * 0.08;
+  const right = width * 0.92;
+  // 非线性拉开两端，避免中段挤在一起
+  const remap = (u: number) =>
+    0.5 + Math.sign(u - 0.5) * Math.pow(Math.abs(u - 0.5) * 2, 0.72) * 0.5;
+
+  cy.batch(() => {
+    for (const { n, t } of timed) {
+      const u = remap(Math.max(0, Math.min(1, (t - minT) / range)));
+      const xTarget = left + u * (right - left);
+      const p = n.position();
+      n.position({ x: p.x + (xTarget - p.x) * strength, y: p.y });
+    }
+  });
+}
+
+/** 连线权重 → 理想边长基底：权重大 → 边短（端点更近），域 [60, 400] */
+function graphCoseIdealEdgeLengthFromWeight(connectionWeightRaw: number): number {
+  const w = Number.isFinite(connectionWeightRaw) ? connectionWeightRaw : 1;
+  const clamped = Math.max(GRAPH_COSE_CONN_WEIGHT_MIN, Math.min(GRAPH_COSE_CONN_WEIGHT_MAX, w));
+  const tLinear =
+    (clamped - GRAPH_COSE_CONN_WEIGHT_MIN) /
+    (GRAPH_COSE_CONN_WEIGHT_MAX - GRAPH_COSE_CONN_WEIGHT_MIN);
+  const t = Math.pow(Math.max(0, Math.min(1, tLinear)), 0.58);
+  return (
+    GRAPH_COSE_EDGE_LENGTH_MAX -
+    t * (GRAPH_COSE_EDGE_LENGTH_MAX - GRAPH_COSE_EDGE_LENGTH_MIN)
+  );
+}
+
+function graphCoseEdgeConnectionWeight(edge: { data?: (k: string) => unknown } | null): number {
+  const rawCw = Number(edge?.data?.('connectionWeight'));
+  if (Number.isFinite(rawCw) && rawCw > 0) {
+    return Math.max(GRAPH_COSE_CONN_WEIGHT_MIN, Math.min(GRAPH_COSE_CONN_WEIGHT_MAX, rawCw));
+  }
+  const rawEw = Number(edge?.data?.('edgeWeight'));
+  if (Number.isFinite(rawEw) && rawEw > 0) {
+    return Math.max(GRAPH_COSE_CONN_WEIGHT_MIN, Math.min(GRAPH_COSE_CONN_WEIGHT_MAX, rawEw));
+  }
+  return 1;
+}
+
+/** 边权 → 弹性：弱 0.75、强 0.25；再按全局边弹性滑块相对默认缩放 */
+function graphCoseEdgeElasticityFromWeight(connectionWeightRaw: number, globalBase: number): number {
+  const w = Number.isFinite(connectionWeightRaw) ? connectionWeightRaw : 1;
+  const clamped = Math.max(GRAPH_COSE_CONN_WEIGHT_MIN, Math.min(GRAPH_COSE_CONN_WEIGHT_MAX, w));
+  const t =
+    (clamped - GRAPH_COSE_CONN_WEIGHT_MIN) /
+    (GRAPH_COSE_CONN_WEIGHT_MAX - GRAPH_COSE_CONN_WEIGHT_MIN);
+  const band =
+    GRAPH_COSE_ELASTICITY_WEAK +
+    Math.max(0, Math.min(1, t)) * (GRAPH_COSE_ELASTICITY_STRONG - GRAPH_COSE_ELASTICITY_WEAK);
+  const scaled = band * (globalBase / GRAPH_COSE_ELASTICITY_SLIDER_REF);
+  return Math.max(0.05, Math.min(2, scaled));
+}
+
+/**
+ * 力导布局参数：边权 → 更短理想边 + 更硬弹性；排斥固定；gravity 用 fCoSE 默认 0.25。
+ * Y 完全由 fCoSE 决定；X 可在后处理中按 timeSort 时间加权分离。
  */
 export function buildGraphCoseLayoutOptions(
   cy: Core,
   overrides?: Record<string, unknown>,
   postProcessOptions?: GraphCosePostProcessOptions
 ): Record<string, unknown> {
-  const centrality = graphCoseBuildWeightedDegreeCentrality(cy);
-  const hubNeighborCountByNodeId = graphCoseBuildHubNeighborCounts(cy, centrality.normByNodeId);
   const enableCrossingPostProcess = postProcessOptions?.enableCrossingPostProcess !== false;
-  const enableLeftFlowPostProcess = postProcessOptions?.enableLeftFlowPostProcess !== false;
+  const enableLeftFlowPostProcess = postProcessOptions?.enableLeftFlowPostProcess === true;
+  const enableTopFlowPostProcess = postProcessOptions?.enableTopFlowPostProcess !== false;
+  const enableOverlapSeparationPostProcess =
+    postProcessOptions?.enableOverlapSeparationPostProcess !== false;
+  const enableTimeXPostProcess =
+    postProcessOptions?.enableDirectedAlignPostProcess !== false;
+  const timeXStrength = postProcessOptions?.timeXStrength;
+
   const userStop = typeof overrides?.stop === 'function' ? (overrides.stop as () => void) : undefined;
   const safeOverrides = { ...(overrides ?? {}) };
   if ('stop' in safeOverrides) delete safeOverrides.stop;
+
   return {
     name: 'fcose',
     animate: true,
     padding: 40,
+    gravity: 0.25,
+    // 弱边 0.75 → 强边 0.25；全局滑块相对默认缩放整条带子
+    edgeElasticity: (edge: any) =>
+      graphCoseEdgeElasticityFromWeight(
+        graphCoseEdgeConnectionWeight(edge),
+        resolveGraphEdgeElasticity(cy)
+      ),
+    // 仅边权 + 层级跨度因子；最终夹到 [60, 400]
     idealEdgeLength: (edge: any) => {
-      const sNode = edge?.source?.();
-      const tNode = edge?.target?.();
-      if (!sNode || !tNode || sNode.empty?.() || tNode.empty?.()) {
-        return graphCoseIdealEdgeLengthFromWeight(Number(edge?.data?.('edgeWeight')));
-      }
-      const sId = String(sNode.id());
-      const tId = String(tNode.id());
-      const cS = centrality.normByNodeId.get(sId) ?? 0;
-      const cT = centrality.normByNodeId.get(tId) ?? 0;
-      const cAvg = (cS + cT) / 2;
-
-      const base = graphCoseIdealEdgeLengthFromWeight(Number(edge?.data?.('edgeWeight')));
-      // 整体：边两端加权度越高，理想边稍短（核心簇收紧）
-      let len = base * (1 - cAvg * 0.26);
-
-      // 节点图层面板 tag 权重：在 edgeWeight 之外再拉高/压低理想长度（权重越大 → 边越长）
-      const tagS = Number(sNode.data?.('tagLayerNorm'));
-      const tagT = Number(tNode.data?.('tagLayerNorm'));
-      const tagAvg =
-        Number.isFinite(tagS) && Number.isFinite(tagT) ? (tagS + tagT) / 2 : 0.5;
-      len *= 1 + (tagAvg - 0.5) * 0.82;
-
-      // “层级跨度”可视化：buildGraphElements 为边写入 edgeIdealLenFactor（默认 1）。
-      // 该因子主要由 Δlevel（层级跨度）驱动，用于让跨层边更长、更醒目。
+      const connW = graphCoseEdgeConnectionWeight(edge);
+      let len = graphCoseIdealEdgeLengthFromWeight(connW);
       const rawLenFactor = Number(edge?.data?.('edgeIdealLenFactor'));
       if (Number.isFinite(rawLenFactor)) {
-        // 允许更大的长度倍率，否则差异会被夹平
         const f = Math.max(0.55, Math.min(4.0, rawLenFactor));
         len *= f;
       }
-
-      // 一侧为 hub、一侧明显更弱：辐条略短；若弱侧同时连接多个 hub，则拉长该辐条，避免多个高中心簇被同一节点拽得太近
-      const cLow = Math.min(cS, cT);
-      const cHigh = Math.max(cS, cT);
-      const lowId = cS <= cT ? sId : tId;
-      const hubTh = GRAPH_COSE_HUB_CENTRALITY_THRESHOLD;
-      if (cHigh >= hubTh && cLow < cHigh - 0.07) {
-        len *= 0.92 + (1 - cHigh) * 0.08;
-        const kHub = hubNeighborCountByNodeId.get(lowId) ?? 0;
-        if (kHub >= 2) {
-          const competition = kHub - 1;
-          len *= 1 + 0.26 * competition * (0.4 + 0.6 * (1 - cLow));
-        }
-      }
-
-      // 提高上限，保证“源头辐射”的长边能拉开差异
-      return Math.max(46, Math.min(720, len));
+      return Math.max(GRAPH_COSE_EDGE_LENGTH_MIN, Math.min(GRAPH_COSE_EDGE_LENGTH_MAX, len));
     },
-    nodeRepulsion: (node: any) => {
-      const c = centrality.normByNodeId.get(String(node?.id?.() ?? '')) ?? 0;
-      // 中心节点排斥略低、外围节点排斥略高：通常可减少外围挤压和连线缠绕。
-      return Math.round(GRAPH_COSE_REPULSION_MIN + (1 - c) * (GRAPH_COSE_REPULSION_MAX - GRAPH_COSE_REPULSION_MIN));
-    },
+    nodeRepulsion: GRAPH_COSE_NODE_REPULSION,
     stop: () => {
+      if (!isCyActive(cy)) {
+        userStop?.();
+        return;
+      }
+      syncGraphEdgeCurveDistances(cy);
+      const doTimeX = enableTimeXPostProcess;
+      // 时间分 X 时不再跑「源头靠左」（抢同一轴）；「源头靠上」走 Y，可并存
+      const doLeftFlow = enableLeftFlowPostProcess && !doTimeX;
+      const doTopFlow = enableTopFlowPostProcess;
+      const doCrossing = enableCrossingPostProcess;
+      const doOverlap = enableOverlapSeparationPostProcess;
+      // 交叉 / 防重叠会改 Y，须放在「源头靠上」之前；时间只动 X，可最后
+      if (doLeftFlow) runGraphCoseLeftFlowPostProcess(cy);
+      if (doCrossing) runGraphCoseCrossingPostProcess(cy);
+      if (doOverlap) runGraphCoseOverlapSeparationPostProcess(cy);
+      if (doTopFlow) runGraphCoseTopFlowPostProcess(cy);
+      if (doTimeX) runGraphCoseTimeWeightedXSeparate(cy, timeXStrength);
+      if (doTimeX || doLeftFlow || doTopFlow || doCrossing || doOverlap) {
+        syncGraphEdgeCurveDistances(cy);
+      }
+      userStop?.();
       requestAnimationFrame(() => {
         if (!isCyActive(cy)) return;
-        syncGraphEdgeCurveDistances(cy);
-        if (enableCrossingPostProcess || enableLeftFlowPostProcess) {
-          if (enableLeftFlowPostProcess) runGraphCoseLeftFlowPostProcess(cy);
-          if (enableCrossingPostProcess) runGraphCoseCrossingPostProcess(cy);
-          syncGraphEdgeCurveDistances(cy);
-          requestAnimationFrame(() => {
-            if (!isCyActive(cy)) return;
-            cy.resize();
-          });
-        }
+        cy.resize();
       });
-      userStop?.();
     },
     ...safeOverrides
   };
@@ -879,6 +1030,121 @@ function graphForceLayoutHasSeedPositions(cy: Core): boolean {
   return Number.isFinite(bb.w) && Number.isFinite(bb.h) && (bb.w > 48 || bb.h > 48);
 }
 
+function graphLayoutSnapshotPositions(cy: Core): Map<string, { x: number; y: number }> {
+  const m = new Map<string, { x: number; y: number }>();
+  cy.nodes().forEach((n) => {
+    if (n.style('display') === 'none') return;
+    if (n.hasClass('frame-cluster-label') || n.hasClass('frame-cluster-halo')) return;
+    const p = n.position();
+    m.set(n.id(), { x: p.x, y: p.y });
+  });
+  return m;
+}
+
+function graphLayoutApplyPositions(cy: Core, positions: Map<string, { x: number; y: number }>): void {
+  cy.batch(() => {
+    positions.forEach((p, id) => {
+      const n = cy.getElementById(id);
+      if (n.empty() || !n.isNode()) return;
+      n.position({ x: p.x, y: p.y });
+    });
+  });
+}
+
+/** 按目标包围盒计算 fit 所需的 zoom/pan（不依赖当前节点位置） */
+function graphLayoutFitZoomPanForPositions(
+  cy: Core,
+  positions: Map<string, { x: number; y: number }>,
+  padding: number
+): { zoom: number; pan: { x: number; y: number } } | null {
+  if (positions.size === 0) return null;
+  let x1 = Infinity;
+  let y1 = Infinity;
+  let x2 = -Infinity;
+  let y2 = -Infinity;
+  positions.forEach((p) => {
+    if (p.x < x1) x1 = p.x;
+    if (p.y < y1) y1 = p.y;
+    if (p.x > x2) x2 = p.x;
+    if (p.y > y2) y2 = p.y;
+  });
+  const w = Math.max(1, x2 - x1);
+  const h = Math.max(1, y2 - y1);
+  const vw = Math.max(1, cy.width());
+  const vh = Math.max(1, cy.height());
+  const pad = Math.max(0, padding);
+  let zoom = Math.min((vw - 2 * pad) / w, (vh - 2 * pad) / h);
+  const minZ = cy.minZoom();
+  const maxZ = cy.maxZoom();
+  if (Number.isFinite(minZ)) zoom = Math.max(minZ, zoom);
+  if (Number.isFinite(maxZ)) zoom = Math.min(maxZ, zoom);
+  if (!Number.isFinite(zoom) || zoom <= 0) return null;
+  const cx = (x1 + x2) / 2;
+  const cyModel = (y1 + y2) / 2;
+  return {
+    zoom,
+    pan: {
+      x: vw / 2 - zoom * cx,
+      y: vh / 2 - zoom * cyModel
+    }
+  };
+}
+
+/** 将节点与视口同步补间到目标（避免结束时 fit 造成瞬间缩放） */
+function graphLayoutAnimateToPositions(
+  cy: Core,
+  to: Map<string, { x: number; y: number }>,
+  durationMs: number
+): void {
+  let pending = 0;
+  const onDone = () => {
+    pending -= 1;
+    if (pending > 0) return;
+    if (!isCyActive(cy)) return;
+    syncGraphEdgeCurveDistances(cy);
+  };
+
+  const fitVp = graphLayoutFitZoomPanForPositions(cy, to, 40);
+  if (fitVp) {
+    pending += 1;
+    cy.stop(true);
+    cy.animate(
+      {
+        zoom: fitVp.zoom,
+        pan: fitVp.pan
+      },
+      {
+        duration: durationMs,
+        easing: 'ease-out-cubic',
+        complete: onDone
+      }
+    );
+  }
+
+  to.forEach((p, id) => {
+    const n = cy.getElementById(id);
+    if (n.empty() || !n.isNode()) return;
+    pending += 1;
+    n.stop(true);
+    n.animate(
+      {
+        position: { x: p.x, y: p.y }
+      },
+      {
+        duration: durationMs,
+        easing: 'ease-out-cubic',
+        complete: onDone
+      }
+    );
+  });
+
+  if (pending === 0) onDone();
+}
+
+/**
+ * 应用力导（fcose）布局。仅应在「用户点底栏力导」或「新建 cy 初次布局」时调用；
+ * 编辑拖点 / 改便签内容 / 连线增量同步 不应触发本函数。
+ */
 export function applyGraphLayout(
   cy: Core,
   name: 'fcose' | 'circle',
@@ -892,25 +1158,73 @@ export function applyGraphLayout(
   }
   prepareGraphForForceLayout(cy);
   const incremental = graphForceLayoutHasSeedPositions(cy);
+
+  // 从时间线等已有布局切入：先静默算出含后处理的最终坐标，再从当前位置动画过去，
+  // 避免「动画到中间态 → 后处理瞬移」看起来不像朝最终力导图运动。
+  if (incremental) {
+    const fromPos = graphLayoutSnapshotPositions(cy);
+    try {
+      cy.layout(
+        buildGraphCoseLayoutOptions(
+          cy,
+          {
+            name: 'fcose',
+            randomize: false,
+            quality: 'proof',
+            animate: false,
+            fit: false,
+            nodeDimensionsIncludeLabels: true,
+            stop: () => {
+              if (!isCyActive(cy)) return;
+              const toPos = graphLayoutSnapshotPositions(cy);
+              graphLayoutApplyPositions(cy, fromPos);
+              // 下一帧再开补间，避免与静默布局同帧抢位置
+              requestAnimationFrame(() => {
+                if (!isCyActive(cy)) return;
+                graphLayoutAnimateToPositions(cy, toPos, 1000);
+              });
+            }
+          },
+          {
+            enableCrossingPostProcess: true,
+            enableLeftFlowPostProcess: false,
+            enableTopFlowPostProcess: true,
+            enableDirectedAlignPostProcess: true
+          }
+        ) as any
+      ).run();
+    } catch {
+      cy.layout({
+        name: 'fcose',
+        animate: true,
+        animationDuration: 1000,
+        padding: 40,
+        randomize: false,
+        quality: 'proof'
+      } as any).run();
+    }
+    return;
+  }
+
   try {
-    // 从时间线等已有布局切入：randomize:false 从当前位置增量跑 fcose，动画导向最终位置。
-    // 冷启动（节点堆叠）：randomize:true 做光谱初值。
-    // 增量动画时关闭后处理，避免 layoutstop 后硬跳破坏「导向 fcose」的观感。
+    // 冷启动（节点堆叠）：randomize:true 做光谱初值并带动画
     cy.layout(
       buildGraphCoseLayoutOptions(
         cy,
         {
           name: 'fcose',
-          randomize: !incremental,
-          quality: incremental ? 'proof' : 'default',
+          randomize: true,
+          quality: 'default',
           animate: true,
           animationDuration: 1000,
           fit: true,
           nodeDimensionsIncludeLabels: true
         },
         {
-          enableCrossingPostProcess: !incremental,
-          enableLeftFlowPostProcess: !incremental
+          enableCrossingPostProcess: true,
+          enableLeftFlowPostProcess: false,
+          enableTopFlowPostProcess: true,
+          enableDirectedAlignPostProcess: true
         }
       ) as any
     ).run();
@@ -920,8 +1234,8 @@ export function applyGraphLayout(
       animate: true,
       animationDuration: 1000,
       padding: 40,
-      randomize: !incremental,
-      quality: incremental ? 'proof' : 'default'
+      randomize: true,
+      quality: 'default'
     } as any).run();
   }
 }

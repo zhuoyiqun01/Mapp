@@ -1,6 +1,10 @@
 import { useCallback, useState } from 'react';
 import type { Connection, Project } from '../../types';
 import { generateId } from '../../utils';
+import {
+  clampConnectionWeight,
+  DEFAULT_CONNECTION_WEIGHT
+} from '../../utils/graph/graphData';
 import { connectionToPanelDraft, type ConnectionDraft } from '../graph/GraphConnectionPanel';
 
 function emptyConnectionDraft(): ConnectionDraft {
@@ -9,7 +13,8 @@ function emptyConnectionDraft(): ConnectionDraft {
     toNoteId: '',
     label: '',
     fromArrow: 'none',
-    toArrow: 'arrow'
+    toArrow: 'arrow',
+    weight: DEFAULT_CONNECTION_WEIGHT
   };
 }
 
@@ -48,7 +53,7 @@ export function useSimpleConnectionPanel({
 
   const commitConnectionDraft = useCallback(() => {
     if (!onUpdateConnections) return;
-    const { fromNoteId, toNoteId, label, fromArrow, toArrow } = connectionDraft;
+    const { fromNoteId, toNoteId, label, fromArrow, toArrow, weight } = connectionDraft;
     if (!fromNoteId || !toNoteId) {
       window.alert('请选择起点和终点后再保存。');
       return;
@@ -58,6 +63,7 @@ export function useSimpleConnectionPanel({
       return;
     }
     const trimmedLabel = label.trim();
+    const connWeight = clampConnectionWeight(weight);
     const arrow: Connection['arrow'] =
       toArrow === 'arrow' && fromArrow === 'none'
         ? 'forward'
@@ -74,7 +80,8 @@ export function useSimpleConnectionPanel({
         label: trimmedLabel || undefined,
         fromArrow,
         toArrow,
-        arrow
+        arrow,
+        weight: connWeight
       };
       void onUpdateConnections([...connections, newConn]);
     } else {
@@ -93,7 +100,8 @@ export function useSimpleConnectionPanel({
                 label: trimmedLabel || undefined,
                 fromArrow,
                 toArrow,
-                arrow
+                arrow,
+                weight: connWeight
               }
             : c
         )
@@ -126,7 +134,8 @@ export function useSimpleConnectionPanel({
       toNoteId: '',
       label: '',
       fromArrow: ends.fromArrow,
-      toArrow: ends.toArrow
+      toArrow: ends.toArrow,
+      weight: DEFAULT_CONNECTION_WEIGHT
     });
     setPickTarget('to');
     setShowConnectionPanel(true);

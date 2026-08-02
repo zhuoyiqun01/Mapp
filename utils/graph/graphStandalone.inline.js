@@ -944,7 +944,6 @@
 
   // utils/graph/graphHighlightChromeLabels.ts
   var REF_NODE_SIZE = 28;
-  var CORE_SCALE = GRAPH_FOCUS_CORE_NODE_SCALE;
   var HI_FONT_SEL_PX = GRAPH_HIGHLIGHT_LABEL_SCREEN_PX;
   var HI_FONT_REL_PX = GRAPH_HIGHLIGHT_RELATED_LABEL_SCREEN_PX;
   var GRAPH_HIGHLIGHT_CHROME_LABEL_MAX_WIDTH_CSS = "min(280px, 70vw)";
@@ -1049,23 +1048,28 @@
     const ctx = canvas?.getContext("2d") ?? null;
     const idleFont = Math.min(16, Math.max(4, Math.round(idleLabelFontPx)));
     const zoom = Math.max(1e-6, cy.zoom());
+    let hasHighlight = false;
+    cy.nodes().forEach((n) => {
+      if (n.hasClass("frame-cluster-label") || n.hasClass("frame-cluster-halo")) return;
+      if (highlightTier(n) > 0) hasHighlight = true;
+    });
     cy.nodes().forEach((n) => {
       if (n.hasClass("frame-cluster-label") || n.hasClass("frame-cluster-halo")) return;
       if (n.style("display") === "none") return;
       const tier = highlightTier(n);
+      if (hasHighlight && tier === 0) return;
       const { title, year } = splitTitleAndYear(n);
       if (!title && !year) return;
       const fav = n.data("favorite") === "yes";
-      const isCore = n.hasClass("focus-core");
       const baseNsRaw = Number(n.data("nodeSize"));
       const baseNs = Number.isFinite(baseNsRaw) && baseNsRaw > 0 ? baseNsRaw : nodeSize;
-      const ns = baseNs * (isCore ? CORE_SCALE : 1) * (fav ? 1.5 : 1);
+      const ns = baseNs * (fav ? 1.5 : 1);
       const isHighlight = tier > 0;
       const fontPx = isHighlight ? highlightFontPx(n) : idleFont;
       const baseGap = Math.max(4, Math.round(fontPx * 0.8));
       const marginY = Math.max(2, Math.round(baseNs / REF_NODE_SIZE * baseGap));
       const padPx = isHighlight ? Math.max(1, Math.round(fontPx * 0.2)) : 0;
-      const gap = isCore ? Math.max(2, Math.round(marginY * CORE_SCALE * (fav ? 1.5 : 1))) : Math.max(2, Math.round(marginY * (fav ? 1.5 : 1)));
+      const gap = Math.max(2, Math.round(marginY * (fav ? 1.5 : 1)));
       const fontWeight = fav ? 700 : isHighlight ? 500 : 600;
       const maxContentPx = resolveMaxContentPx(Math.max(1, padPx || Math.round(fontPx * 0.2)));
       if (ctx) {

@@ -23,7 +23,7 @@ export type GraphHighlightChromeLabelsProps = {
 
 /**
  * 节点 label（HTML）：空闲字叠在节点圆之上，仅用 scale(zoom) 同步缩放；
- * 选中/悬停仍用玻璃 chrome（固定屏上 16/12px）。
+ * 有高亮时只画高亮字（避免 idle 字盖住高亮边/节点）；选中/悬停用玻璃 chrome（固定屏上 16/12px）。
  */
 export const GraphHighlightChromeLabels: React.FC<GraphHighlightChromeLabelsProps> = ({
   cyRef,

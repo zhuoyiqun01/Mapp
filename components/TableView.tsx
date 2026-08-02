@@ -1,7 +1,11 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { Note, Project, Frame, Connection, type GraphLayerState } from '../types';
 import { Trash2 } from 'lucide-react';
-import { connectionToGraphDirection } from '../utils/graph/graphData';
+import {
+  clampConnectionWeight,
+  connectionToGraphDirection,
+  DEFAULT_CONNECTION_WEIGHT
+} from '../utils/graph/graphData';
 import { generateId, parseNoteContent } from '../utils';
 import { mergeGraphLayerState, type GraphLayerGroupStandard } from '../utils/graph/graphRuntimeCore';
 import { groupDisplayLabel, noteBelongsToLayerGroupKey } from '../utils/layer/unifiedNoteLayer';
@@ -131,7 +135,8 @@ export const TableView: React.FC<TableViewProps> = ({
     toNoteId: '',
     label: '',
     fromArrow: 'none',
-    toArrow: 'arrow'
+    toArrow: 'arrow',
+    weight: DEFAULT_CONNECTION_WEIGHT
   });
   const [pickTarget, setPickTarget] = useState<'from' | 'to' | null>(null);
 
@@ -274,7 +279,8 @@ export const TableView: React.FC<TableViewProps> = ({
       toNoteId: '',
       label: '',
       fromArrow: 'none',
-      toArrow: 'arrow'
+      toArrow: 'arrow',
+      weight: DEFAULT_CONNECTION_WEIGHT
     });
     setPickTarget(null);
   }, []);
@@ -288,7 +294,7 @@ export const TableView: React.FC<TableViewProps> = ({
 
   const commitConnectionDraft = useCallback(() => {
     if (!onUpdateConnections) return;
-    const { fromNoteId, toNoteId, label, fromArrow, toArrow } = connectionDraft;
+    const { fromNoteId, toNoteId, label, fromArrow, toArrow, weight } = connectionDraft;
     if (!fromNoteId || !toNoteId) {
       window.alert('请选择起点和终点后再保存。');
       return;
@@ -298,6 +304,7 @@ export const TableView: React.FC<TableViewProps> = ({
       return;
     }
     const trimmedLabel = label.trim();
+    const connWeight = clampConnectionWeight(weight);
     const arrow: Connection['arrow'] =
       toArrow === 'arrow' && fromArrow === 'none'
         ? 'forward'
@@ -314,7 +321,8 @@ export const TableView: React.FC<TableViewProps> = ({
         label: trimmedLabel || undefined,
         fromArrow,
         toArrow,
-        arrow
+        arrow,
+        weight: connWeight
       };
       void onUpdateConnections([...connections, newConn]);
     } else {
@@ -333,7 +341,8 @@ export const TableView: React.FC<TableViewProps> = ({
                 label: trimmedLabel || undefined,
                 fromArrow,
                 toArrow,
-                arrow
+                arrow,
+                weight: connWeight
               }
             : c
         )
@@ -363,7 +372,8 @@ export const TableView: React.FC<TableViewProps> = ({
         toNoteId: '',
         label: '',
         fromArrow: 'none',
-        toArrow: 'arrow'
+        toArrow: 'arrow',
+        weight: DEFAULT_CONNECTION_WEIGHT
       });
     }
   }, [panelEditingKey]);

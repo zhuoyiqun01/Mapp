@@ -1,4 +1,5 @@
 import type { Connection, Note, Project } from '../../types';
+import { clampConnectionWeight } from '../graph/graphData';
 import { parseNoteContent } from '../../utils';
 import { downloadTextFile } from '../builtinExamples/projectFromExport';
 
@@ -168,7 +169,7 @@ export function buildMappVizJson(project: Project): MappVizJson {
       id: c.id,
       source: c.fromNoteId,
       target: c.toNoteId,
-      weight: 1,
+      weight: clampConnectionWeight(c.weight),
       fromArrow,
       toArrow
     };

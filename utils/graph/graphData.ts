@@ -9,6 +9,16 @@ type Stylesheet = any[];
 
 export type GraphEdgeDirection = 'forward' | 'backward' | 'both' | 'none';
 
+/** 连线权重：未设置或非法时按 1（兼容旧数据） */
+export const DEFAULT_CONNECTION_WEIGHT = 1;
+
+/** 夹紧连线权重到可用范围（0.1～10） */
+export function clampConnectionWeight(raw: unknown): number {
+  const w = Number(raw);
+  if (!Number.isFinite(w) || w <= 0) return DEFAULT_CONNECTION_WEIGHT;
+  return Math.round(Math.max(0.1, Math.min(10, w)) * 10) / 10;
+}
+
 /** 与看板连线逻辑一致：由 arrow / fromArrow / toArrow 推导方向 */
 export function connectionToGraphDirection(c: Connection): GraphEdgeDirection {
   if (c.arrow === 'none') return 'none';
@@ -208,22 +218,21 @@ export function buildGraphElements(
   const favScale = 1.5;
   const coreScale = GRAPH_FOCUS_CORE_NODE_SCALE;
 
-  // edgeWeight 本质上用于连线粗细映射；你的需求需要让“收藏端点数”对每条边生效，
-  // 因此这里为每条边计算出独立的 line width 数据字段（供样式表 data(...) 引用）。
-  const baseEdgeWeight = edgeWeightBase ?? DEFAULT_GRAPH_STYLESHEET_SIZING.edgeWeight;
+  // 连线粗细：按 Connection.weight 表现，设置面板「连线粗细」控制线宽上限。
+  const edgeWeightSetting = Math.max(
+    0.1,
+    Math.min(2, edgeWeightBase ?? DEFAULT_GRAPH_STYLESHEET_SIZING.edgeWeight)
+  );
   // Cytoscape 的箭头几何由 `arrow-scale` 控制；但其内部对小线宽存在最小值截断，
   // 导致箭头尺寸在小边权上会“看起来不随边权变化”。这里显式把 arrow-scale
-  // 与 edgeWeight 的等比缩放绑定起来，并保持当前基准外观（默认对应 0.8）。
+  // 与线宽绑定，并保持当前基准外观（默认对应 0.8）。
   const EDGE_ARROW_SCALE_BASE = 0.8;
   const EDGE_ARROW_SCALE_MIN_FACTOR = 0.25;
-  // 当边权进入“较大步进”区间时，避免箭头尺寸随 edgeWidth 近似线性增长过快。
-  // 小于等于 baseEdgeWidth 的区间保持原逻辑（edge=0.2 时的观感锚定），
-  // 大于 baseEdgeWidth 时用低于 1 的幂次做衰减。
   const EDGE_ARROW_WIDTH_GROWTH_HIGH_EXP = 0.75;
+  const EDGE_LINE_MIN = 0.4;
+  const EDGE_LINE_ABS_MAX = 4.6;
   // Cytoscape 内部 getArrowWidth 实际为：
   //   size = max((edgeWidth * 13.37)^0.9, 29) * arrow-scale
-  // 我们按这个公式反推一个 arrow-scale，使“箭头端点尺寸”随 edgeWidth 单调增长；
-  // 同时把最小 edgeWidth 对应的箭头尺寸压到当前的一半（通过 EDGE_ARROW_SCALE_MIN_FACTOR 实现）。
   const arrowWidthDenom = (edgeWidth: number) => Math.max(Math.pow(edgeWidth * 13.37, 0.9), 29);
 
   const getArrowScaleForEdgeWidth = (
@@ -236,41 +245,47 @@ export function buildGraphElements(
     const baseDenom = arrowWidthDenom(safeBase);
     const denom = arrowWidthDenom(edgeWidth);
 
-    // 在 [minEdgeWidth, baseEdgeWidth] 内做 minFactor -> 1 的过渡；
-    // 在 baseEdgeWidth 及以上进入“衰减增长”以减少大步进造成的箭头过大。
     const range = safeBase - safeMin;
     const t = range <= 1e-6 ? 1 : Math.max(0, Math.min(1, (edgeWidth - safeMin) / range));
-    const factor = EDGE_ARROW_SCALE_MIN_FACTOR + (1 - EDGE_ARROW_SCALE_MIN_FACTOR) * t; // minFactor..1
+    const factor = EDGE_ARROW_SCALE_MIN_FACTOR + (1 - EDGE_ARROW_SCALE_MIN_FACTOR) * t;
 
     const growthExp = edgeWidth <= safeBase ? 1 : EDGE_ARROW_WIDTH_GROWTH_HIGH_EXP;
-
-    // 目标 arrowWidth：先用 baseEdgeWidth 对齐到 EDGE_ARROW_SCALE_BASE，再乘因子与衰减幂次。
     const baseArrowWidth = EDGE_ARROW_SCALE_BASE * baseDenom;
     const targetArrowWidth =
       baseArrowWidth * factor * Math.pow(edgeWidth / safeBase, growthExp);
 
-    // arrow-scale = targetArrowWidth / denom
     return targetArrowWidth / denom;
   };
-  const edgeWeightToLines = (edgeWeight: number) => {
-    const ewNorm = (Math.max(0.1, edgeWeight) - 0.1) / 0.9;
-    const edgeLine = Math.max(
-      0.4,
-      Math.min(4.6, Math.round((0.4 + ewNorm * 2.8) * 100) / 100)
-    );
+
+  /** 设置项 graphEdgeWeight（0.1～2）→ 线宽上限 px */
+  const maxEdgeLine = Math.max(
+    EDGE_LINE_MIN,
+    Math.min(
+      EDGE_LINE_ABS_MAX,
+      Math.round((EDGE_LINE_MIN + ((edgeWeightSetting - 0.1) / 0.9) * 2.8) * 100) / 100
+    )
+  );
+
+  /**
+   * 连线权重 → 线宽：先将 weight∈[0.1,10] 归一化到 [0,1]，再线性铺满 [EDGE_LINE_MIN, maxEdgeLine]。
+   * t = (w − 0.1) / (10 − 0.1)；edgeLine = 0.4 + t × (maxEdgeLine − 0.4)
+   */
+  const connectionWeightToLines = (weight: number) => {
+    const w = clampConnectionWeight(weight);
+    const t = Math.max(0, Math.min(1, (w - 0.1) / (10 - 0.1)));
+    const edgeLine =
+      Math.round((EDGE_LINE_MIN + t * (maxEdgeLine - EDGE_LINE_MIN)) * 100) / 100;
     const edgeLineFocus = Math.max(
       0.8,
-      Math.min(6.6, Math.round((edgeLine * 1.35) * 100) / 100)
+      Math.min(6.6, Math.round(edgeLine * 1.35 * 100) / 100)
     );
     const edgeLineHi = Math.max(
       0.8,
-      Math.min(9.2, Math.round((edgeLine * 1.85) * 100) / 100)
+      Math.min(9.2, Math.round(edgeLine * 1.85 * 100) / 100)
     );
     return { edgeLine, edgeLineFocus, edgeLineHi };
   };
-  // 箭头缩放的“参照基准”固定为默认 edgeWeight，避免当面板 edgeWeight 变大时，
-  // 基准系数反向变化，导致在 clamp 到上限的粗边上出现“越大越小”的真实反比。
-  const refLines = edgeWeightToLines(DEFAULT_GRAPH_STYLESHEET_SIZING.edgeWeight);
+  const refLines = connectionWeightToLines(DEFAULT_CONNECTION_WEIGHT);
   const refEdgeLine = refLines.edgeLine;
   const refEdgeLineFocus = refLines.edgeLineFocus;
   const refEdgeLineHi = refLines.edgeLineHi;
@@ -374,9 +389,7 @@ export function buildGraphElements(
     const u = dir === 'forward' ? c.fromNoteId : c.toNoteId; // u -> v
     const v = dir === 'forward' ? c.toNoteId : c.fromNoteId;
     if (u === v) continue;
-    // 用现有 edgeWeight 作为约束权重的近似（越粗的边通常语义越强）
-    // edgeWeight 在后面也会算，这里先用 1，随后用节点/边数据再校准也不影响稳定性。
-    dirEdges.push({ u, v, w: 1 });
+    dirEdges.push({ u, v, w: clampConnectionWeight(c.weight) });
   }
 
   // 用 soft 约束拟合层级：希望 L(v) - L(u) >= margin；允许违背但惩罚
@@ -457,25 +470,13 @@ export function buildGraphElements(
 
     const edgeUntagged = 'no';
 
-    const fromFav = Boolean(noteById.get(c.fromNoteId)?.isFavorite);
-    const toFav = Boolean(noteById.get(c.toNoteId)?.isFavorite);
-    const favEndpointCount = (fromFav ? 1 : 0) + (toFav ? 1 : 0);
-    const fromTag = noteById.get(c.fromNoteId)?.tags?.[0]?.label?.trim() ?? '';
-    const toTag = noteById.get(c.toNoteId)?.tags?.[0]?.label?.trim() ?? '';
-    const fromTagWeight = fromTag ? Number(tagLayerWeights?.[fromTag] ?? 0.5) : 0.5;
-    const toTagWeight = toTag ? Number(tagLayerWeights?.[toTag] ?? 0.5) : 0.5;
-    const tagAvgWeight = (fromTagWeight + toTagWeight) / 2;
-    const tagNorm = (Math.max(0.1, Math.min(1, tagAvgWeight)) - 0.1) / 0.9;
-    // tag 权重越高，连线越粗；以 0.5 作为中位基准，不改 edge label 字号逻辑。
-    const tagBoost = Math.max(0, tagNorm - 0.5) * 1.2;
-    const edgeWeight = baseEdgeWeight + favEndpointCount * 0.5 + tagBoost;
-    let { edgeLine, edgeLineFocus, edgeLineHi } = edgeWeightToLines(edgeWeight);
+    const connectionWeight = clampConnectionWeight(c.weight);
+    // 粗细 / 力导边权均直接使用连线权重（不再叠加收藏端点、标签层、跨层宽度因子）
+    const edgeWeight = connectionWeight;
+    const { edgeLine, edgeLineFocus, edgeLineHi } = connectionWeightToLines(connectionWeight);
 
-    // 分普通/收藏加粗/收藏高亮态：minEdgeWidth 由 edgeWeightToLines 的 clamp 决定。
-    // level → 边粗度/长度（跨层越大越显著；用于“辐射/层级跨度”的可视化）
-    // 仅对有效单向边生效，排除 both/none。
+    // level → 理想边长（跨层/源头辐射）；不再改线宽
     let edgeIdealLenFactor = 1;
-    let widthFactor = 1;
     if (direction === 'forward' || direction === 'backward') {
       const a = direction === 'forward' ? c.fromNoteId : c.toNoteId; // source (语义起点)
       const b = direction === 'forward' ? c.toNoteId : c.fromNoteId; // target
@@ -483,47 +484,23 @@ export function buildGraphElements(
       const lb = levelNormById.get(b) ?? 0;
       const d = Math.max(0, lb - la); // “顺层”跨度；跨层/回指不作为辐射依据
       const edgeSpan = Math.min(1, Math.max(0, d / 0.6)); // 经验尺度：0.6 视为“大跨度”
-      // 线宽步进拉开一些：让跨度大的边更明显
-      widthFactor = 0.85 + (2.25 - 0.85) * Math.pow(edgeSpan, 1.65); // 0.85..2.25
-      // 长度强调“源头辐射”：source 越靠源头（level 越小），边越长；同时叠加层级跨度。
       const sourceRootness = Math.max(0, Math.min(1, 1 - la)); // 1=最源头，0=最末端
-      // 增强对比：让前 20% 源头的边明显更长（更陡的非线性）
       const rootBoost = 0.9 + 3.1 * Math.pow(sourceRootness, 2.2); // 0.9..4.0
       const spanBoost = 1.0 + 1.2 * Math.pow(edgeSpan, 1.35); // 1.0..2.2
       edgeIdealLenFactor = rootBoost * spanBoost; // 0.9..~8.8（布局侧会夹紧到 4.0）
-      edgeLine = Math.max(0.25, edgeLine * widthFactor);
-      edgeLineFocus = Math.max(0.35, edgeLineFocus * widthFactor);
-      edgeLineHi = Math.max(0.4, edgeLineHi * widthFactor);
     }
 
-    // 箭头步进阻尼：线宽可以更粗，但箭头几何不要等比暴涨。
-    // 用 widthFactor 的较小指数参与箭头计算，并对最终 arrow-scale 做上限夹紧。
-    const arrowWidthFactor = Math.pow(Math.max(0.6, Math.min(2.25, widthFactor)), 0.55);
     const edgeArrowScale = Math.min(
       1.35,
-      Math.max(0.15, getArrowScaleForEdgeWidth(edgeLine / Math.max(1e-6, widthFactor) * arrowWidthFactor, refEdgeLine, 0.4))
+      Math.max(0.15, getArrowScaleForEdgeWidth(edgeLine, refEdgeLine, 0.4))
     );
     const edgeArrowScaleFocus = Math.min(
       1.35,
-      Math.max(
-        0.15,
-        getArrowScaleForEdgeWidth(
-          edgeLineFocus / Math.max(1e-6, widthFactor) * arrowWidthFactor,
-          refEdgeLineFocus,
-          0.8
-        )
-      )
+      Math.max(0.15, getArrowScaleForEdgeWidth(edgeLineFocus, refEdgeLineFocus, 0.8))
     );
     const edgeArrowScaleHi = Math.min(
       1.35,
-      Math.max(
-        0.15,
-        getArrowScaleForEdgeWidth(
-          edgeLineHi / Math.max(1e-6, widthFactor) * arrowWidthFactor,
-          refEdgeLineHi,
-          0.8
-        )
-      )
+      Math.max(0.15, getArrowScaleForEdgeWidth(edgeLineHi, refEdgeLineHi, 0.8))
     );
 
     const pairKey =
@@ -542,7 +519,10 @@ export function buildGraphElements(
         target: c.toNoteId,
         label: c.label || '',
         direction,
+        /** 与 connectionWeight 相同；供力导 idealEdgeLength 等读取 */
         edgeWeight,
+        /** 连线权重（旧数据缺省为 1）：决定线宽（受「连线粗细」上限约束）；力导 edgeElasticity = 全局弹性 / 此值 */
+        connectionWeight,
         // 兼容样式表字段；无标签便签已归入「无标签」分组，此处恒为可见
         edgeUntagged,
         // 用于样式表中按数据决定连线粗细
@@ -606,8 +586,14 @@ export const DEFAULT_GRAPH_STYLESHEET_SIZING: GraphStylesheetSizing = {
   edgeLabelFontPx: 6
 };
 
-/** 时间线「按Frame聚类」默认强度（未设置时） */
+/** 时间线「按Frame聚类」（Y 轴）默认强度（未设置时） */
 export const DEFAULT_GRAPH_TIME_AXIS_WEIGHT_BIAS = 0.8;
+
+/** 力导「按时间分布」（X 轴）默认强度（未设置时） */
+export const DEFAULT_GRAPH_COSE_TIME_X_BIAS = 0.8;
+
+/** 力导边弹性（fCoSE edgeElasticity）默认值 */
+export const DEFAULT_GRAPH_EDGE_ELASTICITY = 0.45;
 
 /** 选中对象（节点/边）高亮 label 的固定屏上字号（不受设置面板 Label Size 影响） */
 export const GRAPH_HIGHLIGHT_LABEL_SCREEN_PX = 16;
@@ -639,7 +625,6 @@ function graphSizingCss(themeColor: string, s: GraphStylesheetSizing) {
   const ns = s.nodeSize;
   const nf = s.labelFontPx;
   const ew = s.edgeWeight;
-  // 注意：ewNorm 不再在 1 上截断，避免当边因收藏端点而加粗后出现“上限截平”。
   const ewNorm = (Math.max(0.1, ew) - 0.1) / 0.9;
   const px = (n: number) => `${n}px`;
   const pad = Math.max(4, Math.round(nf * 0.8));
@@ -1248,6 +1233,10 @@ export interface GraphExportPayload {
   graphLayerGroupStandard?: 'tag' | 'frame';
   /** 独立页时间线纵轴按 Frame 聚类强度（0～1；默认 0.8） */
   graphTimeAxisWeightBias?: number;
+  /** 独立页力导横轴按时间分布强度（0～1；默认 0.8） */
+  graphCoseTimeXBias?: number;
+  /** 独立页力导边弹性基数（默认 0.45） */
+  graphEdgeElasticity?: number;
   /** 独立页悬停预览卡片（Markdown / 图片） */
   notePreviews?: Record<string, GraphNotePreview>;
   /** UI 玻璃（高亮 chrome label） */
@@ -1305,7 +1294,8 @@ export function buildGraphExportPayload(
     label: c.label,
     arrow: c.arrow,
     fromArrow: c.fromArrow,
-    toArrow: c.toArrow
+    toArrow: c.toArrow,
+    weight: clampConnectionWeight(c.weight)
   }));
 
   return {
@@ -1330,6 +1320,8 @@ export function buildGraphExportPayload(
     graphLayerGroupStandard: standard,
     graphTimeAxisWeightBias:
       project.graphTimeAxisWeightBias ?? DEFAULT_GRAPH_TIME_AXIS_WEIGHT_BIAS,
+    graphCoseTimeXBias: project.graphCoseTimeXBias ?? DEFAULT_GRAPH_COSE_TIME_X_BIAS,
+    graphEdgeElasticity: project.graphEdgeElasticity ?? DEFAULT_GRAPH_EDGE_ELASTICITY,
     notePreviews: buildNotePreviewsFromNotes(project.notes || []),
     chrome,
     chainLength,

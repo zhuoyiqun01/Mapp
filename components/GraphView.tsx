@@ -9,6 +9,10 @@ import { DEFAULT_THEME_COLOR } from '../constants';
 import {
   buildGraphElements,
   buildGraphExportPayload,
+  clampConnectionWeight,
+  DEFAULT_CONNECTION_WEIGHT,
+  DEFAULT_GRAPH_COSE_TIME_X_BIAS,
+  DEFAULT_GRAPH_EDGE_ELASTICITY,
   DEFAULT_GRAPH_STYLESHEET_SIZING,
   DEFAULT_GRAPH_TIME_AXIS_WEIGHT_BIAS,
   getGraphStylesheet,
@@ -38,9 +42,10 @@ import {
   scheduleGraphResizeAndFit,
   updateGraphStylesheet,
   animateGraphCenterOnNode,
-  buildGraphCoseLayoutOptions,
   applyGraphDualLayerNodeVisibility,
   applyGraphNodeStackZIndex,
+  setGraphCoseTimeXBias,
+  setGraphEdgeElasticity,
   syncGraphEdgeCurveDistances
 } from '../utils/graph/graphRuntimeCore';
 import { getGraphLayoutCache, setGraphLayoutCache } from '../utils/persistence/storage';
@@ -157,7 +162,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
     toNoteId: '',
     label: '',
     fromArrow: 'none',
-    toArrow: 'arrow'
+    toArrow: 'arrow',
+    weight: DEFAULT_CONNECTION_WEIGHT
   }));
   const [pickTarget, setPickTarget] = useState<'from' | 'to' | null>(null);
   /** 图中点选节点后递增，驱动面板清空检索并不聚焦输入框 */
@@ -267,6 +273,11 @@ export const GraphView: React.FC<GraphViewProps> = ({
     }),
     [project.graphTimeAxisWeightBias]
   );
+
+  const coseTimeXBias =
+    project.graphCoseTimeXBias ?? DEFAULT_GRAPH_COSE_TIME_X_BIAS;
+  const edgeElasticity =
+    project.graphEdgeElasticity ?? DEFAULT_GRAPH_EDGE_ELASTICITY;
 
   /** 节点颜色图例：按 Frame 颜色（与图谱节点着色一致） */
   const nodeColorLegendItems = useMemo(() => {
@@ -402,10 +413,6 @@ export const GraphView: React.FC<GraphViewProps> = ({
     () => (mergedFrameGraphLayers.order ?? []).join('\u0001'),
     [mergedFrameGraphLayers.order]
   );
-
-  const dragForceLayoutRef = useRef<{ stop?: () => void } | null>(null);
-  const dragForceNodeIdRef = useRef<string | null>(null);
-  const dragLastPosRef = useRef<{ x: number; y: number } | null>(null);
 
   const selectedConn = useMemo(
     () =>
@@ -596,7 +603,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
       toNoteId: '',
       label: '',
       fromArrow: project.graphNewConnectionFromArrow ?? 'none',
-      toArrow: project.graphNewConnectionToArrow ?? 'arrow'
+      toArrow: project.graphNewConnectionToArrow ?? 'arrow',
+      weight: DEFAULT_CONNECTION_WEIGHT
     }),
     [project.graphNewConnectionFromArrow, project.graphNewConnectionToArrow]
   );
@@ -770,7 +778,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
     if (connectionPanelCommitCooldownRef.current) return;
     const draft = connectionDraftRef.current;
     const editingKey = panelEditingKeyRef.current;
-    const { fromNoteId, toNoteId, label, fromArrow, toArrow } = draft;
+    const { fromNoteId, toNoteId, label, fromArrow, toArrow, weight } = draft;
     if (!fromNoteId || !toNoteId) {
       window.alert('请选择起点和终点后再保存。');
       return;
@@ -781,6 +789,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
     }
 
     const trimmedLabel = label.trim();
+    const connWeight = clampConnectionWeight(weight);
     const arrow: Connection['arrow'] =
       toArrow === 'arrow' && fromArrow === 'none'
         ? 'forward'
@@ -800,7 +809,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
         label: trimmedLabel || undefined,
         fromArrow,
         toArrow,
-        arrow
+        arrow,
+        weight: connWeight
       };
       onUpdateConnections([...conns, newConn]);
     } else {
@@ -819,7 +829,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
                 label: trimmedLabel || undefined,
                 fromArrow,
                 toArrow,
-                arrow
+                arrow,
+                weight: connWeight
               }
             : c
         )
@@ -1075,6 +1086,12 @@ export const GraphView: React.FC<GraphViewProps> = ({
         { edgeCurve: graphEdgeCurve }
       )
     });
+    /**
+     * 力导（cose）何时重算布局：
+     * - 新建 cy（便签 id 集合变化）时按缓存/默认模式跑一次
+     * - 用户点击底栏「力导」时（applyCoseLayout）
+     * 不重算：编辑态拖点、NoteEditor/侧栏改点、连线增删、图层面板显隐/权重、高亮筛选。
+     */
     const cached = projectId ? getGraphLayoutCache(projectId) : null;
     let initialMode = coerceGraphLayoutMode(
       cached ?? project.graphDefaultLayoutMode ?? DEFAULT_GRAPH_LAYOUT_MODE
@@ -1095,6 +1112,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
     }
     setActiveGraphLayout(initialMode);
     cyRef.current = cy;
+    setGraphCoseTimeXBias(cy, coseTimeXBias);
+    setGraphEdgeElasticity(cy, edgeElasticity);
     setGraphCyEpoch((n) => n + 1);
     unbindRef.current = bindCyEvents(cy);
 
@@ -1148,7 +1167,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
     const cy = cyRef.current;
     if (!cy) return;
 
-    // 保证新增/删除 edge 能增量反映到 cytoscape，但不重建/不重跑布局。
+    // 增量同步边与节点 data（含编辑器/侧栏改点）；不重跑力导或其它布局。
     const elements = buildGraphElements(
       notes,
       connections,
@@ -1302,6 +1321,30 @@ export const GraphView: React.FC<GraphViewProps> = ({
     applyGraphTimeLayout(cy, () => {}, timeLayoutOpts, mergedFrameGraphLayers, 'frame');
   }, [activeGraphLayout, timeLayoutOpts, graphLayersOrderKey, graphLayersHiddenKey, mergedFrameGraphLayers]);
 
+  /** 力导布局下：同步 X 轴时间分布权重；用户改百分比时重跑 fcose */
+  const coseTimeXBiasRef = useRef(coseTimeXBias);
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    setGraphCoseTimeXBias(cy, coseTimeXBias);
+    if (coseTimeXBiasRef.current === coseTimeXBias) return;
+    coseTimeXBiasRef.current = coseTimeXBias;
+    if (activeGraphLayout !== 'cose') return;
+    applyGraphLayout(cy, 'fcose');
+  }, [activeGraphLayout, coseTimeXBias]);
+
+  /** 力导布局下：同步边弹性；用户改滑块时重跑 fcose */
+  const edgeElasticityRef = useRef(edgeElasticity);
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    setGraphEdgeElasticity(cy, edgeElasticity);
+    if (edgeElasticityRef.current === edgeElasticity) return;
+    edgeElasticityRef.current = edgeElasticity;
+    if (activeGraphLayout !== 'cose') return;
+    applyGraphLayout(cy, 'fcose');
+  }, [activeGraphLayout, edgeElasticity]);
+
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy) return;
@@ -1335,7 +1378,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
   const applyCoseLayout = useCallback(() => {
     const cy = cyRef.current;
     if (!cy) return;
-    // applyGraphLayout 内会清簇装饰并以增量 fcose 从当前位置动画导向
+    // 仅用户显式点「力导」时重算；编辑拖点/改内容不会走这里
     applyGraphLayout(cy, 'fcose');
     setActiveGraphLayout('cose');
     persistGraphLayout('cose');
@@ -1470,178 +1513,12 @@ export const GraphView: React.FC<GraphViewProps> = ({
     onToggleEditor?.(graphEditorOpen);
   }, [graphEditorOpen, onToggleEditor]);
 
-  /** 标签网格（Tab）禁止拖节点；其余布局在浏览/编辑模式下均可拖动微调位置 */
+  /** 浏览/编辑均可拖点微调位置；力导模式下也不因拖动重跑 fcose */
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy) return;
-    const allowNodeDrag = true;
-    cy.autoungrabify(!allowNodeDrag);
+    cy.autoungrabify(false);
   }, [activeGraphLayout, graphCyEpoch]);
-
-  useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-
-    const stopRunningDragForce = () => {
-      try {
-        dragForceLayoutRef.current?.stop?.();
-      } catch {
-        // 防御：某些布局实例可能已结束，忽略停止异常
-      }
-      dragForceLayoutRef.current = null;
-    };
-
-    const runDragForceStep = (opts?: { animate?: boolean; numIter?: number }) => {
-      stopRunningDragForce();
-      const animate = opts?.animate ?? false;
-      const numIter = opts?.numIter ?? 160;
-      try {
-        dragForceLayoutRef.current = cy.layout(buildGraphCoseLayoutOptions(cy, {
-          name: 'fcose',
-          randomize: false,
-          animate,
-          fit: false,
-          // fCoSE：incremental + randomize:false 需 quality:proof
-          quality: 'proof',
-          numIter,
-          nodeDimensionsIncludeLabels: true
-        }, {
-          enableCrossingPostProcess: false,
-          enableLeftFlowPostProcess: false
-        }) as any);
-      } catch {
-        dragForceLayoutRef.current = cy.layout({
-          name: 'fcose',
-          randomize: false,
-          animate,
-          fit: false,
-          padding: 40,
-          quality: 'proof',
-          numIter,
-          nodeDimensionsIncludeLabels: true
-        } as any);
-      }
-      try {
-        (dragForceLayoutRef.current as any)?.run?.();
-      } catch {
-        // 防御：cose 在少数数据状态下可能抛 RangeError，降级为不触发本次重排。
-        stopRunningDragForce();
-      }
-    };
-
-    const pullNeighborNodesOnDrag = (center: NodeSingular, dx: number, dy: number) => {
-      const d2 = dx * dx + dy * dy;
-      if (d2 < 1e-4) return;
-      const tagWeights = mergedTagGraphLayers.weights ?? {};
-      const getNodeTagWeight = (node: NodeSingular): number => {
-        const key = String(node.data('tagGroup') ?? '').trim();
-        const raw = key ? Number(tagWeights[key] ?? 0.5) : 0.5;
-        return Math.max(0.1, Math.min(1, Number.isFinite(raw) ? raw : 0.5));
-      };
-      const centerTagWeight = getNodeTagWeight(center);
-
-      const firstHop = new Map<string, { node: NodeSingular; factor: number }>();
-      center.connectedEdges().forEach((e) => {
-        const other = e.source().id() === center.id() ? e.target() : e.source();
-        if (other.empty() || !other.isNode()) return;
-        if (other.id() === center.id()) return;
-        if (other.grabbed()) return;
-        if (other.hasClass('frame-cluster-label') || other.hasClass('frame-cluster-halo')) return;
-        if (other.style('display') === 'none') return;
-        const rawW = Number(e.data('edgeWeight'));
-        const safeW = Number.isFinite(rawW) ? Math.max(0.1, Math.min(4.5, rawW)) : 0.3;
-        const normW = (safeW - 0.1) / 4.4;
-        const otherTagWeight = getNodeTagWeight(other);
-        // tag 权重越大，牵引越强：将两端 tag 权重映射为 0.75~1.55 的额外增益。
-        const tagBoost = 0.75 + (((centerTagWeight + otherTagWeight) / 2 - 0.1) / 0.9) * 0.8;
-        const factor = (0.2 + normW * 0.32) * tagBoost; // 一阶牵动：明显可见
-        const prev = firstHop.get(other.id());
-        if (!prev || factor > prev.factor) firstHop.set(other.id(), { node: other, factor });
-      });
-      if (firstHop.size === 0) return;
-
-      const secondHop = new Map<string, { node: NodeSingular; factor: number }>();
-      firstHop.forEach(({ node: n1, factor: f1 }) => {
-        n1.connectedEdges().forEach((e) => {
-          const n2 = e.source().id() === n1.id() ? e.target() : e.source();
-          if (n2.empty() || !n2.isNode()) return;
-          if (n2.id() === center.id() || n2.id() === n1.id()) return;
-          if (firstHop.has(n2.id())) return;
-          if (n2.grabbed()) return;
-          if (n2.hasClass('frame-cluster-label') || n2.hasClass('frame-cluster-halo')) return;
-          if (n2.style('display') === 'none') return;
-          const rawW = Number(e.data('edgeWeight'));
-          const safeW = Number.isFinite(rawW) ? Math.max(0.1, Math.min(4.5, rawW)) : 0.3;
-          const normW = (safeW - 0.1) / 4.4;
-          const n2TagWeight = getNodeTagWeight(n2);
-          const tagBoost = 0.75 + (((centerTagWeight + n2TagWeight) / 2 - 0.1) / 0.9) * 0.8;
-          const factor = (0.08 + normW * 0.14) * f1 * 0.55 * tagBoost; // 二阶轻微衰减，避免全图抖动
-          const prev = secondHop.get(n2.id());
-          if (!prev || factor > prev.factor) secondHop.set(n2.id(), { node: n2, factor });
-        });
-      });
-
-      cy.batch(() => {
-        firstHop.forEach(({ node, factor }) => {
-          const p = node.position();
-          node.position({ x: p.x + dx * factor, y: p.y + dy * factor });
-        });
-        secondHop.forEach(({ node, factor }) => {
-          const p = node.position();
-          node.position({ x: p.x + dx * factor, y: p.y + dy * factor });
-        });
-      });
-    };
-
-    if (!(isGraphToolbarEditMode && activeGraphLayout === 'cose')) {
-      stopRunningDragForce();
-      dragForceNodeIdRef.current = null;
-      return;
-    }
-
-    const onGrab = (evt: cytoscape.EventObject) => {
-      const n = evt.target as NodeSingular;
-      if (n.hasClass('frame-cluster-label') || n.hasClass('frame-cluster-halo')) return;
-      dragForceNodeIdRef.current = n.id();
-      dragLastPosRef.current = { x: n.position('x'), y: n.position('y') };
-    };
-
-    const onDrag = (evt: cytoscape.EventObject) => {
-      const n = evt.target as NodeSingular;
-      if (dragForceNodeIdRef.current !== n.id()) return;
-      const nowPos = { x: n.position('x'), y: n.position('y') };
-      if (dragLastPosRef.current) {
-        pullNeighborNodesOnDrag(
-          n,
-          nowPos.x - dragLastPosRef.current.x,
-          nowPos.y - dragLastPosRef.current.y
-        );
-      }
-      dragLastPosRef.current = nowPos;
-    };
-
-    const onFree = (evt: cytoscape.EventObject) => {
-      const n = evt.target as NodeSingular;
-      if (dragForceNodeIdRef.current !== n.id()) return;
-      dragForceNodeIdRef.current = null;
-      dragLastPosRef.current = null;
-      // 松手后做一次全局回弹，形成“牵一点而动全身”。
-      runDragForceStep({ animate: true, numIter: 360 });
-    };
-
-    cy.on('grab', 'node', onGrab);
-    cy.on('drag', 'node', onDrag);
-    cy.on('free', 'node', onFree);
-
-    return () => {
-      cy.removeListener('grab', 'node', onGrab);
-      cy.removeListener('drag', 'node', onDrag);
-      cy.removeListener('free', 'node', onFree);
-      stopRunningDragForce();
-      dragForceNodeIdRef.current = null;
-      dragLastPosRef.current = null;
-    };
-  }, [isGraphToolbarEditMode, activeGraphLayout, tagGraphLayersWeightsKey]);
 
   useEffect(() => {
     return () => {

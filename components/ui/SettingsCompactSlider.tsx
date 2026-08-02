@@ -15,6 +15,8 @@ type SettingsCompactSliderProps = {
   max: number;
   step: number;
   onChange: (v: number) => void;
+  /** 抬起时触发一次；用于昂贵副作用（如力导重算） */
+  onCommit?: (v: number) => void;
   formatValue: (v: number) => string;
   minCaption?: string;
   maxCaption?: string;
@@ -36,6 +38,7 @@ export const SettingsCompactSlider: React.FC<SettingsCompactSliderProps> = ({
   max,
   step,
   onChange,
+  onCommit,
   formatValue,
   minCaption,
   maxCaption,
@@ -57,6 +60,7 @@ export const SettingsCompactSlider: React.FC<SettingsCompactSliderProps> = ({
           max={max}
           step={step}
           onChange={onChange}
+          onCommit={onCommit}
           themeColor={themeColor}
           width={trackWidth}
           formatValue={formatValue}

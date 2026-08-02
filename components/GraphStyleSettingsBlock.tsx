@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import type { Project } from '../types';
 import {
+  DEFAULT_GRAPH_COSE_TIME_X_BIAS,
+  DEFAULT_GRAPH_EDGE_ELASTICITY,
   DEFAULT_GRAPH_STYLESHEET_SIZING,
   DEFAULT_GRAPH_TIME_AXIS_WEIGHT_BIAS
 } from '../utils/graph/graphData';
@@ -12,7 +14,7 @@ export interface GraphStyleSettingsBlockProps {
   onPatch: (patch: Partial<Project>) => void;
 }
 
-/** 设置面板「Graph Style」：节点/边视觉、按 Frame 聚类强度 */
+/** 设置面板「Graph Style」：节点/边视觉、时间线 Frame 聚类、力导时间分布 */
 export const GraphStyleSettingsBlock: React.FC<GraphStyleSettingsBlockProps> = ({
   themeColor,
   project,
@@ -23,7 +25,19 @@ export const GraphStyleSettingsBlock: React.FC<GraphStyleSettingsBlockProps> = (
   const edgeW = project.graphEdgeWeight ?? DEFAULT_GRAPH_STYLESHEET_SIZING.edgeWeight;
   const edgeLabelPx = project.graphEdgeLabelFontPx ?? DEFAULT_GRAPH_STYLESHEET_SIZING.edgeLabelFontPx;
   const timeBias = project.graphTimeAxisWeightBias ?? DEFAULT_GRAPH_TIME_AXIS_WEIGHT_BIAS;
+  const coseTimeXBias = project.graphCoseTimeXBias ?? DEFAULT_GRAPH_COSE_TIME_X_BIAS;
+  const edgeElasticity = project.graphEdgeElasticity ?? DEFAULT_GRAPH_EDGE_ELASTICITY;
   const edgeCurve = project.graphEdgeCurve !== false;
+
+  // 力导相关：拖动只改本地显示，抬起再写回项目（避免拖动过程中反复重算布局）
+  const [coseTimeXDraft, setCoseTimeXDraft] = useState(coseTimeXBias);
+  const [edgeElasticityDraft, setEdgeElasticityDraft] = useState(edgeElasticity);
+  useEffect(() => {
+    setCoseTimeXDraft(coseTimeXBias);
+  }, [coseTimeXBias]);
+  useEffect(() => {
+    setEdgeElasticityDraft(edgeElasticity);
+  }, [edgeElasticity]);
 
   return (
     <div className="grid grid-cols-1 gap-x-3 gap-y-3 sm:grid-cols-2">
@@ -64,6 +78,7 @@ export const GraphStyleSettingsBlock: React.FC<GraphStyleSettingsBlockProps> = (
           minCaption="细"
           maxCaption="粗"
         />
+        <p className="mt-1 text-[10px] leading-snug text-gray-400">线宽上限（权重决定相对粗细）</p>
       </div>
       <div className="min-w-0">
         <SettingsCompactSlider
@@ -92,6 +107,43 @@ export const GraphStyleSettingsBlock: React.FC<GraphStyleSettingsBlockProps> = (
           minCaption="弱"
           maxCaption="强"
         />
+        <p className="mt-1 text-[10px] leading-snug text-gray-400">时间线 · Y 轴</p>
+      </div>
+      <div className="min-w-0">
+        <SettingsCompactSlider
+          label="按时间分布"
+          themeColor={themeColor}
+          value={coseTimeXDraft}
+          min={0}
+          max={1}
+          step={0.05}
+          onChange={setCoseTimeXDraft}
+          onCommit={(v) => onPatch({ graphCoseTimeXBias: Math.max(0, Math.min(1, v)) })}
+          formatValue={(v) => `${Math.round(v * 100)}%`}
+          minCaption="弱"
+          maxCaption="强"
+        />
+        <p className="mt-1 text-[10px] leading-snug text-gray-400">力导 · X 轴</p>
+      </div>
+      <div className="min-w-0">
+        <SettingsCompactSlider
+          label="边弹性"
+          themeColor={themeColor}
+          value={edgeElasticityDraft}
+          min={0.05}
+          max={2}
+          step={0.05}
+          onChange={setEdgeElasticityDraft}
+          onCommit={(v) =>
+            onPatch({
+              graphEdgeElasticity: Math.max(0.05, Math.min(2, Math.round(v * 100) / 100))
+            })
+          }
+          formatValue={(v) => v.toFixed(2)}
+          minCaption="硬"
+          maxCaption="软"
+        />
+        <p className="mt-1 text-[10px] leading-snug text-gray-400">力导 · edgeElasticity</p>
       </div>
 
       <label className="flex min-w-0 cursor-pointer items-center justify-between gap-3 sm:col-span-2">

@@ -73,6 +73,11 @@ export interface Connection {
   labelAnchorNoteId?: string;
   fromArrow?: 'arrow' | 'none'; // 起点端样式
   toArrow?: 'arrow' | 'none';   // 终点端样式
+  /**
+   * 连线权重（力导边弹性等）；未设置的旧数据按 1 处理。
+   * 建议范围 0.1～10，越大表示关联越强。
+   */
+  weight?: number;
 }
 
 export interface Frame {
@@ -135,16 +140,28 @@ export interface Project {
   graphNodeSize?: number;
   /** 图谱节点下方标题字号（px，4～16） */
   graphLabelFontPx?: number;
-  /** 图谱连线粗细（0.1～2） */
+  /** 图谱连线粗细上限（设置项 0.1～2，映射为线宽 px 上限）；实际粗细由 Connection.weight 决定并夹在此上限内 */
   graphEdgeWeight?: number;
   /** 图谱边标签字号（px，3～16）；未设置时由样式默认值决定，不再与连线粗细联动 */
   graphEdgeLabelFontPx?: number;
   /**
-   * 时间线布局：纵轴按 Frame 图层权重聚类的强度，0～1。
+   * 时间线布局：纵轴（Y）按 Frame 图层权重聚类的强度，0～1。
    * 0 为均匀随机；越大则高权重 Frame 越靠上、纵向散布越小。
    * 未设置时默认 0.8（80%）。
    */
   graphTimeAxisWeightBias?: number;
+  /**
+   * 力导布局：横轴（X）按 timeSort 时间分布的强度，0～1。
+   * 0 保留纯力导 X；1 完全按时间目标排开（早左晚右）。
+   * 未设置时默认 0.8（80%）。
+   */
+  graphCoseTimeXBias?: number;
+  /**
+   * 力导布局全局边弹性（fCoSE `edgeElasticity` 基数）。
+   * 越大边越「软」；单条连线再按 `Connection.weight` 缩放（权重越大越硬）。
+   * 未设置时默认 0.45。
+   */
+  graphEdgeElasticity?: number;
   /**
    * 历史：圆环布局力导向微调。圆环布局已移除，字段仅兼容旧项目。
    */
