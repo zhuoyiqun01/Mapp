@@ -124,7 +124,7 @@ const ExportResolutionDialog: React.FC<{
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[3000]" onClick={onClose}>
       <div
-        className="rounded-2xl shadow-2xl max-w-[320px] w-full mx-4 p-5 animate-in zoom-in-95 duration-200 border border-gray-200/80"
+        className="rounded-2xl shadow-2xl max-w-[320px] w-full mx-4 p-5 animate-in zoom-in-95 duration-200 border border-gray-100/80"
         style={mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx)}
         onClick={(e) => e.stopPropagation()}
       >
@@ -157,7 +157,7 @@ const ExportResolutionDialog: React.FC<{
 
               {showOptions && (
                 <div
-                  className="absolute top-full left-0 right-0 mt-2 border border-gray-200/80 rounded-xl shadow-xl z-10 py-1 animate-in fade-in slide-in-from-top-2"
+                  className="absolute top-full left-0 right-0 mt-2 border border-gray-100/80 rounded-xl shadow-xl z-10 py-1 animate-in fade-in slide-in-from-top-2"
                   style={mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx)}
                 >
                   {[
@@ -1455,7 +1455,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                 />
               </button>
               {homeCleanupMenuOpen && (
-                <div className="absolute top-full right-0 z-[2020] mt-2 min-w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-xl">
+                <div className="absolute top-full right-0 z-[2020] mt-2 min-w-48 rounded-lg border border-gray-100/80 bg-white py-1 shadow-xl">
                   <button
                     type="button"
                     onClick={() => {
@@ -1572,7 +1572,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                   className="fixed top-1/2 left-3 right-3 z-[5001] mx-auto w-full max-w-md sm:max-w-lg sm:left-4 sm:right-4 -translate-y-1/2 transform"
                 >
                   <div
-                    className="rounded-xl shadow-2xl flex flex-col max-h-[min(85dvh,85vh)] overflow-hidden border border-gray-200/80"
+                    className="rounded-xl shadow-2xl flex flex-col max-h-[min(85dvh,85vh)] overflow-hidden border border-gray-100/80"
                     style={mapChromeSurface}
                   >
                     <div className="flex items-center justify-between px-4 py-3 shrink-0">
@@ -2156,7 +2156,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       {isCreating && (
         <div className="fixed inset-0 z-[3000] bg-black/50 flex items-center justify-center p-4">
           <div
-            className="rounded-3xl shadow-2xl w-full max-w-md p-6 animate-in zoom-in-95 border border-gray-200/80"
+            className="rounded-3xl shadow-2xl w-full max-w-md p-6 animate-in zoom-in-95 border border-gray-100/80"
             style={mapChromeSurface}
           >
             <h2 className="text-2xl font-black text-gray-800 mb-6">New Project</h2>
@@ -2250,7 +2250,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       {showImportDialog && (
         <div className="fixed inset-0 z-[3000] bg-black/50 flex items-center justify-center p-4">
           <div
-            className="rounded-3xl shadow-2xl w-full max-w-md p-6 animate-in zoom-in-95 border border-gray-200/80"
+            className="rounded-3xl shadow-2xl w-full max-w-md p-6 animate-in zoom-in-95 border border-gray-100/80"
             style={mapChromeSurface}
           >
             <h2 className="text-2xl font-black text-gray-800 mb-6">

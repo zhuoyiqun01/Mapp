@@ -675,6 +675,17 @@ export const MapView: React.FC<MapViewProps> = ({
     [onUpdateProject, project]
   );
 
+  const handleMapUpdateFrame = useCallback(
+    (frame: Frame) => {
+      if (!onUpdateProject) return;
+      void onUpdateProject({
+        ...project,
+        frames: (project.frames ?? []).map((f) => (f.id === frame.id ? frame : f))
+      });
+    },
+    [onUpdateProject, project]
+  );
+
   const { clusteredMarkers, sortNotes } = useMapClustering({
     mapInstance,
     getFilteredNotes: () => mapRenderedNotes,
@@ -1486,6 +1497,7 @@ export const MapView: React.FC<MapViewProps> = ({
                           onUpdateNote={onUpdateNote}
                           onBatchUpdateNotes={handleMapBatchNotes}
                           frames={project.frames ?? []}
+                          onUpdateFrame={onUpdateProject ? handleMapUpdateFrame : undefined}
                           onActivateNote={(note) => {
                             if (!mapInstance || !noteHasRenderableMapPosition(note)) return;
                             mapInstance.flyTo([note.coords.lat, note.coords.lng], Math.max(mapInstance.getZoom(), 15), {

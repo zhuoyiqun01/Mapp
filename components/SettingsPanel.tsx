@@ -214,7 +214,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         data-graph-top-left-panel
         role="dialog"
         aria-label="设置"
-        className="fixed z-[5001] overflow-hidden rounded-xl border border-gray-200/80 shadow-xl flex flex-col"
+        className="fixed z-[5001] overflow-hidden rounded-xl border border-gray-100/80 shadow-xl flex flex-col"
         style={{
           top: panelRect.top,
           left: panelRect.left,
@@ -412,7 +412,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           <div
             ref={mapBgMenuRef}
             role="listbox"
-            className="fixed overflow-hidden rounded-lg border border-gray-200/80 bg-white/95 py-1 shadow-xl backdrop-blur-sm theme-surface-scrollbar"
+            className="fixed overflow-hidden rounded-lg border border-gray-100/80 bg-white/95 py-1 shadow-xl backdrop-blur-sm theme-surface-scrollbar"
             style={{
               zIndex: PORTAL_TOOLTIP_Z,
               top: mapBgMenuRect.top,

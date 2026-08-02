@@ -84,7 +84,7 @@ export const TagAddPanel: React.FC<TagAddPanelProps> = ({
     return () => document.removeEventListener('pointerdown', onDocPointerDown, true);
   }, [closeOnInteractOutside]);
 
-  const shellClass = `rounded-xl border border-gray-200/90 p-2.5 shadow-lg ring-1 ring-black/[0.04] ${panelChromeStyle ? '' : 'bg-white'} ${className}`;
+  const shellClass = `rounded-xl border border-gray-100/80 p-2.5 shadow-lg ${panelChromeStyle ? '' : 'bg-white'} ${className}`;
 
   const body = (
     <>

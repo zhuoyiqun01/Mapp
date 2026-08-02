@@ -64,9 +64,9 @@ export interface ProjectNotesLayerPanelProps {
   embed?: boolean;
   /** Map：`start` 与图层按钮左对齐，`end` 与按钮右对齐 */
   dockAlign?: 'start' | 'end';
-  /** Table：点位记录不显示显隐，展示所有 tag + 时间，并支持双击组名内联重命名 */
+  /** Table：点位记录不显示显隐，展示所有 tag + 时间；双击组名重命名在各视图均可用 */
   tableMode?: boolean;
-  /** Table：重命名 frame（更新 project.frames.title） */
+  /** 重命名 frame（更新 project.frames.title）；缺省时可用 onUpdateFrame */
   onUpdateFrameTitle?: (frameId: string, nextTitle: string) => void;
   /** 更新整簇（如图谱面板改 Frame.color） */
   onUpdateFrame?: (frame: Frame) => void;
@@ -364,7 +364,6 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
 
   const renameTagLayerKeyInState = useCallback(
     (oldKey: string, nextKey: string) => {
-      if (!tableMode) return;
       if (oldKey === nextKey) return;
       patch((p) => {
         const dedupePreserveOrder = (arr: string[]) => {
@@ -401,85 +400,62 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
         return { ...p, order: nextOrder, hidden: nextHidden, weights: nextWeights };
       });
     },
-    [patch, tableMode]
+    [patch]
   );
 
+  /** 批量重命名标签（所有便签上匹配的 tag.label）；旧键迁移 order/hidden/weights */
   const applyRenameTagGroup = useCallback(
     async (oldKey: string, nextKey: string) => {
-      if (!tableMode) return;
       const oldK = String(oldKey).trim();
       const newK = String(nextKey).trim();
       if (!newK || oldK === newK) return;
       if (oldK === '' || oldK === GRAPH_UNTAGGED_TAG_GROUP) return;
       if (newK === '' || newK === GRAPH_UNTAGGED_TAG_GROUP) return;
 
-      // Table：重命名 tag 组名时，只修改用于“决定所属分组”的第一条标签（tags[0]）
-      // （与 noteBelongsToLayerGroupKey / noteTagLayerGroupKey 的分组依据保持一致）
-      const affectedNotes = notes.filter((n) => noteBelongsToLayerGroupKey(n, oldK, 'tag'));
-      const updatedNotes = affectedNotes.map((note) => {
-        const nextTags = (note.tags ?? []).map((t, i) =>
-          i === 0 && normalizeTagLabel(t.label) === oldK ? { ...t, label: newK } : t
-        );
-        return { ...note, tags: nextTags };
-      });
+      const updatedNotes: Note[] = [];
+      for (const note of notes) {
+        const tags = note.tags ?? [];
+        let changed = false;
+        const nextTags = tags.map((t) => {
+          if (normalizeTagLabel(t.label) === oldK) {
+            changed = true;
+            return { ...t, label: newK };
+          }
+          return t;
+        });
+        if (changed) updatedNotes.push({ ...note, tags: nextTags });
+      }
 
-      if (affectedNotes.length > 0) {
-        // 先更新笔记标签
+      if (updatedNotes.length > 0) {
         if (onBatchUpdateNotes) {
-          await onBatchUpdateNotes(updatedNotes);
+          const byId = new Map(updatedNotes.map((n) => [n.id, n]));
+          await onBatchUpdateNotes(notes.map((n) => byId.get(n.id) ?? n));
         } else {
           updatedNotes.forEach((n) => void onUpdateNote(n));
         }
       }
 
-      // 再更新 layer 面板的组键/显隐/权重（order/hidden/weights 是以首标签组 key 组织的）
-      // 即便笔记内部是多个标签，这里也只需要保证 layer state 里的组键正确迁移。
-
-      patch((p) => {
-        const dedupePreserveOrder = (arr: string[]) => {
-          const seen = new Set<string>();
-          const out: string[] = [];
-          for (const x of arr) {
-            const v = String(x).trim();
-            if (seen.has(v)) continue;
-            seen.add(v);
-            out.push(v);
-          }
-          return out;
-        };
-
-        const nextOrder = dedupePreserveOrder((p.order ?? []).map((k) => (String(k).trim() === oldK ? newK : String(k).trim())));
-        const nextHidden = dedupePreserveOrder((p.hidden ?? []).map((k) => (String(k).trim() === oldK ? newK : String(k).trim())));
-        const nextWeights =
-          p.weights == null
-            ? p.weights
-            : (() => {
-                const w = { ...p.weights };
-                if (w[oldK] != null) {
-                  // If target key already exists, keep its weight.
-                  if (w[newK] == null) w[newK] = w[oldK];
-                  delete w[oldK];
-                }
-                return w;
-              })();
-
-        return { ...p, order: nextOrder, hidden: nextHidden, weights: nextWeights };
-      });
+      renameTagLayerKeyInState(oldK, newK);
     },
-    [notes, onBatchUpdateNotes, onUpdateNote, patch, tableMode]
+    [notes, onBatchUpdateNotes, onUpdateNote, renameTagLayerKeyInState]
   );
 
   const applyRenameFrameGroup = useCallback(
     async (oldFrameId: string, nextTitle: string) => {
-      if (!tableMode) return;
-      if (!onUpdateFrameTitle) return;
+      if (!onUpdateFrameTitle && !onUpdateFrame) return;
       const oldId = String(oldFrameId).trim();
       const newTitleTrim = String(nextTitle).trim();
       if (!oldId || !newTitleTrim) return;
 
       const oldTitle = framesById.get(oldId)?.title ?? oldId;
 
-      await onUpdateFrameTitle(oldId, newTitleTrim);
+      if (onUpdateFrameTitle) {
+        await onUpdateFrameTitle(oldId, newTitleTrim);
+      } else if (onUpdateFrame) {
+        const f = framesById.get(oldId);
+        if (!f) return;
+        onUpdateFrame({ ...f, title: newTitleTrim });
+      }
 
       const affectedNotes = notes.filter((n) => noteBelongsToLayerGroupKey(n, oldId, 'frame'));
       if (affectedNotes.length > 0) {
@@ -493,13 +469,15 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
         });
 
         if (onBatchUpdateNotes) {
-          await onBatchUpdateNotes(updatedNotes);
+          await onBatchUpdateNotes(
+            notes.map((n) => updatedNotes.find((u) => u.id === n.id) ?? n)
+          );
         } else {
           updatedNotes.forEach((n) => void onUpdateNote(n));
         }
       }
     },
-    [framesById, notes, onBatchUpdateNotes, onUpdateFrameTitle, onUpdateNote, tableMode, patch]
+    [framesById, notes, onBatchUpdateNotes, onUpdateFrame, onUpdateFrameTitle, onUpdateNote]
   );
 
   const commitEditingGroup = useCallback(
@@ -560,7 +538,7 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
   return (
     <div
       data-graph-top-left-panel
-      className={`${posCls} mt-2 flex max-h-[min(24rem,70vh)] overflow-hidden rounded-xl border border-gray-200/90 shadow-xl ${
+      className={`${posCls} mt-2 flex max-h-[min(24rem,70vh)] overflow-hidden rounded-xl border border-gray-100/80 shadow-xl ${
         embed ? 'w-full max-w-xl' : weightSideOpen ? 'w-[min(36rem,calc(100vw-1rem))]' : 'w-[min(20rem,calc(100vw-2rem))]'
       }`}
       style={panelChromeStyle ?? { backgroundColor: 'rgba(255,255,255,0.96)' }}
@@ -661,6 +639,7 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
               onOpenTagColor={openTagColorBatchEditor}
               weightOpenKey={weightOpenKey}
               setWeightOpenKey={setWeightOpenKey}
+              onRenameTag={(oldKey, nextKey) => void applyRenameTagGroup(oldKey, nextKey)}
             />
           ) : (
           merged.order.map((key) => {
@@ -779,7 +758,7 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
                         </span>
                       ) : null}
                     </div>
-                    {tableMode && editingGroupKey === k ? (
+                    {editingGroupKey === k ? (
                       <input
                         autoFocus
                         value={editingGroupDraft}
@@ -812,13 +791,12 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
                       />
                     ) : (
                       <span
-                        className="min-w-0 flex-1 truncate text-sm font-medium text-gray-800"
-                        title={groupDisplayLabel(k, layerGroupStandard, framesById)}
+                        className="min-w-0 flex-1 truncate text-sm font-medium text-gray-800 cursor-default"
+                        title={`${groupDisplayLabel(k, layerGroupStandard, framesById)}（双击重命名）`}
                         onDoubleClick={(e) => {
-                          if (!tableMode) return;
                           e.stopPropagation();
-
-                          const canRenameFrame = k !== '' && !!onUpdateFrameTitle;
+                          const canRenameFrame =
+                            k !== '' && (!!onUpdateFrameTitle || !!onUpdateFrame);
                           if (!canRenameFrame) return;
 
                           cancelRenameRef.current = false;

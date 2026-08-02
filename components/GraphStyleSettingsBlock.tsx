@@ -8,10 +8,14 @@ import {
 } from '../utils/graph/graphData';
 import {
   GRAPH_CLUSTER_BASIS_FRAME,
+  isFrameClusterBasis,
   normalizeGraphClusterBasis
 } from '../utils/graph/graphClusterBasis';
 import { GRAPH_UNTAGGED_TAG_GROUP, mergeGraphLayerState } from '../utils/graph/graphRuntimeCore';
-import { groupTagsByHierarchyPrefix } from '../utils/layer/tagHierarchy';
+import {
+  groupTagsByHierarchyPrefix,
+  tagLayerHiddenForSelectedPrefix
+} from '../utils/layer/tagHierarchy';
 import { SettingsCompactSlider } from './ui/SettingsCompactSlider';
 
 export interface GraphStyleSettingsBlockProps {
@@ -42,11 +46,39 @@ export const GraphStyleSettingsBlock: React.FC<GraphStyleSettingsBlockProps> = (
       .filter((p) => p && p !== GRAPH_UNTAGGED_TAG_GROUP);
   }, [project.notes, project.graphLayers]);
 
+  const mergedTagLayers = useMemo(
+    () => mergeGraphLayerState(project.notes ?? [], project.graphLayers ?? null, 'tag'),
+    [project.notes, project.graphLayers]
+  );
+
   const clusterBasisRaw = normalizeGraphClusterBasis(project.graphClusterBasis);
   const clusterBasis =
     clusterBasisRaw === GRAPH_CLUSTER_BASIS_FRAME || tagPrefixes.includes(clusterBasisRaw)
       ? clusterBasisRaw
       : GRAPH_CLUSTER_BASIS_FRAME;
+
+  const applyClusterBasis = (raw: string) => {
+    const next = normalizeGraphClusterBasis(raw);
+    if (isFrameClusterBasis(next)) {
+      onPatch({ graphClusterBasis: next });
+      return;
+    }
+    // 选某一级标签前缀：打开该一级眼睛，关闭其他一级
+    const hidden = tagLayerHiddenForSelectedPrefix(
+      mergedTagLayers.order ?? [],
+      next,
+      GRAPH_UNTAGGED_TAG_GROUP
+    );
+    onPatch({
+      graphClusterBasis: next,
+      graphLayers: {
+        order: mergedTagLayers.order ?? [],
+        hidden,
+        weights: mergedTagLayers.weights,
+        tagVisibilityLogic: mergedTagLayers.tagVisibilityLogic
+      }
+    });
+  };
 
   // 力导相关：拖动只改本地显示，抬起再写回项目（避免拖动过程中反复重算布局）
   const [coseTimeXDraft, setCoseTimeXDraft] = useState(coseTimeXBias);
@@ -134,7 +166,7 @@ export const GraphStyleSettingsBlock: React.FC<GraphStyleSettingsBlockProps> = (
           className="w-full rounded-lg border border-gray-200/90 bg-white px-2 py-1.5 text-xs text-gray-800 outline-none focus:border-gray-300"
           style={{ accentColor: themeColor }}
           value={clusterBasis}
-          onChange={(e) => onPatch({ graphClusterBasis: normalizeGraphClusterBasis(e.target.value) })}
+          onChange={(e) => applyClusterBasis(e.target.value)}
         >
           <option value={GRAPH_CLUSTER_BASIS_FRAME}>簇图层</option>
           {tagPrefixes.map((p) => (
@@ -143,7 +175,9 @@ export const GraphStyleSettingsBlock: React.FC<GraphStyleSettingsBlockProps> = (
             </option>
           ))}
         </select>
-        <p className="mt-1 text-[10px] leading-snug text-gray-400">时间线分层 · 图例 · 节点色</p>
+        <p className="mt-1 text-[10px] leading-snug text-gray-400">
+          时间线分层 · 图例 · 节点色；选一级标签时同步图层眼睛
+        </p>
       </div>
       <div className="min-w-0">
         <SettingsCompactSlider

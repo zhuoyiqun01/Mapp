@@ -71,7 +71,7 @@ export const BoardImportPreviewDialog: React.FC<BoardImportPreviewDialogProps> =
       }}
     >
       <div
-        className="mx-4 flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-gray-200/80 shadow-2xl"
+        className="mx-4 flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-gray-100/80 shadow-2xl"
         style={panelChromeStyle ?? mapChromeSurfaceStyle(mapUiChromeOpacity, mapUiChromeBlurPx)}
         onClick={(e) => {
           e.preventDefault();

@@ -1512,7 +1512,8 @@ export function applyGraphTimeLayout(
     return resolveCyClusterGroupKey(
       String(node.data('tagGroup') ?? '').trim(),
       String(node.data('frameGroup') ?? '').trim(),
-      clusterBasis
+      clusterBasis,
+      node.data('tagLabels')
     );
   };
 

@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, Eye, EyeOff, GripVertical } from 'lucide-react';
 import type { GraphLayerState, Note, TagVisibilityLogic } from '../../types';
 import { GRAPH_UNTAGGED_TAG_GROUP } from '../../utils/graph/graphRuntimeCore';
@@ -9,11 +9,13 @@ import {
   truncateRawTextLabel
 } from '../../utils/layer/unifiedNoteLayer';
 import {
+  composeRenamedTagLabel,
   groupTagsByHierarchyPrefix,
   insertLayerOrderBlockRelative,
   insertLayerOrderRelative,
   tagHasHierarchySep,
-  tagHierarchySuffix
+  tagHierarchySuffix,
+  tagRenameEditablePart
 } from '../../utils/layer/tagHierarchy';
 
 type Props = {
@@ -27,6 +29,8 @@ type Props = {
   onOpenTagColor: (tagKey: string, fromColor: string, anchor: HTMLElement) => void;
   weightOpenKey: string | null;
   setWeightOpenKey: React.Dispatch<React.SetStateAction<string | null>>;
+  /** 双击标签名批量重命名（传入完整旧键 → 完整新键） */
+  onRenameTag?: (oldFullKey: string, nextFullKey: string) => void | Promise<void>;
 };
 
 /**
@@ -44,7 +48,8 @@ export const TagLayerHierarchyList: React.FC<Props> = ({
   tagColorsByKey,
   onOpenTagColor,
   weightOpenKey,
-  setWeightOpenKey
+  setWeightOpenKey,
+  onRenameTag
 }) => {
   const hiddenSet = useMemo(
     () => new Set((merged.hidden ?? []).map((h) => String(h).trim())),
@@ -64,6 +69,35 @@ export const TagLayerHierarchyList: React.FC<Props> = ({
   const [dragPrefixKeys, setDragPrefixKeys] = useState<string[] | null>(null);
   const [overTagKey, setOverTagKey] = useState<string | null>(null);
   const [dropPlace, setDropPlace] = useState<'before' | 'after'>('before');
+  const [editingTagKey, setEditingTagKey] = useState<string | null>(null);
+  const [editingTagDraft, setEditingTagDraft] = useState('');
+  const cancelRenameRef = useRef(false);
+
+  const cancelEditingTag = useCallback(() => {
+    cancelRenameRef.current = true;
+    setEditingTagKey(null);
+    setEditingTagDraft('');
+  }, []);
+
+  const commitEditingTag = useCallback(
+    async (oldKey: string, draft: string) => {
+      cancelRenameRef.current = false;
+      const nextFull = composeRenamedTagLabel(oldKey, draft);
+      setEditingTagKey(null);
+      setEditingTagDraft('');
+      if (!onRenameTag) return;
+      await onRenameTag(oldKey, nextFull);
+    },
+    [onRenameTag]
+  );
+
+  const beginEditingTag = useCallback((fullKey: string) => {
+    if (!onRenameTag) return;
+    if (fullKey === GRAPH_UNTAGGED_TAG_GROUP) return;
+    cancelRenameRef.current = false;
+    setEditingTagKey(fullKey);
+    setEditingTagDraft(tagRenameEditablePart(fullKey));
+  }, [onRenameTag]);
 
   const patch = useCallback(
     (fn: (p: GraphLayerState) => GraphLayerState) => {
@@ -275,9 +309,47 @@ export const TagLayerHierarchyList: React.FC<Props> = ({
               />
             ))}
           </div>
-          <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-800" title={fullLabel}>
-            {displayLabel}
-          </span>
+          {editingTagKey === k ? (
+            <input
+              autoFocus
+              value={editingTagDraft}
+              onChange={(e) => setEditingTagDraft(e.target.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  cancelEditingTag();
+                  return;
+                }
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void commitEditingTag(k, editingTagDraft);
+                }
+              }}
+              onBlur={() => {
+                if (cancelRenameRef.current) {
+                  cancelRenameRef.current = false;
+                  return;
+                }
+                void commitEditingTag(k, editingTagDraft);
+              }}
+              onClick={(e) => e.stopPropagation()}
+              className="min-w-0 flex-1 truncate px-2 py-0.5 text-sm font-medium text-gray-800 border border-gray-200 rounded-md outline-none focus:ring-2"
+              style={{ ['--tw-ring-color' as string]: themeColor }}
+              title={editingTagDraft}
+            />
+          ) : (
+            <span
+              className="min-w-0 flex-1 truncate text-sm font-medium text-gray-800 cursor-default"
+              title={`${fullLabel}${onRenameTag && k !== GRAPH_UNTAGGED_TAG_GROUP ? '（双击重命名）' : ''}`}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                beginEditingTag(k);
+              }}
+            >
+              {displayLabel}
+            </span>
+          )}
           <span className="shrink-0 text-[10px] text-gray-400">{groupNotes.length}</span>
           <button
             type="button"
@@ -435,9 +507,52 @@ export const TagLayerHierarchyList: React.FC<Props> = ({
                   ))}
                 </div>
               ) : null}
-              <span className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-800" title={prefixLabel}>
-                {prefixLabel}
-              </span>
+              {leafOnly && editingTagKey === tags[0] ? (
+                <input
+                  autoFocus
+                  value={editingTagDraft}
+                  onChange={(e) => setEditingTagDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      cancelEditingTag();
+                      return;
+                    }
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void commitEditingTag(tags[0], editingTagDraft);
+                    }
+                  }}
+                  onBlur={() => {
+                    if (cancelRenameRef.current) {
+                      cancelRenameRef.current = false;
+                      return;
+                    }
+                    void commitEditingTag(tags[0], editingTagDraft);
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="min-w-0 flex-1 truncate px-2 py-0.5 text-sm font-semibold text-gray-800 border border-gray-200 rounded-md outline-none focus:ring-2"
+                  style={{ ['--tw-ring-color' as string]: themeColor }}
+                  title={editingTagDraft}
+                />
+              ) : (
+                <span
+                  className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-800 cursor-default"
+                  title={
+                    leafOnly && onRenameTag && tags[0] !== GRAPH_UNTAGGED_TAG_GROUP
+                      ? `${prefixLabel}（双击重命名）`
+                      : prefixLabel
+                  }
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    if (!leafOnly) return;
+                    beginEditingTag(tags[0]);
+                  }}
+                >
+                  {prefixLabel}
+                </span>
+              )}
               <span className="shrink-0 text-[10px] text-gray-400">{pNotes.length}</span>
               <button
                 type="button"

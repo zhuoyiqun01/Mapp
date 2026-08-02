@@ -74,7 +74,7 @@ export const BoardMultiSelectToolbar: React.FC<BoardMultiSelectToolbarProps> = (
       }}
     >
       <div
-        className="flex shrink-0 items-center gap-0.5 rounded-xl border border-gray-200/90 bg-white/95 p-1 shadow-lg ring-1 ring-black/[0.04]"
+        className="flex shrink-0 items-center gap-0.5 rounded-xl border border-gray-100/80 bg-white/95 p-1 shadow-lg"
         style={panelChromeStyle}
       >
         {isEditMode ? (

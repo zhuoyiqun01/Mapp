@@ -196,7 +196,7 @@ export const GraphTopRightToolbar: React.FC<Props> = ({
       </div>
       {pickResults.shown.length > 0 && q.trim() !== '' ? (
         <ul
-          className="absolute left-0 right-0 top-[calc(100%+0.25rem)] z-[600] max-h-52 min-w-0 overflow-y-auto rounded-xl border border-gray-200/90 bg-white/95 py-1 text-left shadow-xl backdrop-blur-sm"
+          className="absolute left-0 right-0 top-[calc(100%+0.25rem)] z-[600] max-h-52 min-w-0 overflow-y-auto rounded-xl border border-gray-100/80 bg-white/95 py-1 text-left shadow-xl backdrop-blur-sm"
           role="listbox"
         >
           {pickResults.shownInView.length > 0 ? (

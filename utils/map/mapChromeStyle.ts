@@ -25,11 +25,19 @@ export const DEFAULT_MAP_UI_CHROME_OPACITY = 0.9;
 export const DEFAULT_MAP_UI_CHROME_BLUR_PX = 8;
 
 /**
+ * 全局玻璃浮层描边：只用这一条细灰边，不要再叠 `ring-*`，否则会出现两种描边色。
+ * gray-100/80 ≈ #f3f4f6 @ 80%，与 ChromeIconButton / canvas paint 一致。
+ */
+export const MAP_CHROME_SURFACE_BORDER_CLASS = 'border border-gray-100/80';
+
+/**
  * 全局玻璃浮层外壳 class（圆角 / 阴影 / 描边）。
  * 与 ChromeIconButton、ChromeLabeledSlider 一致；底色+模糊用 `mapChromeSurfaceStyle`。
  */
-export const MAP_CHROME_SURFACE_SHELL_CLASS =
-  'rounded-lg shadow-lg border border-gray-100/80';
+export const MAP_CHROME_SURFACE_SHELL_CLASS = `rounded-lg shadow-lg ${MAP_CHROME_SURFACE_BORDER_CLASS}`;
+
+/** 已有 `panelChromeStyle` 时的描边 class（替代 gray-200 + ring 双描边） */
+export const MAP_CHROME_PANEL_EDGE_CLASS = MAP_CHROME_SURFACE_BORDER_CLASS;
 
 export function mapChromeSurfaceStyle(opacity: number, blurPx: number): CSSProperties {
   const o = Math.min(1, Math.max(0, opacity));

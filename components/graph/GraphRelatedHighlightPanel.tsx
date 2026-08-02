@@ -124,7 +124,7 @@ export const GraphRelatedHighlightPanel: React.FC<GraphRelatedHighlightPanelProp
         embedded
           ? 'relative w-72 sm:w-80 shrink-0 min-h-0'
           : 'fixed ui-workspace-left z-[1000] w-72 sm:w-80'
-      } rounded-2xl shadow-2xl border border-gray-100 overflow-hidden animate-in slide-in-from-top-2 duration-300 ease-out flex flex-col pointer-events-auto ${
+      } rounded-2xl shadow-2xl border border-gray-100/80 overflow-hidden animate-in slide-in-from-top-2 duration-300 ease-out flex flex-col pointer-events-auto ${
         chromeSurfaceStyle ? '' : 'bg-white'
       }`}
       style={{

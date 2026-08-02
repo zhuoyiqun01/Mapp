@@ -62,7 +62,7 @@ export const BoardBrowseTagFilterPanel: React.FC<BoardBrowseTagFilterPanelProps>
       open={portalOpen}
       position={position}
       browseDataAttr="tag-filter"
-      className={`w-56 rounded-xl border border-gray-100 py-2 shadow-xl ${
+      className={`w-56 rounded-xl border border-gray-100/80 py-2 shadow-xl ${
         panelChromeStyle ? '' : 'bg-white'
       }`}
       style={panelChromeStyle}

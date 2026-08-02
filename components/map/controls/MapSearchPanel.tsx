@@ -68,7 +68,7 @@ export const MapSearchPanel: React.FC<MapSearchPanelProps> = ({
 
     {isOpen && (
       <div
-        className={`absolute right-0 top-full mt-2 w-72 sm:w-80 rounded-2xl shadow-2xl border border-gray-100 p-4 z-[2000] animate-in fade-in slide-in-from-top-4 ${chromeSurfaceStyle ? '' : 'bg-white'}`}
+        className={`absolute right-0 top-full mt-2 w-72 sm:w-80 rounded-2xl shadow-2xl border border-gray-100/80 p-4 z-[2000] animate-in fade-in slide-in-from-top-4 ${chromeSurfaceStyle ? '' : 'bg-white'}`}
         style={chromeSurfaceStyle}
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}

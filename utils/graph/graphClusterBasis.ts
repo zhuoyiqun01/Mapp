@@ -19,7 +19,7 @@ export function isFrameClusterBasis(basis: GraphClusterBasis): boolean {
   return normalizeGraphClusterBasis(basis) === GRAPH_CLUSTER_BASIS_FRAME;
 }
 
-/** 便签首标签（多标签只认 tags[0]） */
+/** 便签首标签（多标签默认顺序） */
 export function noteFirstTag(note: Note): Tag | undefined {
   const t = note.tags?.[0];
   if (!t) return undefined;
@@ -29,21 +29,32 @@ export function noteFirstTag(note: Note): Tag | undefined {
 }
 
 /**
+ * 按聚类依据取用于分层的标签：在 tags 顺序中找「一级前缀 === basis」的第一个。
+ * （多标签时仍按数组顺序；把匹配该维度的标签拖到更前即可优先。）
+ */
+export function noteTagMatchingClusterBasis(note: Note, basis: GraphClusterBasis): Tag | undefined {
+  const b = normalizeGraphClusterBasis(basis);
+  if (isFrameClusterBasis(b)) return undefined;
+  for (const t of note.tags ?? []) {
+    const label = String(t.label ?? '').trim();
+    if (!label || label === UNTAGGED) continue;
+    if (tagHierarchyPrefix(label) === b) return t;
+  }
+  return undefined;
+}
+
+/**
  * 时间线/图例/填色用的聚类分组键。
  * - frame：首个簇 id；无簇为 ''
- * - tagPrefix P：仅当 tags[0] 的一级前缀为 P 时返回完整标签，否则 ''
+ * - tagPrefix P：首个前缀为 P 的完整标签（按后缀区分层）；无匹配为 ''
  */
 export function resolveNoteClusterGroupKey(note: Note, basis: GraphClusterBasis): string {
   const b = normalizeGraphClusterBasis(basis);
   if (isFrameClusterBasis(b)) {
     return String(note.groupIds?.[0] ?? note.groupId ?? note.groupNames?.[0] ?? note.groupName ?? '').trim();
   }
-  const first = noteFirstTag(note);
-  if (!first) return '';
-  const label = String(first.label).trim();
-  if (label === UNTAGGED) return '';
-  if (tagHierarchyPrefix(label) !== b) return '';
-  return label;
+  const matched = noteTagMatchingClusterBasis(note, b);
+  return matched ? String(matched.label).trim() : '';
 }
 
 /** 节点填色：与聚类依据 / 图例一致 */
@@ -65,24 +76,34 @@ export function noteColorForClusterBasis(
     if (note.color) return note.color;
     return fallback;
   }
-  const first = noteFirstTag(note);
-  if (first) {
-    const label = String(first.label).trim();
-    if (label && tagHierarchyPrefix(label) === b && first.color) return first.color;
-  }
+  const matched = noteTagMatchingClusterBasis(note, b);
+  if (matched?.color) return matched.color;
   return fallback;
 }
 
-/** cytoscape 节点上按依据取时间线分组键（tagGroup 已是 tags[0]） */
+/** cytoscape：按依据取时间线分组键（优先用全部 tagLabels，兼容仅有 tagGroup） */
 export function resolveCyClusterGroupKey(
   tagGroup: string,
   frameGroup: string,
-  basis: GraphClusterBasis
+  basis: GraphClusterBasis,
+  tagLabels?: unknown
 ): string {
   const b = normalizeGraphClusterBasis(basis);
   if (isFrameClusterBasis(b)) return String(frameGroup ?? '').trim();
-  const tag = String(tagGroup ?? '').trim();
-  if (!tag || tag === UNTAGGED) return '';
-  if (tagHierarchyPrefix(tag) !== b) return '';
-  return tag;
+
+  const labels: string[] = [];
+  if (Array.isArray(tagLabels)) {
+    for (const x of tagLabels) {
+      const s = String(x ?? '').trim();
+      if (s) labels.push(s);
+    }
+  }
+  const primary = String(tagGroup ?? '').trim();
+  if (primary && !labels.includes(primary)) labels.unshift(primary);
+
+  for (const label of labels) {
+    if (!label || label === UNTAGGED) continue;
+    if (tagHierarchyPrefix(label) === b) return label;
+  }
+  return '';
 }

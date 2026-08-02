@@ -37,7 +37,7 @@ export const ImportPreviewDialog: React.FC<ImportPreviewDialogProps> = ({
   return (
     <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/50">
       <div
-        className="rounded-2xl shadow-2xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col border border-gray-200/80"
+        className="rounded-2xl shadow-2xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col border border-gray-100/80"
         style={cardChrome}
       >
         {/* Header */}

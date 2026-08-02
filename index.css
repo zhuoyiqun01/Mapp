@@ -46,6 +46,14 @@
   transition: left var(--workspace-ui-inset-transition);
 }
 
+/**
+ * 底部居中工具条：最大宽度 = 工作区全宽 − 左右各 1rem（与 bottom-4 下边距同量），
+ * 不再另设 rem 硬顶，避免两侧空很多却提前换行。
+ */
+.ui-workspace-bottom-bar {
+  max-width: calc(100vw - var(--workspace-ui-left-inset, 0px) - 2rem);
+}
+
 /* 原生 range 滑块拇指/强调色（否则为系统蓝） */
 input[type="range"] {
   accent-color: var(--theme-color);

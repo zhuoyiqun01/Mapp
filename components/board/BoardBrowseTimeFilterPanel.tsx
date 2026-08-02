@@ -51,7 +51,7 @@ export const BoardBrowseTimeFilterPanel: React.FC<BoardBrowseTimeFilterPanelProp
       open={portalOpen}
       position={position}
       browseDataAttr="time-filter"
-      className={`w-72 rounded-xl border border-gray-100 py-2 shadow-xl ${
+      className={`w-72 rounded-xl border border-gray-100/80 py-2 shadow-xl ${
         panelChromeStyle ? '' : 'bg-white'
       }`}
       style={panelChromeStyle}

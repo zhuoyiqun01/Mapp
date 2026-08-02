@@ -310,7 +310,7 @@ export const ThemeColorPicker: React.FC<ThemeColorPickerProps> = ({
       <div
         className={`rounded-xl shadow-2xl w-full ${
           isInline ? 'max-w-none' : 'max-w-md animate-in zoom-in-95'
-        } p-4 border border-gray-200/80`}
+        } p-4 border border-gray-100/80`}
         style={cardChrome}
       >
         <div className="relative mb-2">

@@ -30,7 +30,7 @@ export const ProjectKindPromptDialog: React.FC<Props> = ({
       <div
         role="dialog"
         aria-labelledby="project-kind-prompt-title"
-        className="w-full max-w-md rounded-3xl border border-gray-200/80 p-6 shadow-2xl animate-in zoom-in-95"
+        className="w-full max-w-md rounded-3xl border border-gray-100/80 p-6 shadow-2xl animate-in zoom-in-95"
         style={chromeSurfaceStyle ?? { backgroundColor: '#fff' }}
         onClick={(e) => e.stopPropagation()}
       >

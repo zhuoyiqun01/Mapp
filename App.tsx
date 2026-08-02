@@ -1450,7 +1450,7 @@ export default function App() {
       {isDeletingProject && (
         <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/40 backdrop-blur-[2px]">
           <div
-            className="mx-4 flex max-w-sm flex-col items-center gap-4 rounded-2xl border border-gray-200/80 p-8 shadow-2xl"
+            className="mx-4 flex max-w-sm flex-col items-center gap-4 rounded-2xl border border-gray-100/80 p-8 shadow-2xl"
             style={panelChromeStyle}
           >
             <Loader2 size={28} className="animate-spin shrink-0 text-gray-700" aria-hidden />
@@ -2038,8 +2038,8 @@ export default function App() {
         isUIVisible && projectKind && (
         <div
           data-allow-context-menu
-          className={`fixed bottom-4 ui-workspace-center-x -translate-x-1/2 z-50 max-w-[min(100vw-1rem,42rem)] p-1.5 rounded-2xl shadow-xl border flex flex-wrap justify-center gap-1 animate-in slide-in-from-bottom-4 fade-in ${
-            panelChromeStyle ? 'border-gray-200/80 ring-1 ring-black/[0.04]' : 'border-white/50 map-chrome-surface-fallback'
+          className={`fixed bottom-4 ui-workspace-center-x ui-workspace-bottom-bar -translate-x-1/2 z-50 p-1.5 rounded-2xl shadow-xl border flex flex-wrap justify-center gap-1 animate-in slide-in-from-bottom-4 fade-in ${
+            panelChromeStyle ? 'border-gray-100/80' : 'border-white/50 map-chrome-surface-fallback'
           }`}
           style={panelChromeStyle}
         >

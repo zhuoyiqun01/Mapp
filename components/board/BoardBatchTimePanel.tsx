@@ -24,7 +24,7 @@ export const BoardBatchTimePanel: React.FC<BoardBatchTimePanelProps> = ({
 }) => {
   return (
     <div
-      className="whitespace-nowrap rounded-xl border border-gray-200/90 bg-white p-2.5 shadow-lg ring-1 ring-black/[0.04]"
+      className="whitespace-nowrap rounded-xl border border-gray-100/80 bg-white p-2.5 shadow-lg"
       style={panelChromeStyle}
       onClick={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}

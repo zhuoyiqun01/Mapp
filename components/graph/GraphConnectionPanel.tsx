@@ -291,7 +291,7 @@ export const GraphConnectionPanel: React.FC<GraphConnectionPanelProps> = ({
       ref={panelRootRef}
       data-allow-context-menu
       className={`fixed top-[calc(3rem+0.75rem)] sm:top-[calc(4rem+0.75rem)] ui-workspace-left z-[520] w-[min(100%-1rem,22rem)] max-h-[calc(100dvh-3.75rem-1rem-env(safe-area-inset-bottom,0px))] sm:max-h-[calc(100dvh-4.75rem-1rem-env(safe-area-inset-bottom,0px))] overflow-y-auto rounded-2xl border shadow-xl p-4 text-sm ${
-        ch ? 'border-gray-200/80' : 'border-white/50 map-chrome-surface-fallback'
+        ch ? 'border-gray-100/80' : 'border-white/50 map-chrome-surface-fallback'
       }`}
       style={ch}
       onPointerDown={(e) => e.stopPropagation()}

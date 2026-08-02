@@ -77,7 +77,7 @@ const asideShellClass =
 
 /** 侧栏内折叠块与卡片：轻微投影 + 细描边，与浅底区分层 */
 const inspectorSectionSurfaceClass =
-  'rounded-lg border border-gray-200/80 bg-white/90 shadow-[0_1px_3px_rgba(15,23,42,0.06),0_1px_2px_-1px_rgba(15,23,42,0.06)]';
+  'rounded-lg border border-gray-100/80 bg-white/90 shadow-[0_1px_3px_rgba(15,23,42,0.06),0_1px_2px_-1px_rgba(15,23,42,0.06)]';
 
 /** 块内子卡片（端点、Frame 行等）：更轻的投影 */
 const inspectorNestedCardClass =

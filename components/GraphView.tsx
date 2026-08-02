@@ -54,7 +54,7 @@ import {
   GRAPH_CLUSTER_BASIS_FRAME,
   isFrameClusterBasis,
   normalizeGraphClusterBasis,
-  noteFirstTag,
+  noteTagMatchingClusterBasis,
   resolveNoteClusterGroupKey
 } from '../utils/graph/graphClusterBasis';
 import { tagHierarchyPrefix, tagHierarchySuffix } from '../utils/layer/tagHierarchy';
@@ -365,7 +365,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
       }
       usedKeys.add(key);
       if (!colorByKey.has(key)) {
-        const c = noteFirstTag(note)?.color?.trim();
+        const c = noteTagMatchingClusterBasis(note, clusterBasis)?.color?.trim();
         if (c) colorByKey.set(key, c);
       }
     }

@@ -57,7 +57,7 @@ export const ChromeDownloadMenu: React.FC<ChromeDownloadMenuProps> = ({
       {open && items.length > 0 && (
         <div
           role="menu"
-          className={`absolute right-0 top-[calc(100%+6px)] z-[600] min-w-[13rem] rounded-xl border border-gray-200/80 py-1 shadow-xl ring-1 ring-black/[0.04] ${menuClassName}`.trim()}
+          className={`absolute right-0 top-[calc(100%+6px)] z-[600] min-w-[13rem] rounded-xl border border-gray-100/80 py-1 shadow-xl ${menuClassName}`.trim()}
           style={chromeSurfaceStyle}
         >
           {items.map((item) => (

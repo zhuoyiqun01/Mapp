@@ -430,11 +430,26 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
   );
 
   const handleBoardBatchNotes = useCallback(
-    async (nextNotes: Note[]) => {
+      async (nextNotes: Note[]) => {
       if (!onUpdateProject || !projectFull) return;
       await onUpdateProject({ ...projectFull, notes: nextNotes });
     },
     [onUpdateProject, projectFull]
+  );
+
+  const handleBoardUpdateFrame = useCallback(
+    (frame: Frame) => {
+      if (onUpdateFrames) {
+        onUpdateFrames((frames ?? []).map((f) => (f.id === frame.id ? frame : f)));
+        return;
+      }
+      if (!onUpdateProject || !projectFull) return;
+      onUpdateProject({
+        ...projectFull,
+        frames: (projectFull.frames ?? []).map((f) => (f.id === frame.id ? frame : f))
+      });
+    },
+    [frames, onUpdateFrames, onUpdateProject, projectFull]
   );
 
   const panBoardToNoteCenter = useCallback(
@@ -5058,6 +5073,9 @@ const createNoteAtCenter = () => {
                             onUpdateNote={onUpdateNote}
                             onBatchUpdateNotes={handleBoardBatchNotes}
                             frames={frames ?? []}
+                            onUpdateFrame={
+                              onUpdateFrames || onUpdateProject ? handleBoardUpdateFrame : undefined
+                            }
                             onActivateNote={panBoardToNoteCenter}
                         />
                     ) : null}

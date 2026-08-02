@@ -172,7 +172,7 @@ export const NoteTimeRangeControl: React.FC<NoteTimeRangeControlProps> = ({
         createPortal(
           <div
             ref={timePanelPortalRef}
-            className={`flex flex-nowrap items-center gap-1.5 rounded-xl border border-gray-200/90 p-2 shadow-lg ring-1 ring-black/[0.04] whitespace-nowrap ${panelChromeStyle ? '' : 'bg-white'}`}
+            className={`flex flex-nowrap items-center gap-1.5 rounded-xl border border-gray-100/80 p-2 shadow-lg whitespace-nowrap ${panelChromeStyle ? '' : 'bg-white'}`}
             style={{
               ...(panelChromeStyle || {}),
               position: 'fixed',

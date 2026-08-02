@@ -445,7 +445,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0.9, opacity: 0 }}
-          className={`w-[500px] max-w-[95vw] flex flex-col relative transition-colors duration-300 max-h-[90vh] max-h-[90dvh] min-h-[300px] rounded-2xl border border-gray-200/80 ${panelChromeStyle ? '' : 'bg-white'} ${isSketching ? 'min-h-[500px]' : ''}`}
+          className={`w-[500px] max-w-[95vw] flex flex-col relative transition-colors duration-300 max-h-[90vh] max-h-[90dvh] min-h-[300px] rounded-2xl border border-gray-100/80 ${panelChromeStyle ? '' : 'bg-white'} ${isSketching ? 'min-h-[500px]' : ''}`}
           style={{
             ...(panelChromeStyle || {}),
             boxShadow: '0 25px 50px 12px rgba(0, 0, 0, 0.15)',
@@ -615,7 +615,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
               createPortal(
                 <div
                   ref={moreMenuPortalRef}
-                  className={`min-w-[11rem] rounded-xl border border-gray-200/90 py-1.5 shadow-xl ${panelChromeStyle ? '' : 'bg-white'}`}
+                  className={`min-w-[11rem] rounded-xl border border-gray-100/80 py-1.5 shadow-xl ${panelChromeStyle ? '' : 'bg-white'}`}
                   style={{
                     ...(panelChromeStyle || {}),
                     position: 'fixed',

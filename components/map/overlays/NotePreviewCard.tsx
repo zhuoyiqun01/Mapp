@@ -63,7 +63,7 @@ export const NotePreviewCard: React.FC<NotePreviewCardProps> = ({
         embedded
           ? 'relative w-72 sm:w-80 shrink-0'
           : 'fixed ui-workspace-left z-[1000] w-72 sm:w-80'
-      } rounded-2xl shadow-2xl border border-gray-100 overflow-hidden animate-in slide-in-from-left-8 duration-500 ease-out flex flex-col ${
+      } rounded-2xl shadow-2xl border border-gray-100/80 overflow-hidden animate-in slide-in-from-left-8 duration-500 ease-out flex flex-col ${
         passThrough ? 'pointer-events-none' : 'pointer-events-auto'
       } ${chromeSurfaceStyle ? '' : 'bg-white'}`}
       style={{

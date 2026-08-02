@@ -51,7 +51,7 @@ export const DeleteConfirmDialog: React.FC<DeleteConfirmDialogProps> = ({
         onClick={() => !confirming && onCancel()}
       />
       <div
-        className="relative w-full max-w-sm rounded-2xl border border-gray-200/80 shadow-xl p-5 text-sm"
+        className="relative w-full max-w-sm rounded-2xl border border-gray-100/80 shadow-xl p-5 text-sm"
         style={cardChrome}
       >
         <h2 id="delete-confirm-dialog-title" className="font-bold text-gray-900 mb-2 text-base">
