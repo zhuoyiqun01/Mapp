@@ -20,9 +20,9 @@ import { EmojiPicker } from './note-editor/EmojiPicker';
 import { DeleteConfirmDialog } from './ui/DeleteConfirmDialog';
 import { MODAL_BACKDROP_MASK_STYLE } from '../utils/map/mapChromeStyle';
 import {
-  hasNavigableGpsCoords,
-  openExternalNavigation
+  hasNavigableGpsCoords
 } from '../utils/map/openExternalNavigation';
+import { ExternalNavigationSheet } from './map/overlays/ExternalNavigationSheet';
 
 interface NoteEditorProps {
   initialNote?: Partial<Note>;
@@ -55,6 +55,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteConfirming, setDeleteConfirming] = useState(false);
+  const [navSheetOpen, setNavSheetOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const [startYear, setStartYear] = useState<number | undefined>(initialNote?.startYear);
@@ -515,11 +516,8 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
               }}
               showNavigateGo={hasNavigableGpsCoords(initialNote?.coords)}
               onNavigateGo={() => {
-                const c = initialNote?.coords;
-                if (!c) return;
-                openExternalNavigation(c.lat, c.lng, {
-                  label: parseNoteContent(initialNote?.text || '').title || undefined
-                });
+                if (!hasNavigableGpsCoords(initialNote?.coords)) return;
+                setNavSheetOpen(true);
               }}
               showLocateGraph={!!(initialNote?.id && onSwitchToGraphView)}
               onLocateGraph={() => {
@@ -688,6 +686,16 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         themeColor={themeColor}
         panelChromeStyle={panelChromeStyle}
       />
+      {hasNavigableGpsCoords(initialNote?.coords) && initialNote?.coords ? (
+        <ExternalNavigationSheet
+          open={navSheetOpen}
+          lat={initialNote.coords.lat}
+          lng={initialNote.coords.lng}
+          label={parseNoteContent(initialNote?.text || '').title || undefined}
+          onClose={() => setNavSheetOpen(false)}
+          themeColor={themeColor}
+        />
+      ) : null}
     </div>
   );
 };

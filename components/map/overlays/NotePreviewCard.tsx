@@ -1,12 +1,13 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ChevronLeft, ChevronRight, Navigation, Pencil } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import type { Note } from '../../../types';
 import { parseNoteContent } from '../../../utils';
 import { noteHasRenderableMapPosition } from '../../../utils/layer/unifiedNoteLayer';
-import { openExternalNavigation } from '../../../utils/map/openExternalNavigation';
+import { hasNavigableGpsCoords } from '../../../utils/map/openExternalNavigation';
 import { chromePanelGhostIconButtonClass } from '../../ui/chromePanelIconButton';
 import { PortalTooltip } from '../../ui/PortalTooltip';
+import { ExternalNavigationSheet } from './ExternalNavigationSheet';
 
 interface NotePreviewCardProps {
   note: Note;
@@ -36,8 +37,11 @@ export const NotePreviewCard: React.FC<NotePreviewCardProps> = ({
   passThrough = false,
   offsetTopPx,
   embedded = false,
+  themeColor,
   onOpenEditor
 }) => {
+  const [navSheetOpen, setNavSheetOpen] = useState(false);
+
   const formatPreviewTitle = (rawText: string): string => {
     const title = parseNoteContent(rawText || '').title || 'Untitled Note';
     return title.replace(/,\s/, '\n');
@@ -57,9 +61,13 @@ export const NotePreviewCard: React.FC<NotePreviewCardProps> = ({
 
   const topPx = offsetTopPx ?? 16;
   const showEdit = Boolean(onOpenEditor) && !passThrough;
-  const showGo = noteHasRenderableMapPosition(note) && !passThrough;
+  const showGo =
+    noteHasRenderableMapPosition(note) &&
+    hasNavigableGpsCoords(note.coords) &&
+    !passThrough;
 
   return (
+    <>
     <div
       data-allow-context-menu
       className={`mapping-preview-selectable ${
@@ -122,9 +130,7 @@ export const NotePreviewCard: React.FC<NotePreviewCardProps> = ({
                   aria-label="Go 外部导航"
                   onClick={(e) => {
                     e.stopPropagation();
-                    openExternalNavigation(note.coords.lat, note.coords.lng, {
-                      label: parseNoteContent(note.text || '').title || undefined
-                    });
+                    setNavSheetOpen(true);
                   }}
                   onPointerDown={(e) => e.stopPropagation()}
                 >
@@ -242,5 +248,16 @@ export const NotePreviewCard: React.FC<NotePreviewCardProps> = ({
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #E5E7EB; border-radius: 10px; }
       `}</style>
     </div>
+    {showGo ? (
+      <ExternalNavigationSheet
+        open={navSheetOpen}
+        lat={note.coords.lat}
+        lng={note.coords.lng}
+        label={parseNoteContent(note.text || '').title || undefined}
+        onClose={() => setNavSheetOpen(false)}
+        themeColor={themeColor}
+      />
+    ) : null}
+    </>
   );
 };
