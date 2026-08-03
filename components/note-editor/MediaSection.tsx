@@ -29,12 +29,12 @@ export const MediaSection: React.FC<MediaSectionProps> = ({
 
   return (
     <section className="flex flex-col shrink-0 border-t border-gray-100/80" aria-label="媒体">
-      <div className="px-4 pt-2 pb-0 flex items-center justify-between gap-2">
+      <div className="px-4 pt-2 pb-1 flex items-center justify-between gap-2">
         <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">媒体</span>
         {moreActionsSlot}
       </div>
       {hasMedia ? (
-        <div className="relative px-4 pt-1.5 pb-2">
+        <div className="relative px-4 pt-1.5 pb-3">
           <div
             className="flex gap-3 overflow-x-auto scrollbar-hide py-2"
             style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' }}
@@ -125,7 +125,7 @@ export const MediaSection: React.FC<MediaSectionProps> = ({
           </div>
         </div>
       ) : (
-        <div className="px-4 pb-2 pt-1 text-[11px] text-gray-400">暂无附件</div>
+        <div className="px-4 pb-3 pt-1 text-[11px] text-gray-400">暂无附件</div>
       )}
     </section>
   );

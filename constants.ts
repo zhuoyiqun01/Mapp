@@ -15,6 +15,9 @@ export const EMOJI_LIST = EMOJI_CATEGORIES['Recent'];
 export const MAP_TILE_URL = "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png";
 export const MAP_TILE_URL_FALLBACK = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 export const MAP_SATELLITE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+/** Esri World Imagery 高缩放下常返回 “Map data not yet available” 占位图；超过此级别用较低清晰度瓦片拉伸，避免空图。 */
+export const MAP_SATELLITE_MAX_NATIVE_ZOOM = 17;
+export const MAP_MAX_ZOOM = 19;
 // 1x1 transparent PNG tile for "blank background" map style.
 // Leaflet will request it for each tile, but the image itself is empty.
 export const MAP_BLANK_TILE_URL =

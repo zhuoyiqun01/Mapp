@@ -11,7 +11,7 @@ import {
   sortNotesByLayerStack
 } from '../utils/layer/unifiedNoteLayer';
 import { ProjectNotesLayerPanel } from './layer/ProjectNotesLayerPanel';
-import { MAP_TILE_URL, MAP_TILE_URL_FALLBACK, MAP_SATELLITE_URL, MAP_ATTRIBUTION, THEME_COLOR, THEME_COLOR_DARK, MAP_STYLE_OPTIONS, PROJECT_OPEN_SLIDE_DURATION_S } from '../constants';
+import { MAP_TILE_URL, MAP_TILE_URL_FALLBACK, MAP_SATELLITE_URL, MAP_ATTRIBUTION, MAP_MAX_ZOOM, THEME_COLOR, THEME_COLOR_DARK, MAP_STYLE_OPTIONS, PROJECT_OPEN_SLIDE_DURATION_S } from '../constants';
 import { useMapPosition } from '@/components/hooks/useMapPosition';
 import { useGeolocation } from '@/components/hooks/useGeolocation';
 import { useImageImport } from '@/components/hooks/useImageImport';
@@ -56,7 +56,7 @@ import { NoteEditor } from './NoteEditor';
 import { generateId } from '../utils';
 import { hexToRgb, isPhotoTakenRecently } from '../utils/map/mapUtils';
 import { calculateImageFingerprint, calculateFingerprintFromBase64 } from '../utils/media/imageProcessing';
-import { loadImage } from '../utils/persistence/storage';
+import { loadImage, getViewPositionCache } from '../utils/persistence/storage';
 import { ImportPreviewDialog } from './ImportPreviewDialog';
 import { buildMapTabExportPayload } from '../utils/map/mapTabExportPayload';
 import { buildStandaloneMapTabHtml } from '../utils/map/mapTabExportHtml';
@@ -453,6 +453,9 @@ export const MapView: React.FC<MapViewProps> = ({
   // Location error retry tracking
   const [hasRetriedLocation, setHasRetriedLocation] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
+  /** Empty-project geolocation arrived after fallback center — one-shot late recenter */
+  const [lateAutoCenter, setLateAutoCenter] = useState<[number, number] | null>(null);
+  const emptyProjectLocateAttemptedRef = useRef(false);
 
   // Current marker index being viewed
 
@@ -509,56 +512,28 @@ export const MapView: React.FC<MapViewProps> = ({
     try {
       setIsLocating(true);
       setHasRetriedLocation(false);
-      setLocationError(null); // Clear any previous errors
+      setLocationError(null);
       console.log('Requesting current location...');
 
-      // Request location
-      await requestLocation();
-
-      // Wait a bit for the location to be set, then navigate
-      setTimeout(() => {
-        if (currentLocation && mapInstance) {
-          console.log('Location obtained, navigating to:', currentLocation);
-          mapInstance.flyTo([currentLocation.lat, currentLocation.lng], 16, {
-            duration: 1.5
-          });
-        } else {
-          console.warn('Location not available after request');
-        }
-        setIsLocating(false);
-      }, 500); // Increased timeout for mobile devices
-
-    } catch (error) {
-      console.log('Location request failed, trying retry...');
-      // If first attempt fails and we haven't retried yet, try again
-      if (!hasRetriedLocation) {
+      let loc = await requestLocation({ requestOrientation: true });
+      if (!loc && !hasRetriedLocation) {
         setHasRetriedLocation(true);
-        // Wait a moment before retry
-        setTimeout(async () => {
-          try {
-            await requestLocation();
-            // If retry succeeds, navigate
-            setTimeout(() => {
-              if (currentLocation && mapInstance) {
-                console.log('Location obtained after retry, navigating to:', currentLocation);
-                mapInstance.flyTo([currentLocation.lat, currentLocation.lng], 16, {
-                  duration: 1.5
-                });
-              }
-              setIsLocating(false);
-            }, 500);
-          } catch (retryError) {
-            // If retry also fails, show error notification
-            console.error('Location request failed after retry:', retryError);
-            setIsLocating(false);
-          }
-        }, 1000); // Wait 1 second before retry
-      } else {
-        console.error('Location request failed:', error);
-        setIsLocating(false);
+        await new Promise((r) => setTimeout(r, 1000));
+        loc = await requestLocation({ requestOrientation: true });
       }
+
+      if (loc && mapInstance) {
+        console.log('Location obtained, navigating to:', loc);
+        mapInstance.flyTo([loc.lat, loc.lng], 16, { duration: 1.5 });
+      } else {
+        console.warn('Location not available after request');
+      }
+    } catch (error) {
+      console.error('Location request failed:', error);
+    } finally {
+      setIsLocating(false);
     }
-  }, [requestLocation, hasRetriedLocation, currentLocation, mapInstance]);
+  }, [requestLocation, hasRetriedLocation, mapInstance, setLocationError]);
 
   // Map position management hook
   const { initialMapPosition, handleMapPositionChange } = useMapPosition({
@@ -569,6 +544,32 @@ export const MapView: React.FC<MapViewProps> = ({
     currentLocation,
     defaultCenter
   });
+
+  // Empty project (no pins / no cache / no nav): prefer current location, then keep fallback
+  useEffect(() => {
+    emptyProjectLocateAttemptedRef.current = false;
+    setLateAutoCenter(null);
+  }, [project.id]);
+
+  useEffect(() => {
+    if (emptyProjectLocateAttemptedRef.current) return;
+    if (navigateToCoords) return;
+    if (mapGeoNotes.length > 0) return;
+    const cached = getViewPositionCache(project.id, 'map');
+    if (cached?.center && cached.zoom) return;
+
+    emptyProjectLocateAttemptedRef.current = true;
+    let cancelled = false;
+    (async () => {
+      // Auto path: do not prompt iOS orientation (needs user gesture); location only
+      const loc = await requestLocation({ requestOrientation: false });
+      if (cancelled || !loc) return;
+      setLateAutoCenter([loc.lat, loc.lng]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [navigateToCoords, mapGeoNotes.length, project.id, requestLocation]);
 
   // Image import management hook
   const {
@@ -975,7 +976,7 @@ export const MapView: React.FC<MapViewProps> = ({
       target?.closest?.('.pre-selected-label-item') ||
       // Clicking a pin should not clear selection (otherwise label may show but edit button won't).
       target?.closest?.('.custom-icon') ||
-      target?.closest?.('.leaflet-marker-icon') ||
+      (target?.closest?.('.leaflet-marker-icon') && !target?.closest?.('.user-location-marker')) ||
       target?.closest?.('.custom-pending-marker')
     ) {
       return;
@@ -1152,7 +1153,7 @@ export const MapView: React.FC<MapViewProps> = ({
         key={project.id}
         center={initialMapPosition?.center || defaultCenter}
         zoom={initialMapPosition?.zoom ?? 16}
-        maxZoom={19}
+        maxZoom={MAP_MAX_ZOOM}
         zoomSnap={0}
         zoomDelta={0.5}
         scrollWheelZoom={false}
@@ -1187,8 +1188,6 @@ export const MapView: React.FC<MapViewProps> = ({
         <TileLayer 
           key={effectiveMapStyle}
           {...tileLayerConfig}
-          maxNativeZoom={19}
-          maxZoom={19}
           tileSize={256}
           zoomOffset={0}
           updateWhenZooming={false}
@@ -1264,6 +1263,9 @@ export const MapView: React.FC<MapViewProps> = ({
         <MapCenterHandler 
           center={initialMapPosition?.center || defaultCenter}
           zoom={initialMapPosition?.zoom ?? 16}
+          allowLateCenterUpdate={lateAutoCenter != null}
+          lateCenter={lateAutoCenter}
+          lateZoom={16}
         />
         
         <TextLabelsLayer
@@ -1309,10 +1311,12 @@ export const MapView: React.FC<MapViewProps> = ({
           labelSize={labelSize}
         />
 
-        {/* User Location Indicator - only show if location permission is granted */}
+        {/* User Location Indicator - visual only; must not block long-press / map gestures */}
         {hasLocationPermission && currentLocation && mapInstance && (
           <Marker
             position={[currentLocation.lat, currentLocation.lng]}
+            interactive={false}
+            keyboard={false}
             icon={L.divIcon({
               className: 'user-location-marker',
               html: `<div style="
@@ -1329,14 +1333,14 @@ export const MapView: React.FC<MapViewProps> = ({
                   height: 48px;
                   border-radius: 50%;
                   background: conic-gradient(
-                    from ${((deviceHeading || 0) - 30) % 360}deg,
+                    from -30deg,
                     transparent 0deg,
                     rgba(${hexToRgb(themeColor)}, 0.3) 0deg,
                     rgba(${hexToRgb(themeColor)}, 0.3) 60deg,
                     transparent 60deg
                   );
                   transform: rotate(${deviceHeading || 0}deg);
-                  transition: transform 0.3s ease;
+                  transition: transform 0.15s ease-out;
                 "></div>
 
                 <!-- Center dot (12px radius) -->
@@ -1355,7 +1359,7 @@ export const MapView: React.FC<MapViewProps> = ({
               iconSize: [48, 48],
               iconAnchor: [24, 24]
             })}
-            zIndexOffset={1000} // Always on top
+            zIndexOffset={1000}
           />
         )}
 
@@ -1487,6 +1491,7 @@ export const MapView: React.FC<MapViewProps> = ({
                           themeColor={themeColor}
                           panelChromeStyle={mapChromeSurface}
                           variant="dock"
+                          flow
                           dockAlign="start"
                           projectId={project.id}
                           merged={mergedMapProjectLayers}
@@ -1625,13 +1630,16 @@ export const MapView: React.FC<MapViewProps> = ({
         />
       )}
 
-      {/* 预览模式选中展示面板 */}
-      {!isUIVisible && (hoveredNote ?? selectedNote) && (
+      {/* 非编辑 / Tab 预览：选中点详情卡（与 Graph 同款，含编辑铅笔） */}
+      {((isUIVisible && !isMapToolbarEditMode && !isEditorOpen && selectedNote) ||
+        (!isUIVisible && (hoveredNote ?? selectedNote))) && (
         <NotePreviewCard
-          note={hoveredNote ?? selectedNote!}
+          note={(isUIVisible ? selectedNote : hoveredNote ?? selectedNote)!}
           currentImageIndex={currentPreviewImageIndex}
           onImageIndexChange={setCurrentPreviewImageIndex}
           chromeSurfaceStyle={mapChromeSurface}
+          themeColor={themeColor}
+          onOpenEditor={isUIVisible ? handleEditNoteFromLabel : undefined}
         />
       )}
 

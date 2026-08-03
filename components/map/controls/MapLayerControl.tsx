@@ -1,9 +1,11 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { Edit3, Save } from 'lucide-react';
 import type { Frame } from '../../../types';
 import type { GraphLayerGroupStandard } from '../../../utils/graph/graphRuntimeCore';
 import { ChromeIconButton } from '../../ui/ChromeIconButton';
 import { LayerToolbarIcon } from '../../ui/LayerToolbarIcon';
+import { useChromeMenuTop } from '../../../utils/ui/chromeMenuPosition';
 
 interface MapLayerControlProps {
   showPanel: boolean;
@@ -23,7 +25,7 @@ interface MapLayerControlProps {
   frameLayerRef: React.RefObject<HTMLDivElement | null>;
   /** 统一节点图层（tag/frame），排在簇描述/簇列表左侧 */
   unifiedNotesLayerSlot?: React.ReactNode;
-  /** 展开面板相对图层按钮：`start`=左边缘对齐（主地图顶栏），`end`=右边缘对齐（右上角工具条等） */
+  /** 展开面板对齐页面左/右缘（与顶栏按钮 margin 一致），不再与图层按钮左右齐平 */
   dropdownAlign?: 'start' | 'end';
   /** 工具栏按钮图标：与图层面板当前 tag/frame 一致 */
   layerGroupStandard?: GraphLayerGroupStandard;
@@ -50,24 +52,17 @@ export const MapLayerControl: React.FC<MapLayerControlProps> = ({
   layerGroupStandard = 'tag'
 }) => {
   const ch = chromeSurfaceStyle;
-  const panelAnchorCls = dropdownAlign === 'start' ? 'left-0' : 'right-0';
-  return (
-  <div className="relative" ref={frameLayerRef}>
-    <ChromeIconButton
-      themeColor={themeColor}
-      chromeSurfaceStyle={ch}
-      chromeHoverBackground={chromeHoverBackground}
-      active={showPanel}
-      pressThemeFlash
-      nonChromeIdleHover="imperative-gray100"
-      onClick={() => onTogglePanel()}
-      tooltip="图层"
-    >
-      <LayerToolbarIcon layerGroupStandard={layerGroupStandard} />
-    </ChromeIconButton>
+  const menuTop = useChromeMenuTop(showPanel, frameLayerRef, 8);
+  const edgeCls =
+    dropdownAlign === 'start' ? 'ui-chrome-menu-page-left' : 'ui-chrome-menu-page-right';
 
-    {showPanel && (
-      <div className={`absolute ${panelAnchorCls} top-full flex gap-2 items-start pointer-events-none mt-2`}>
+  const panel =
+    showPanel && menuTop != null ? (
+      <div
+        data-map-layer-chrome-panel
+        className={`fixed z-[2000] ${edgeCls} flex gap-2 items-start pointer-events-none`}
+        style={{ top: menuTop }}
+      >
         {unifiedNotesLayerSlot ? (
           <div
             className="pointer-events-auto shrink-0"
@@ -131,7 +126,24 @@ export const MapLayerControl: React.FC<MapLayerControlProps> = ({
           </div>
         )}
       </div>
-    )}
+    ) : null;
+
+  return (
+  <div className="relative" ref={frameLayerRef}>
+    <ChromeIconButton
+      themeColor={themeColor}
+      chromeSurfaceStyle={ch}
+      chromeHoverBackground={chromeHoverBackground}
+      active={showPanel}
+      pressThemeFlash
+      nonChromeIdleHover="imperative-gray100"
+      onClick={() => onTogglePanel()}
+      tooltip="图层"
+    >
+      <LayerToolbarIcon layerGroupStandard={layerGroupStandard} />
+    </ChromeIconButton>
+
+    {panel ? createPortal(panel, document.body) : null}
   </div>
   );
 };

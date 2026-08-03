@@ -3,14 +3,14 @@ import {
   DEFAULT_GRAPH_STYLESHEET_SIZING
 } from './utils/graph/graphData';
 import { wireStandaloneHighlightChromeLabels } from './utils/graph/graphHighlightChromeLabels';
+import { wireStandaloneGraphChrome } from './utils/graph/graphStandaloneChrome';
 import {
   attachBoardlikeWheelZoom,
   attachGraphResizeObserver,
+  applyGraphDualLayerNodeVisibility,
   applyGraphLayerNodeVisibility,
   applyGraphNodeStackZIndex,
   decodeGraphPayloadFromBase64,
-  scheduleGraphResizeAndFit,
-  wireStandaloneGraphControls,
   wireStandaloneGraphInteractions
 } from './utils/graph/graphRuntimeCore';
 import {
@@ -54,8 +54,15 @@ function main(): void {
   });
   attachBoardlikeWheelZoom(cy);
 
-  // 保留导出时的 x,y：不重跑布局
-  if (payload.graphLayers?.hidden?.length) {
+  // 保留导出时的 x,y：不重跑布局；显隐与 App 一致（标签层 + 簇层）
+  if (payload.graphFrameLayers != null) {
+    applyGraphDualLayerNodeVisibility(
+      cy,
+      payload.graphLayers?.hidden ?? [],
+      payload.graphFrameLayers.hidden ?? [],
+      payload.graphLayers?.tagVisibilityLogic ?? 'or'
+    );
+  } else if (payload.graphLayers?.hidden?.length) {
     applyGraphLayerNodeVisibility(
       cy,
       payload.graphLayers.hidden,
@@ -72,19 +79,18 @@ function main(): void {
   applyGraphHighlightLabelScreenSize(cy, { nodeSize }, { opacity: chromeOpacity, blurPx: chromeBlurPx });
 
   attachGraphResizeObserver(cy, container);
-  scheduleGraphResizeAndFit(cy);
-  wireStandaloneGraphControls(cy, payload, boot.safeName);
 
   let refreshChromeLabels: (() => void) | null = null;
+  const chromeLabelOpts = {
+    themeColor: payload.themeColor,
+    nodeSize,
+    chromeOpacity,
+    chromeBlurPx,
+    host: stage as HTMLElement | null,
+    labelFontPx: payload.labelFontPx ?? DEFAULT_GRAPH_STYLESHEET_SIZING.labelFontPx
+  };
   if (chromeLayer) {
-    refreshChromeLabels = wireStandaloneHighlightChromeLabels(cy, chromeLayer, {
-      themeColor: payload.themeColor,
-      nodeSize,
-      chromeOpacity,
-      chromeBlurPx,
-      host: stage,
-      labelFontPx: payload.labelFontPx ?? DEFAULT_GRAPH_STYLESHEET_SIZING.labelFontPx
-    });
+    refreshChromeLabels = wireStandaloneHighlightChromeLabels(cy, chromeLayer, chromeLabelOpts);
   }
 
   wireStandaloneGraphInteractions(
@@ -95,6 +101,12 @@ function main(): void {
     () => refreshChromeLabels?.()
   );
 
+  // 预设应用与 fit 在 chrome 内完成（有预设时按 active 点位布局，避免先 fit 成默认排布）
+  wireStandaloneGraphChrome(cy, payload, {
+    onRefreshChromeLabels: () => refreshChromeLabels?.(),
+    chromeLabelOpts
+  });
+
   // 视口变化时校正高亮边标签屏上字号
   let labelSizeRaf: number | null = null;
   cy.on('viewport', () => {
@@ -104,8 +116,8 @@ function main(): void {
       if (cy.destroyed?.()) return;
       applyGraphHighlightLabelScreenSize(
         cy,
-        { nodeSize },
-        { opacity: chromeOpacity, blurPx: chromeBlurPx }
+        { nodeSize: chromeLabelOpts.nodeSize, labelFontPx: chromeLabelOpts.labelFontPx },
+        { opacity: chromeLabelOpts.chromeOpacity, blurPx: chromeLabelOpts.chromeBlurPx }
       );
     });
   });

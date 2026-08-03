@@ -1023,10 +1023,14 @@ export default function App() {
       return target instanceof Element && !!target.closest('.leaflet-container');
     };
 
+    const isInsideBoardView = (target: EventTarget | null): boolean => {
+      return target instanceof Element && !!target.closest('#board-view-container');
+    };
+
     const preventZoom = (e: TouchEvent) => {
       if (e.touches.length > 1) {
-        // Leaflet 双指缩放依赖 touch 序列；全局 preventDefault 会废掉 TouchZoom。
-        if (isInsideLeafletMap(e.target)) return;
+        // Leaflet / Board 双指缩放依赖 touch 序列；全局 preventDefault 会废掉手势。
+        if (isInsideLeafletMap(e.target) || isInsideBoardView(e.target)) return;
         e.preventDefault();
       }
     };

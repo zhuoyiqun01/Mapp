@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ChevronDown,
   ChevronLeft,
@@ -27,7 +28,12 @@ import { SettingsCompactSlider } from '../ui/SettingsCompactSlider';
 import { TagAddPanel } from '../ui/TagAddPanel';
 import { NoteTimeRangeControl } from '../note-editor/NoteTimeRangeControl';
 import { TagLayerHierarchyList } from './TagLayerHierarchyList';
-import { insertLayerOrderRelative } from '../../utils/layer/tagHierarchy';
+import {
+  emojiFromLayerTagKey,
+  emojiToLayerTagKey,
+  insertLayerOrderRelative
+} from '../../utils/layer/tagHierarchy';
+import { useChromeMenuTop } from '../../utils/ui/chromeMenuPosition';
 
 function insertRelative(order: string[], fromKey: string, toKey: string, place: 'before' | 'after'): string[] {
   return insertLayerOrderRelative(order, fromKey, toKey, place);
@@ -62,8 +68,15 @@ export interface ProjectNotesLayerPanelProps {
   };
   /** Table 等：嵌入滚动区，不用 absolute 下拉 */
   embed?: boolean;
-  /** Map：`start` 与图层按钮左对齐，`end` 与按钮右对齐 */
+  /**
+   * 由父级负责定位（如顶栏 absolute left-0 / MapLayerControl 门户内），
+   * 面板自身不再 absolute/fixed。
+   */
+  flow?: boolean;
+  /** 非 flow 时：`start` 对齐页面左侧，`end` 对齐页面右侧（与顶栏按钮 margin 一致） */
   dockAlign?: 'start' | 'end';
+  /** flow=false 时用于计算菜单 top 的锚点（通常为图层按钮容器） */
+  menuAnchorRef?: React.RefObject<HTMLElement | null>;
   /** Table：点位记录不显示显隐，展示所有 tag + 时间；双击组名重命名在各视图均可用 */
   tableMode?: boolean;
   /** 重命名 frame（更新 project.frames.title）；缺省时可用 onUpdateFrame */
@@ -90,7 +103,9 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
   onActivateNote,
   boardVariantToggles,
   embed = false,
+  flow = false,
   dockAlign = 'start',
+  menuAnchorRef,
   tableMode = false,
   onUpdateFrameTitle,
   onUpdateFrame,
@@ -423,7 +438,15 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
           }
           return t;
         });
-        if (changed) updatedNotes.push({ ...note, tags: nextTags });
+        // emoji 图层键：`【emoji】 · 🔥` ↔ note.emoji
+        let nextEmoji = note.emoji;
+        const currentEmojiKey = emojiToLayerTagKey(note.emoji ?? '');
+        if (currentEmojiKey === oldK) {
+          const nextFromKey = emojiFromLayerTagKey(newK);
+          nextEmoji = nextFromKey ?? '';
+          changed = true;
+        }
+        if (changed) updatedNotes.push({ ...note, tags: nextTags, emoji: nextEmoji });
       }
 
       if (updatedNotes.length > 0) {
@@ -528,20 +551,31 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
 
   const weightSideOpen = weightOpenKey != null;
   const weightPanelKey = weightOpenKey;
+  const pageMenuOpen = !embed && !flow;
+  const fallbackAnchorRef = useRef<HTMLElement | null>(null);
+  const menuTop = useChromeMenuTop(
+    pageMenuOpen,
+    (menuAnchorRef as React.RefObject<HTMLElement | null> | undefined) ?? fallbackAnchorRef,
+    8
+  );
+  const pageEdgeCls = dockAlign === 'end' ? 'ui-chrome-menu-page-right' : 'ui-chrome-menu-page-left';
 
   const posCls = embed
     ? 'relative z-[40] my-2'
-    : dockAlign === 'end'
-      ? 'absolute right-0 left-auto top-full z-[2000]'
-      : 'absolute left-0 top-full z-[2000]';
+    : flow
+      ? 'relative z-[2000]'
+      : `fixed z-[2000] ${pageEdgeCls}`;
 
-  return (
+  const panelBody = (
     <div
       data-graph-top-left-panel
-      className={`${posCls} mt-2 flex max-h-[min(24rem,70vh)] overflow-hidden rounded-xl border border-gray-100/80 shadow-xl ${
+      className={`${posCls} ${embed ? 'mt-2' : ''} flex max-h-[min(24rem,70vh)] overflow-hidden rounded-xl border border-gray-100/80 shadow-xl ${
         embed ? 'w-full max-w-xl' : weightSideOpen ? 'w-[min(36rem,calc(100vw-1rem))]' : 'w-[min(20rem,calc(100vw-2rem))]'
       }`}
-      style={panelChromeStyle ?? { backgroundColor: 'rgba(255,255,255,0.96)' }}
+      style={{
+        ...(panelChromeStyle ?? { backgroundColor: 'rgba(255,255,255,0.96)' }),
+        ...(pageMenuOpen && menuTop != null ? { top: menuTop } : undefined)
+      }}
       onPointerDown={(e) => e.stopPropagation()}
       onTouchStart={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
@@ -1150,4 +1184,8 @@ export const ProjectNotesLayerPanel: React.FC<ProjectNotesLayerPanelProps> = ({
       )}
     </div>
   );
+
+  if (embed || flow) return panelBody;
+  if (menuTop == null) return null;
+  return createPortal(panelBody, document.body);
 };

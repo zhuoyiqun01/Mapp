@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
 import { Note, Frame, Connection, type GraphLayerState, type Project } from '../types';
 import { mergeGraphLayerState, type GraphLayerGroupStandard } from '../utils/graph/graphRuntimeCore';
-import { isNoteVisibleInUnifiedLayer } from '../utils/layer/unifiedNoteLayer';
+import { isNoteVisibleInUnifiedLayer, noteTagLabels } from '../utils/layer/unifiedNoteLayer';
 import { ProjectNotesLayerPanel } from './layer/ProjectNotesLayerPanel';
 import { NoteEditor } from './NoteEditor';
 import { Square, X, Check, Minus, Move, Hash, Plus, FileJson, Locate, Settings } from 'lucide-react';
@@ -162,7 +162,7 @@ function collectTagLabelsFromSelection(ids: Set<string>, allNotes: Note[]): Set<
   const labels = new Set<string>();
   allNotes.forEach((n) => {
     if (!ids.has(n.id)) return;
-    (n.tags || []).forEach((t) => labels.add(t.label));
+    noteTagLabels(n).forEach((l) => labels.add(l));
   });
   return labels;
 }
@@ -177,18 +177,19 @@ function collectSortedUniqueTagLabelsFromSelection(
 }
 
 function selectionHasUntaggedNotes(ids: Set<string>, allNotes: Note[]): boolean {
-  return allNotes.some((n) => ids.has(n.id) && !(n.tags && n.tags.length));
+  return allNotes.some((n) => ids.has(n.id) && noteTagLabels(n).length === 0);
 }
 
-/** 勾选「无标签」或任一 label（并集） */
+/** 勾选「无标签」或任一 label（并集；含 emoji） */
 function noteMatchesBoardTagFilter(
   note: Note,
   labels: Set<string>,
   includeUntagged: boolean
 ): boolean {
-  const untagged = !(note.tags && note.tags.length);
+  const noteLabels = noteTagLabels(note);
+  const untagged = noteLabels.length === 0;
   if (includeUntagged && untagged) return true;
-  if (labels.size > 0 && (note.tags || []).some((t) => labels.has(t.label))) return true;
+  if (labels.size > 0 && noteLabels.some((l) => labels.has(l))) return true;
   return false;
 }
 
@@ -352,7 +353,11 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
     // This will be recalculated when container is ready
     return { x: 0, y: 0, scale: 1 };
   });
+  const transformRef = useRef(transform);
+  transformRef.current = transform;
   const [isPanning, setIsPanning] = useState(false);
+  const isPanningRef = useRef(false);
+  isPanningRef.current = isPanning;
   
   // Note position selection state
   const [isSelectingNotePosition, setIsSelectingNotePosition] = useState(false);
@@ -388,6 +393,7 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
   const [showLayerPanel, setShowLayerPanel] = useState(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
+  const boardLayerBtnRef = useRef<HTMLDivElement>(null);
 
   const projectFull = project as Project | undefined;
   const effectiveConnections = useMemo(
@@ -2179,170 +2185,151 @@ const createNoteAtCenter = () => {
   );
 
   // 处理触摸双指缩放
-  const touchStartRef = useRef<{ 
-    distance: number; 
-    scale: number; 
-    centerX: number; 
+  const touchStartRef = useRef<{
+    distance: number;
+    scale: number;
+    centerX: number;
     centerY: number;
     transformX: number;
     transformY: number;
   } | null>(null);
 
-  // 跟踪上一次的距离和时间，用于计算速度
-  const lastTouchMoveRef = useRef<{ distance: number; time: number } | null>(null);
-  
   const [isZooming, setIsZooming] = useState(false);
-  
+  const isZoomingRef = useRef(false);
+  isZoomingRef.current = isZooming;
+
   // Use native event listeners for touch events to allow preventDefault
+  // Stable deps: read transform via transformRef so pinch does not rebind every frame.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
+    const cancelSingleFingerPan = () => {
+      if (!isPanningRef.current) return;
+      isPanningRef.current = false;
+      setIsPanning(false);
+      setIsDraggingBackground(false);
+      lastMousePos.current = null;
+      panStartPos.current = null;
+      try {
+        // Release any active pointer captures on the board container
+        const captures = (container as HTMLElement & { hasPointerCapture?: (id: number) => boolean });
+        // Best-effort: clear common pointer ids if still captured
+        for (let id = 0; id < 8; id++) {
+          if (typeof captures.hasPointerCapture === 'function' && captures.hasPointerCapture(id)) {
+            captures.releasePointerCapture(id);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    };
+
     const handleTouchStart = (e: TouchEvent) => {
-      // 如果是双指，取消所有长按检测
+      // 如果是双指，取消所有长按检测与单指平移
       if (e.touches.length === 2) {
         e.preventDefault(); // 禁用浏览器的双指缩放
-        setIsZooming(true); // 标记正在缩放
-        
+        cancelSingleFingerPan();
+        isZoomingRef.current = true;
+        setIsZooming(true);
+
         // 取消便利贴的长按检测
         if (longPressTimerRef.current) {
           clearTimeout(longPressTimerRef.current);
           longPressTimerRef.current = null;
         }
         longPressNoteIdRef.current = null;
-        
+
         const touch1 = e.touches[0];
         const touch2 = e.touches[1];
         const distance = Math.sqrt(
-          Math.pow(touch2.clientX - touch1.clientX, 2) + 
-          Math.pow(touch2.clientY - touch1.clientY, 2)
+          Math.pow(touch2.clientX - touch1.clientX, 2) +
+            Math.pow(touch2.clientY - touch1.clientY, 2)
         );
-        // 计算两指中心点（相对于容器）
         const centerX = (touch1.clientX + touch2.clientX) / 2;
         const centerY = (touch1.clientY + touch2.clientY) / 2;
-        
-        if (container) {
-          const rect = container.getBoundingClientRect();
-          const relativeCenterX = centerX - rect.left;
-          const relativeCenterY = centerY - rect.top;
-          
-          touchStartRef.current = { 
-            distance, 
-            scale: transform.scale,
-            centerX: relativeCenterX,
-            centerY: relativeCenterY,
-            transformX: transform.x,
-            transformY: transform.y
-          };
+        const rect = container.getBoundingClientRect();
+        const relativeCenterX = centerX - rect.left;
+        const relativeCenterY = centerY - rect.top;
+        const t = transformRef.current;
 
-          // 初始化速度跟踪
-          lastTouchMoveRef.current = {
-            distance,
-            time: Date.now()
-          };
-        }
+        touchStartRef.current = {
+          distance,
+          scale: t.scale,
+          centerX: relativeCenterX,
+          centerY: relativeCenterY,
+          transformX: t.x,
+          transformY: t.y
+        };
       }
     };
-    
+
     const handleTouchMove = (e: TouchEvent) => {
-      if (e.touches.length === 2 && touchStartRef.current && container) {
+      if (e.touches.length === 2 && touchStartRef.current) {
         e.preventDefault();
-        // 阻止长按检测
         if (longPressTimerRef.current) {
           clearTimeout(longPressTimerRef.current);
           longPressTimerRef.current = null;
         }
         longPressNoteIdRef.current = null;
-        
+
         const touch1 = e.touches[0];
         const touch2 = e.touches[1];
         const distance = Math.sqrt(
-          Math.pow(touch2.clientX - touch1.clientX, 2) + 
-          Math.pow(touch2.clientY - touch1.clientY, 2)
+          Math.pow(touch2.clientX - touch1.clientX, 2) +
+            Math.pow(touch2.clientY - touch1.clientY, 2)
         );
 
-        // 计算速度（距离变化率）
-        let scaleRatio = distance / touchStartRef.current.distance;
-        const currentTime = Date.now();
+        const start = touchStartRef.current;
+        const scaleRatio = distance / start.distance;
+        const newScale = Math.min(Math.max(0.2, start.scale * scaleRatio), 4);
 
-        if (lastTouchMoveRef.current) {
-          const timeDelta = currentTime - lastTouchMoveRef.current.time;
-          const distanceDelta = distance - lastTouchMoveRef.current.distance;
-          
-          // 如果时间间隔很小（小于16ms，约60fps），使用速度敏感缩放
-          if (timeDelta > 0 && timeDelta < 100) {
-            // 计算距离变化速度（像素/毫秒）
-            const speed = Math.abs(distanceDelta) / timeDelta;
-            
-            // 速度越快，缩放因子越大（最大2倍加速）
-            // 速度阈值：10像素/毫秒为基准速度
-            const speedFactor = Math.min(1 + (speed / 10), 2);
-            
-            // 应用速度因子：放大时加速放大，缩小时加速缩小
-            if (distanceDelta > 0) {
-              // 放大：增加缩放比例
-              scaleRatio = 1 + (scaleRatio - 1) * speedFactor;
-            } else {
-              // 缩小：减少缩放比例
-              scaleRatio = 1 + (scaleRatio - 1) * speedFactor;
-            }
-          }
-        }
-
-        // 更新上一次的距离和时间
-        lastTouchMoveRef.current = {
-          distance,
-          time: currentTime
-        };
-
-        const newScale = Math.min(Math.max(0.2, touchStartRef.current.scale * scaleRatio), 4);
-        
-        // 计算当前两指中心点（相对于容器）
+        // Anchor at current two-finger midpoint (world point under fingers stays put)
         const currentCenterX = (touch1.clientX + touch2.clientX) / 2;
         const currentCenterY = (touch1.clientY + touch2.clientY) / 2;
         const rect = container.getBoundingClientRect();
         const relativeCenterX = currentCenterX - rect.left;
         const relativeCenterY = currentCenterY - rect.top;
-        
-        // 将当前两指中心点转换为世界坐标（使用当前的 transform）
-        // 这样缩放就会以当前两指中心为中心
-        const worldX = (relativeCenterX - transform.x) / transform.scale;
-        const worldY = (relativeCenterY - transform.y) / transform.scale;
-        
-        // 计算新的 transform，使得同一个世界坐标点仍然在当前两指中心位置
-        const newX = relativeCenterX - worldX * newScale;
-        const newY = relativeCenterY - worldY * newScale;
-        
-        setTransform({ 
-          x: newX, 
-          y: newY, 
-          scale: newScale 
-        });
+
+        const t = transformRef.current;
+        const liveWorldX = (relativeCenterX - t.x) / t.scale;
+        const liveWorldY = (relativeCenterY - t.y) / t.scale;
+        const newX = relativeCenterX - liveWorldX * newScale;
+        const newY = relativeCenterY - liveWorldY * newScale;
+
+        const next = { x: newX, y: newY, scale: newScale };
+        transformRef.current = next;
+        setTransform(next);
       }
     };
-    
+
     const handleTouchEnd = (e: TouchEvent) => {
       if (e.touches.length < 2) {
+        if (touchStartRef.current) {
+          const t = transformRef.current;
+          scheduleZoomTransformPersist(t.x, t.y, t.scale);
+        }
         touchStartRef.current = null;
-        lastTouchMoveRef.current = null; // 清理速度跟踪
         // 延迟重置缩放状态，防止触发误点击
         setTimeout(() => {
+          isZoomingRef.current = false;
           setIsZooming(false);
         }, 100);
       }
     };
 
-    // Add event listeners with { passive: false } to allow preventDefault
     container.addEventListener('touchstart', handleTouchStart, { passive: false });
     container.addEventListener('touchmove', handleTouchMove, { passive: false });
     container.addEventListener('touchend', handleTouchEnd, { passive: false });
+    container.addEventListener('touchcancel', handleTouchEnd, { passive: false });
 
     return () => {
       container.removeEventListener('touchstart', handleTouchStart);
       container.removeEventListener('touchmove', handleTouchMove);
       container.removeEventListener('touchend', handleTouchEnd);
+      container.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, [transform, longPressTimerRef, longPressNoteIdRef]);
+  }, [scheduleZoomTransformPersist]);
 
   // Add wheel event listener with passive: false to allow preventDefault（与普通滚轮缩放一致，以指针为中心）
   useEffect(() => {
@@ -2615,10 +2602,15 @@ const createNoteAtCenter = () => {
       }
       
       if (!isPanning || !lastMousePos.current) return;
+      if (isZoomingRef.current) return;
       e.preventDefault(); // 阻止浏览器默认行为
       const dx = e.clientX - lastMousePos.current.x;
       const dy = e.clientY - lastMousePos.current.y;
-      setTransform(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
+      setTransform(prev => {
+        const next = { ...prev, x: prev.x + dx, y: prev.y + dy };
+        transformRef.current = next;
+        return next;
+      });
       lastMousePos.current = { x: e.clientX, y: e.clientY };
   };
 
@@ -5042,7 +5034,7 @@ const createNoteAtCenter = () => {
                   <Settings size={18} className="sm:w-5 sm:h-5" />
                 </ChromeIconButton>
                 {!workspaceEditMode && (
-                <div className="relative">
+                <div className="relative" ref={boardLayerBtnRef}>
                     <ChromeIconButton
                         themeColor={themeColor}
                         chromeSurfaceStyle={ch}
@@ -5064,6 +5056,7 @@ const createNoteAtCenter = () => {
                             panelChromeStyle={panelChromeStyle}
                             variant="dock"
                             dockAlign="start"
+                            menuAnchorRef={boardLayerBtnRef}
                             projectId={projectId ?? ''}
                             merged={mergedProjectBoardLayers}
                             layerGroupStandard={graphLayerGroupStandard}

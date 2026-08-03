@@ -2,13 +2,17 @@ import type { Core, ElementDefinition } from 'cytoscape';
 import type { Connection, Frame, Note, Project } from '../../types';
 import { parseNoteContent } from '../../utils';
 import { DEFAULT_MAP_UI_CHROME_BLUR_PX, DEFAULT_MAP_UI_CHROME_OPACITY } from '../map/mapChromeStyle';
-import { GRAPH_UNTAGGED_TAG_GROUP, mergeGraphLayerState } from './graphRuntimeCore';
+import { mergeGraphLayerState } from './graphRuntimeCore';
+import { noteTagLabels, noteTagLayerGroupKey } from '../layer/unifiedNoteLayer';
 import {
+  buildGraphNodeColorLegendItems,
   GRAPH_CLUSTER_BASIS_FRAME,
   noteColorForClusterBasis,
   normalizeGraphClusterBasis,
-  type GraphClusterBasis
+  type GraphClusterBasis,
+  type GraphNodeColorLegendItem
 } from './graphClusterBasis';
+import type { GraphViewPreset } from './graphPresets';
 
 // Cytoscape 的 style stylesheet 类型在当前工具链下可能不可用，这里用宽类型避免无关类型检查阻塞。
 type Stylesheet = any[];
@@ -132,10 +136,11 @@ function noteLabel(note: Note): string {
   return raw.length > 48 ? `${raw.slice(0, 45)}…` : raw;
 }
 
-/** 与关联面板检索一致，供顶栏节点定位等复用 */
+/** 与关联面板检索一致，供顶栏节点定位等复用（含 emoji / 标签） */
 export function graphNoteSearchLabel(note: Note): string {
   const short = graphNoteShortTitle(note.text || '');
-  const raw = `${note.emoji || ''}${short}`.trim();
+  const layerTags = noteTagLabels(note).join(' ');
+  const raw = `${short} ${layerTags}`.trim();
   return raw || '便签';
 }
 
@@ -307,8 +312,7 @@ export function buildGraphElements(
   stackOrder.forEach((n, i) => stackZById.set(n.id, 2 + i));
 
   const nodes: ElementDefinition[] = notes.map((note) => {
-      const rawTag = note.tags?.[0]?.label?.trim() ?? '';
-      const tagGroup = rawTag !== '' ? rawTag : GRAPH_UNTAGGED_TAG_GROUP;
+      const tagGroup = noteTagLayerGroupKey(note);
       const rawTagLayerW = Number(tagLayerWeights?.[tagGroup] ?? 0.5);
       const tagLayerW = Math.min(
         1,
@@ -328,6 +332,7 @@ export function buildGraphElements(
       const nsFav = Math.round(ns * favScale * 100) / 100;
       const nsCore = Math.round(ns * coreScale * 100) / 100;
       const nsFavCore = Math.round(ns * favScale * coreScale * 100) / 100;
+      const layerTagLabels = noteTagLabels(note);
       return {
         data: {
           id: note.id,
@@ -347,10 +352,8 @@ export function buildGraphElements(
           nodeSizeFavCore: nsFavCore,
           /** 图谱「按标签分组」用：无首个标签时归入 GRAPH_UNTAGGED_TAG_GROUP */
           tagGroup,
-          /** 全部标签（显隐：任一未隐藏则显示） */
-          tagLabels: (note.tags ?? [])
-            .map((t) => String(t.label ?? '').trim())
-            .filter((l) => l !== ''),
+          /** 全部标签（含 emoji；显隐：任一未隐藏则显示） */
+          tagLabels: layerTagLabels,
           /**
            * 单簇归属（旧多簇取第一个）
            */
@@ -370,7 +373,7 @@ export function buildGraphElements(
           frameGroup: String(
             note.groupIds?.[0] ?? note.groupId ?? note.groupNames?.[0] ?? note.groupName ?? ''
           ).trim(),
-          tagHint: note.tags?.map((t) => t.label).join(' · ') || '',
+          tagHint: layerTagLabels.join(' · ') || '',
           tagLayerNorm,
           favorite: note.isFavorite ? 'yes' : 'no',
           graphLinked: linkedIds.has(note.id) ? 'yes' : 'no'
@@ -1215,6 +1218,15 @@ function buildNotePreviewsFromNotes(notes: Note[]): Record<string, GraphNotePrev
   return m;
 }
 
+/** 独立页图层面板便签条目 @deprecated 展示页已改用 legendItems */
+export interface GraphExportLayerNote {
+  id: string;
+  title: string;
+  tagLabels: string[];
+  frameGroups: string[];
+  layerItemHidden?: boolean;
+}
+
 export interface GraphExportPayload {
   version: 1;
   app: 'mapp-graph-export';
@@ -1227,9 +1239,13 @@ export interface GraphExportPayload {
     | ElementDefinition[];
   /** 独立网页内嵌样式（与主应用一致） */
   stylesheet: Stylesheet;
-  /** 独立页环形/标签网格布局与图层权重一致 */
+  /** 标签图层（显隐 / 权重）；独立页与簇层同时生效 */
   graphLayers?: import('../../types').GraphLayerState;
-  /** 独立页圆环/时间轴的分组标准：标签或簇（frame） */
+  /** 簇图层（显隐 / 权重） */
+  graphFrameLayers?: import('../../types').GraphLayerState;
+  /**
+   * @deprecated 独立页已改为双层显隐；保留字段兼容旧导出 JSON
+   */
   graphLayerGroupStandard?: 'tag' | 'frame';
   /** 独立页时间线纵轴聚类强度（0～1；默认 0.8） */
   graphTimeAxisWeightBias?: number;
@@ -1249,6 +1265,18 @@ export interface GraphExportPayload {
   nodeSize?: number;
   /** 空闲节点标签字号 */
   labelFontPx?: number;
+  /** 连线粗细基数 */
+  edgeWeight?: number;
+  /** 边标签字号 */
+  edgeLabelFontPx?: number;
+  /** 连线是否曲线 */
+  edgeCurve?: boolean;
+  /** 左下角节点色图例（导出时顺序与 App 一致） */
+  legendItems?: GraphNodeColorLegendItem[];
+  /** 临时图谱预设（点位 + 颜色 + 图例）；演示页可切换 */
+  presets?: GraphViewPreset[];
+  /** 导出时激活的预设 id */
+  activePresetId?: string | null;
   /** 关联 From/To 筛选用连线副本 */
   connections?: Array<{
     id: string;
@@ -1258,6 +1286,7 @@ export interface GraphExportPayload {
     arrow?: Connection['arrow'];
     fromArrow?: Connection['fromArrow'];
     toArrow?: Connection['toArrow'];
+    weight?: number;
   }>;
 }
 
@@ -1265,6 +1294,10 @@ export type BuildGraphExportPayloadOpts = {
   chromeOpacity?: number;
   chromeBlurPx?: number;
   chainLength?: number;
+  presets?: GraphViewPreset[];
+  activePresetId?: string | null;
+  /** App 内预设覆盖的图例（优先于现场重算） */
+  legendItemsOverride?: GraphNodeColorLegendItem[] | null;
 };
 
 export function buildGraphExportPayload(
@@ -1273,11 +1306,14 @@ export function buildGraphExportPayload(
   cy: Core,
   opts?: BuildGraphExportPayloadOpts
 ): GraphExportPayload {
+  const tagLayers = mergeGraphLayerState(project.notes || [], project.graphLayers ?? null, 'tag');
+  const frameLayers = mergeGraphLayerState(
+    project.notes || [],
+    project.graphFrameLayers ?? null,
+    'frame'
+  );
+  /** 旧字段：仅兼容；独立页启动优先双层 */
   const standard = project.graphLayerStandard ?? 'tag';
-  const activeGraphLayers =
-    standard === 'frame'
-      ? mergeGraphLayerState(project.notes || [], project.graphFrameLayers ?? null, 'frame')
-      : mergeGraphLayerState(project.notes || [], project.graphLayers ?? null, 'tag');
 
   const nodeSize = project.graphNodeSize ?? DEFAULT_GRAPH_STYLESHEET_SIZING.nodeSize;
   const chrome: GraphStylesheetChrome = {
@@ -1300,6 +1336,20 @@ export function buildGraphExportPayload(
     weight: clampConnectionWeight(c.weight)
   }));
 
+  const legendItems =
+    opts?.legendItemsOverride && opts.legendItemsOverride.length > 0
+      ? opts.legendItemsOverride
+      : buildGraphNodeColorLegendItems({
+          notes: project.notes || [],
+          themeColor,
+          frames: project.frames,
+          clusterBasis: project.graphClusterBasis,
+          tagLayerOrder: tagLayers.order,
+          frameLayerOrder: frameLayers.order
+        });
+
+  const presets = (opts?.presets ?? []).filter((p) => p && typeof p.id === 'string');
+
   return {
     version: 1,
     app: 'mapp-graph-export',
@@ -1318,7 +1368,8 @@ export function buildGraphExportPayload(
       chrome,
       { edgeCurve: project.graphEdgeCurve !== false }
     ),
-    graphLayers: activeGraphLayers,
+    graphLayers: tagLayers,
+    graphFrameLayers: frameLayers,
     graphLayerGroupStandard: standard,
     graphTimeAxisWeightBias:
       project.graphTimeAxisWeightBias ?? DEFAULT_GRAPH_TIME_AXIS_WEIGHT_BIAS,
@@ -1330,6 +1381,12 @@ export function buildGraphExportPayload(
     chainLength,
     nodeSize,
     labelFontPx: project.graphLabelFontPx ?? DEFAULT_GRAPH_STYLESHEET_SIZING.labelFontPx,
+    edgeWeight: project.graphEdgeWeight ?? DEFAULT_GRAPH_STYLESHEET_SIZING.edgeWeight,
+    edgeLabelFontPx: project.graphEdgeLabelFontPx ?? DEFAULT_GRAPH_STYLESHEET_SIZING.edgeLabelFontPx,
+    edgeCurve: project.graphEdgeCurve !== false,
+    legendItems,
+    presets: presets.length > 0 ? presets : undefined,
+    activePresetId: opts?.activePresetId ?? null,
     connections
   };
 }

@@ -188,7 +188,8 @@ export function runMapTabStandalone(L: any, marked: MarkedLike, payload: MapTabE
   const map = L.map('map', { zoomControl: true, scrollWheelZoom: true }).setView(payload.center, payload.zoom);
   L.tileLayer(payload.tileUrl, {
     attribution: payload.tileAttribution || '',
-    maxZoom: 19,
+    maxZoom: payload.maxZoom ?? 19,
+    maxNativeZoom: payload.maxNativeZoom ?? payload.maxZoom ?? 19,
     subdomains: 'abcd'
   }).addTo(map);
 

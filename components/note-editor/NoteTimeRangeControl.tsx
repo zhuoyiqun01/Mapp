@@ -172,6 +172,7 @@ export const NoteTimeRangeControl: React.FC<NoteTimeRangeControlProps> = ({
         createPortal(
           <div
             ref={timePanelPortalRef}
+            data-note-time-range-panel
             className={`flex flex-nowrap items-center gap-1.5 rounded-xl border border-gray-100/80 p-2 shadow-lg whitespace-nowrap ${panelChromeStyle ? '' : 'bg-white'}`}
             style={{
               ...(panelChromeStyle || {}),

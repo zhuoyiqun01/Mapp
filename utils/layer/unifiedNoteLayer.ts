@@ -1,6 +1,7 @@
 import type { Frame, GraphLayerState, Note, TagVisibilityLogic } from '../../types';
 import { GRAPH_UNTAGGED_TAG_GROUP } from '../graph/graphRuntimeCore';
 import type { GraphLayerGroupStandard } from '../graph/graphRuntimeCore';
+import { emojiToLayerTagKey } from './tagHierarchy';
 
 export function normalizeTagVisibilityLogic(raw?: string | null): TagVisibilityLogic {
   return raw === 'and' ? 'and' : 'or';
@@ -35,12 +36,20 @@ export function noteTagLabels(note: Note): string[] {
     seen.add(l);
     out.push(l);
   }
+  // emoji 归入父集【emoji】（`【emoji】 · 🔥`），交互同 · 层级
+  const emojiKey = emojiToLayerTagKey(note.emoji ?? '');
+  if (emojiKey && !seen.has(emojiKey)) {
+    out.push(emojiKey);
+  }
   return out;
 }
 
 export function noteTagLayerGroupKey(note: Note): string {
   const raw = note.tags?.[0]?.label?.trim() ?? '';
-  return raw === '' ? GRAPH_UNTAGGED_TAG_GROUP : raw;
+  if (raw !== '') return raw;
+  const emojiKey = emojiToLayerTagKey(note.emoji ?? '');
+  if (emojiKey) return emojiKey;
+  return GRAPH_UNTAGGED_TAG_GROUP;
 }
 
 export function noteFrameIdCandidates(note: Note): string[] {

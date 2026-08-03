@@ -38,6 +38,33 @@
   }
 }
 
+/**
+ * 顶栏按钮呼出菜单：对齐页面左/右缘（与顶栏按钮 margin 一致），
+ * 不再与单个按钮左/右齐平。右侧在编辑属性栏打开时由 --workspace-ui-right-edge 抬高。
+ */
+.ui-chrome-menu-page-left {
+  left: calc(var(--workspace-ui-left-inset, 0px) + 0.5rem);
+  transition: left var(--workspace-ui-inset-transition);
+}
+@media (min-width: 640px) {
+  .ui-chrome-menu-page-left {
+    left: calc(var(--workspace-ui-left-inset, 0px) + 1rem);
+  }
+}
+
+:root {
+  --workspace-ui-right-edge: 0.5rem;
+}
+@media (min-width: 640px) {
+  :root {
+    --workspace-ui-right-edge: 1rem;
+  }
+}
+.ui-chrome-menu-page-right {
+  right: var(--workspace-ui-right-edge, 0.5rem);
+  transition: right var(--workspace-ui-inset-transition);
+}
+
 /** 相对工作区水平居中（侧栏右缘～视口右缘） */
 .ui-workspace-center-x {
   left: calc(
@@ -227,4 +254,10 @@ body {
  * Leaflet 用 transform 定位，过渡会与落点取整/重投影打架，移动端 pinch 后尤其明显。 */
 .leaflet-container.map-cluster-settling .leaflet-marker-pane .leaflet-marker-icon {
   transition: none;
+}
+
+/* 当前位置指示器仅展示，不拦截地图长按/点击 */
+.leaflet-marker-icon.user-location-marker,
+.user-location-marker {
+  pointer-events: none !important;
 }

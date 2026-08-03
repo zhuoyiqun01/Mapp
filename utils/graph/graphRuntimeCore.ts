@@ -9,6 +9,7 @@ import {
   compareTagLayerKeysForAutoOrder,
   defaultWeightForTagLayer
 } from '../layer/layerRegistry';
+import { emojiToLayerTagKey } from '../layer/tagHierarchy';
 import {
   GRAPH_CLUSTER_BASIS_FRAME,
   isFrameClusterBasis,
@@ -1347,9 +1348,18 @@ export function mergeGraphLayerState(
   const allKeys = new Set<string>();
   for (const n of notes) {
     if (standard === 'tag') {
-      const labels = (n.tags ?? [])
-        .map((t) => String(t.label ?? '').trim())
-        .filter((l) => l !== '');
+      const labels: string[] = [];
+      const seen = new Set<string>();
+      for (const t of n.tags ?? []) {
+        const l = String(t.label ?? '').trim();
+        if (!l || seen.has(l)) continue;
+        seen.add(l);
+        labels.push(l);
+      }
+      const emojiKey = emojiToLayerTagKey(n.emoji ?? '');
+      if (emojiKey && !seen.has(emojiKey)) {
+        labels.push(emojiKey);
+      }
       if (labels.length === 0) {
         allKeys.add(GRAPH_UNTAGGED_TAG_GROUP);
       } else {
@@ -2058,7 +2068,7 @@ export function wireStandaloneGraphInteractions(
   themeColor: string,
   marked: MarkedLike,
   onHighlightChange?: () => void
-): void {
+): { focusNote: (noteId: string) => void; clearFocus: () => void } {
   const previews = payload.notePreviews || {};
   const previewEl = document.getElementById('graph-note-preview');
   const relatedEl = document.getElementById('graph-related-panel');
@@ -2127,7 +2137,8 @@ export function wireStandaloneGraphInteractions(
     };
 
     relatedEl.innerHTML = `
-      <div data-allow-context-menu class="relative w-72 sm:w-80 rounded-2xl shadow-2xl border border-gray-100 overflow-hidden flex flex-col pointer-events-auto bg-white shrink-0" style="max-height:min(40vh,22rem)">
+      <div class="relative w-72 sm:w-80 shrink-0 pointer-events-auto" style="filter:drop-shadow(0 25px 50px rgb(0 0 0 / 0.15))">
+        <div data-allow-context-menu class="relative rounded-2xl border border-gray-100/80 overflow-hidden flex flex-col map-chrome-surface" style="max-height:min(40vh,22rem)">
         <div class="shrink-0 flex items-center justify-between gap-2 border-b border-gray-100 px-3 py-2.5">
           <div class="min-w-0 flex-1">
             <div class="text-[10px] font-semibold uppercase tracking-wide text-gray-400">关联</div>
@@ -2155,6 +2166,7 @@ export function wireStandaloneGraphInteractions(
                   ${colHtml('To', 'to', groups.to)}
                 </div>`
           }
+        </div>
         </div>
       </div>`;
 
@@ -2253,7 +2265,8 @@ export function wireStandaloneGraphInteractions(
 
     previewEl.classList.remove('hidden');
     previewEl.innerHTML = `
-      <div data-allow-context-menu class="relative w-72 sm:w-80 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden pointer-events-auto flex flex-col shrink-0" style="max-height:min(52vh,28rem)">
+      <div class="relative w-72 sm:w-80 shrink-0 pointer-events-auto" style="filter:drop-shadow(0 25px 50px rgb(0 0 0 / 0.15))">
+        <div data-allow-context-menu class="relative rounded-2xl border border-gray-100/80 overflow-hidden flex flex-col map-chrome-surface" style="max-height:min(52vh,28rem)">
         <div class="p-4 pb-2 flex items-start justify-between gap-3 border-b border-gray-100 shrink-0">
           <div class="flex items-start gap-3 flex-1 min-w-0">
             ${p.emoji ? `<span class="text-2xl mt-0.5 shrink-0">${escapeHtml(p.emoji)}</span>` : ''}
@@ -2270,6 +2283,7 @@ export function wireStandaloneGraphInteractions(
               : ''
           }
           ${imgSection}
+        </div>
         </div>
       </div>`;
 
@@ -2341,6 +2355,23 @@ export function wireStandaloneGraphInteractions(
       clearFocus();
     }
   });
+
+  const focusNote = (noteId: string) => {
+    const n = cy.getElementById(noteId);
+    if (n.empty() || !n.isNode()) return;
+    if (n.hasClass?.('frame-cluster-label') || n.hasClass?.('frame-cluster-halo')) return;
+    cy.elements().unselect();
+    focusedId = noteId;
+    const groups = collectRelatedEdgeLabelEntries(noteId, connections, chainLength);
+    relatedKeys = new Set(flattenRelatedEdgeLabelGroups(groups).map((e) => e.key));
+    previewImgIdx = 0;
+    applyFocusHighlight(noteId);
+    applyGraphHoverHighlight(cy, hoverId);
+    renderRelatedPanel();
+    renderPreview();
+  };
+
+  return { focusNote, clearFocus };
 }
 
 export function downloadGraphPayloadJson(payload: GraphExportPayload, safeName: string): void {

@@ -9,13 +9,18 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-/** 与 GraphView 中 lucide 图标一致的 inline SVG（stroke） */
+/** 与 GraphView 顶栏一致的 inline SVG（stroke） */
 const ICON = {
-  download: `<svg class="w-[18px] h-[18px] sm:w-5 sm:h-5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>`,
-  fileJson: `<svg class="w-[18px] h-[18px] sm:w-5 sm:h-5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 12a1 1 0 0 0-1 1v1a1 1 0 0 1-1 1 1 1 0 0 1 1 1v1a1 1 0 0 0 1 1"/><path d="M14 18a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1 1 1 0 0 1-1-1v-1a1 1 0 0 0-1-1"/></svg>`
+  settings: `<svg class="w-[18px] h-[18px] sm:w-5 sm:h-5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>`
 };
 
-/** 生成可离线打开的独立 HTML（数据以 Base64 内嵌；交互与 App 内图谱浏览一致；不含编辑器 / 布局切换 / 设置滑块） */
+const BTN =
+  'map-chrome-surface p-2 sm:p-3 rounded-xl shadow-lg transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center text-gray-700 border border-gray-100/80';
+
+const PANEL =
+  'hidden absolute left-0 top-full z-[2000] mt-2 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-gray-100/80 map-chrome-surface shadow-xl pointer-events-auto';
+
+/** 生成可离线打开的独立 HTML（浏览态：设置 + 节点色图例；不含图层设置 / JSON 导出） */
 export function buildStandaloneGraphHtml(payload: GraphExportPayload): string {
   const json = JSON.stringify(payload);
   const b64 = btoa(unescape(encodeURIComponent(json)));
@@ -35,12 +40,23 @@ export function buildStandaloneGraphHtml(payload: GraphExportPayload): string {
   <script src="https://unpkg.com/cytoscape-fcose/cytoscape-fcose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <style>
-    :root { --theme-color: ${payload.themeColor}; }
-    #cy { width: 100%; height: 100vh; background: #f9fafb;
+    :root {
+      --theme-color: ${payload.themeColor};
+      --map-ui-chrome-opacity: ${payload.chrome?.opacity ?? 0.9};
+      --map-ui-chrome-blur-px: ${(payload.chrome?.blurPx ?? 8) === 0 ? '0px' : `${payload.chrome?.blurPx ?? 8}px`};
+    }
+    #cy { width: 100%; height: 100%; height: 100dvh; background: #f9fafb;
       background-image: radial-gradient(#e5e7eb 1px, transparent 1px); background-size: 20px 20px; }
-    #graph-stage { position: relative; width: 100%; height: 100vh; overflow: hidden; }
+    #graph-stage { position: relative; width: 100%; height: 100%; height: 100dvh; overflow: hidden; }
+    html, body { height: 100%; height: 100dvh; max-height: 100dvh; overflow: hidden; margin: 0; }
     #graph-chrome-labels { position: absolute; inset: 0; z-index: 15; overflow: hidden; pointer-events: none; }
     #graph-related-panel:empty { display: none; }
+    /* 与 App index.css .map-chrome-surface-fallback 一致：面板透明/模糊走 CSS 变量 */
+    .map-chrome-surface {
+      background-color: rgb(255 255 255 / var(--map-ui-chrome-opacity, 0.9));
+      backdrop-filter: blur(var(--map-ui-chrome-blur-px, 8px));
+      -webkit-backdrop-filter: blur(var(--map-ui-chrome-blur-px, 8px));
+    }
     .mapping-preview-markdown p { margin-bottom: 0.6rem; line-height: 1.4; }
     .mapping-preview-markdown p:last-child { margin-bottom: 0; }
     .mapping-preview-markdown h1 { font-size: 1.25rem; font-weight: 800; margin: 0.8rem 0 0.4rem; }
@@ -58,19 +74,28 @@ export function buildStandaloneGraphHtml(payload: GraphExportPayload): string {
   <div id="graph-stage">
     <div id="cy"></div>
     <div id="graph-chrome-labels" aria-hidden="true"></div>
-  </div>
-  <div id="graph-side-stack" class="fixed top-4 left-4 z-[1000] flex flex-col gap-3 pointer-events-none max-h-[calc(100vh-2rem)] overflow-y-auto">
-    <div id="graph-note-preview" class="hidden"></div>
-    <div id="graph-related-panel"></div>
+    <div id="graph-node-legend" class="absolute bottom-4 left-4 z-[44] pointer-events-none select-none origin-bottom-left transform scale-200 hidden" aria-hidden="true"></div>
   </div>
 
-  <div class="fixed top-2 sm:top-4 right-2 sm:right-4 z-[500] pointer-events-auto flex items-center gap-1.5 sm:gap-2" id="graph-export-actions">
-    <button type="button" id="btnDlJson" title="下载 JSON 数据" class="bg-white p-2 sm:p-3 rounded-xl shadow-lg transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center text-gray-700 hover:bg-gray-50">
-      ${ICON.download}
-    </button>
-    <button type="button" id="btnCopyJson" title="复制 JSON 到剪贴板" class="bg-white p-2 sm:p-3 rounded-xl shadow-lg transition-colors w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center text-gray-700 hover:bg-gray-50">
-      ${ICON.fileJson}
-    </button>
+  <div id="graph-top-left" class="fixed top-2 left-2 sm:top-4 sm:left-4 z-[500] pointer-events-none flex flex-col gap-2">
+    <div class="pointer-events-auto flex h-10 sm:h-12 items-center gap-1.5 sm:gap-2">
+      <div class="relative">
+        <button type="button" id="btnSettings" title="设置" class="${BTN}">${ICON.settings}</button>
+        <div id="graph-settings-panel" class="${PANEL} sm:w-[min(28rem,calc(100vw-2rem))]"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="graph-preset-switcher" class="hidden fixed top-2 right-2 sm:top-4 sm:right-4 z-[500] pointer-events-auto">
+    <label class="flex h-10 sm:h-12 items-center gap-2 rounded-xl border border-gray-100/80 map-chrome-surface px-2.5 sm:px-3 shadow-lg">
+      <span class="hidden sm:inline text-[10px] font-semibold uppercase tracking-wide text-gray-400 shrink-0">预设</span>
+      <select id="graph-preset-select" class="min-w-0 max-w-[10rem] sm:max-w-[14rem] bg-transparent text-xs sm:text-sm text-gray-800 outline-none" style="accent-color:var(--theme-color)"></select>
+    </label>
+  </div>
+
+  <div id="graph-side-stack" class="fixed top-16 sm:top-[4.75rem] left-2 sm:left-4 z-[1000] flex flex-col gap-3 pointer-events-none max-h-[calc(100dvh-5.5rem)] p-3 -m-3">
+    <div id="graph-note-preview" class="hidden"></div>
+    <div id="graph-related-panel"></div>
   </div>
 
   <script>window.__KM_GRAPH__=${JSON.stringify({ b64, safeName })};</script>

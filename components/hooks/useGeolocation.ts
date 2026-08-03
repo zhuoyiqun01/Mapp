@@ -1,9 +1,52 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 export interface LocationData {
   lat: number;
   lng: number;
 }
+
+type DeviceOrientationConstructor = typeof DeviceOrientationEvent & {
+  requestPermission?: () => Promise<'granted' | 'denied' | 'default'>;
+};
+
+const normalizeHeading = (deg: number): number => {
+  const n = deg % 360;
+  return n < 0 ? n + 360 : n;
+};
+
+const getScreenOrientationAngle = (): number => {
+  const so = window.screen?.orientation?.angle;
+  if (typeof so === 'number' && !Number.isNaN(so)) return so;
+  const wo = (window as Window & { orientation?: number }).orientation;
+  if (typeof wo === 'number' && !Number.isNaN(wo)) return wo;
+  return 0;
+};
+
+/** Derive compass heading (degrees clockwise from true/magnetic north, device top). */
+const headingFromOrientationEvent = (
+  event: DeviceOrientationEvent,
+  isAbsoluteEvent: boolean
+): number | null => {
+  const webkitHeading = (event as DeviceOrientationEvent & { webkitCompassHeading?: number })
+    .webkitCompassHeading;
+  if (typeof webkitHeading === 'number' && !Number.isNaN(webkitHeading)) {
+    return normalizeHeading(webkitHeading);
+  }
+
+  if (event.alpha == null || Number.isNaN(event.alpha)) return null;
+
+  // Absolute alpha / deviceorientationabsolute: 0 = north. Relative alpha needs 360 - alpha.
+  const absolute =
+    isAbsoluteEvent ||
+    (event as DeviceOrientationEvent & { absolute?: boolean }).absolute === true;
+
+  let heading = absolute ? event.alpha : 360 - event.alpha;
+  heading = normalizeHeading(heading - getScreenOrientationAngle());
+  return heading;
+};
+
+const HEADING_DEAD_ZONE_DEG = 2.5;
+const HEADING_LOW_PASS = 0.28;
 
 export const useGeolocation = (isMapMode: boolean) => {
   const [currentLocation, setCurrentLocation] = useState<LocationData | null>(null);
@@ -11,8 +54,12 @@ export const useGeolocation = (isMapMode: boolean) => {
   const [hasLocationPermission, setHasLocationPermission] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
 
+  const filteredHeadingRef = useRef<number | null>(null);
+  const orientationAttachedRef = useRef(false);
+  const orientationCleanupRef = useRef<(() => void) | null>(null);
+
   // Check location permission
-  const checkLocationPermission = async (): Promise<string> => {
+  const checkLocationPermission = useCallback(async (): Promise<string> => {
     // Special handling for WeChat and mobile browsers
     const isWeChat = /micromessenger/i.test(navigator.userAgent);
     const isAndroid = /android/i.test(navigator.userAgent);
@@ -88,10 +135,10 @@ export const useGeolocation = (isMapMode: boolean) => {
     }
 
     return 'unknown';
-  };
+  }, []);
 
   // Format location error for user display
-  const formatLocationError = (error: any): string => {
+  const formatLocationError = useCallback((error: any): string => {
     const isWeChat = /micromessenger/i.test(navigator.userAgent);
     const isMobile = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(navigator.userAgent);
     const isAndroid = /android/i.test(navigator.userAgent);
@@ -157,7 +204,83 @@ export const useGeolocation = (isMapMode: boolean) => {
     }
 
     return defaultMsg;
-  };
+  }, []);
+
+  const applyHeadingSample = useCallback((raw: number) => {
+    const prev = filteredHeadingRef.current;
+    if (prev == null) {
+      filteredHeadingRef.current = raw;
+      setDeviceHeading(Math.round(raw));
+      return;
+    }
+    // Shortest-path delta on circle
+    let delta = raw - prev;
+    if (delta > 180) delta -= 360;
+    if (delta < -180) delta += 360;
+    if (Math.abs(delta) < HEADING_DEAD_ZONE_DEG) return;
+    const next = normalizeHeading(prev + delta * HEADING_LOW_PASS);
+    filteredHeadingRef.current = next;
+    setDeviceHeading(Math.round(next));
+  }, []);
+
+  const detachOrientationListeners = useCallback(() => {
+    orientationCleanupRef.current?.();
+    orientationCleanupRef.current = null;
+    orientationAttachedRef.current = false;
+  }, []);
+
+  const attachOrientationListeners = useCallback(() => {
+    if (orientationAttachedRef.current || !('DeviceOrientationEvent' in window)) return;
+
+    let gotAbsoluteSample = false;
+    const handleAbsolute = (event: DeviceOrientationEvent) => {
+      const heading = headingFromOrientationEvent(event, true);
+      if (heading == null) return;
+      gotAbsoluteSample = true;
+      applyHeadingSample(heading);
+    };
+    const handleRelative = (event: DeviceOrientationEvent) => {
+      // Prefer absolute stream when it is producing samples (Android).
+      // Always accept webkitCompassHeading (iOS) even if absolute also exists.
+      const webkitHeading = (event as DeviceOrientationEvent & { webkitCompassHeading?: number })
+        .webkitCompassHeading;
+      if (gotAbsoluteSample && typeof webkitHeading !== 'number') return;
+      const heading = headingFromOrientationEvent(event, false);
+      if (heading != null) applyHeadingSample(heading);
+    };
+
+    // Prefer absolute when available (Android Chrome); iOS uses webkitCompassHeading on relative event.
+    const supportsAbsolute =
+      typeof window !== 'undefined' && 'ondeviceorientationabsolute' in window;
+
+    if (supportsAbsolute) {
+      window.addEventListener('deviceorientationabsolute', handleAbsolute as EventListener, true);
+    }
+    window.addEventListener('deviceorientation', handleRelative, true);
+    orientationAttachedRef.current = true;
+    orientationCleanupRef.current = () => {
+      if (supportsAbsolute) {
+        window.removeEventListener('deviceorientationabsolute', handleAbsolute as EventListener, true);
+      }
+      window.removeEventListener('deviceorientation', handleRelative, true);
+    };
+  }, [applyHeadingSample]);
+
+  /** Must be called from a user gesture on iOS (Safari 13+). */
+  const requestOrientationPermission = useCallback(async (): Promise<boolean> => {
+    const DOE = DeviceOrientationEvent as DeviceOrientationConstructor;
+    if (typeof DOE.requestPermission === 'function') {
+      try {
+        const state = await DOE.requestPermission();
+        if (state !== 'granted') return false;
+      } catch (err) {
+        console.warn('Device orientation permission request failed:', err);
+        return false;
+      }
+    }
+    attachOrientationListeners();
+    return true;
+  }, [attachOrientationListeners]);
 
   // Enhanced geolocation function with retry logic and accuracy fallback
   const getCurrentPositionWithRetry = useCallback((
@@ -209,15 +332,23 @@ export const useGeolocation = (isMapMode: boolean) => {
     });
   }, [getCurrentPositionWithRetry, formatLocationError]);
 
-  // Manual location request function (must be called from user gesture)
-  const requestLocation = useCallback(async () => {
+  /**
+   * Manual / auto location request.
+   * Resolves with coords on success, null on failure (avoids stale-closure flyTo).
+   * Also requests orientation permission when invoked from a user gesture path.
+   */
+  const requestLocation = useCallback(async (opts?: { requestOrientation?: boolean }): Promise<LocationData | null> => {
     try {
       setLocationError(null);
+
+      if (opts?.requestOrientation !== false) {
+        void requestOrientationPermission();
+      }
 
       // Check if geolocation is available
       if (!navigator.geolocation) {
         setLocationError('此设备或浏览器不支持地理位置功能。请尝试使用现代浏览器。');
-        return;
+        return null;
       }
 
       const isWeChat = /micromessenger/i.test(navigator.userAgent);
@@ -235,7 +366,7 @@ export const useGeolocation = (isMapMode: boolean) => {
           ? '位置权限被拒绝。'
           : '位置权限被拒绝。';
         setLocationError(deniedMessage);
-        return;
+        return null;
       }
 
       // Special handling for WeChat and problematic mobile browsers
@@ -244,81 +375,87 @@ export const useGeolocation = (isMapMode: boolean) => {
           ? '微信浏览器需要额外的位置权限设置。请尝试：\n1. 点击地址栏右侧的设置图标\n2. 选择"允许使用位置信息"\n3. 刷新页面后重试\n\n如果仍然失败，请在微信设置中开启位置权限。'
           : 'Edge浏览器可能需要额外的位置权限设置。请尝试：\n1. 点击地址栏左侧的锁图标\n2. 选择"网站权限" > "位置" > "允许"\n3. 刷新页面后重试';
         setLocationError(specialMessage);
-        return;
+        return null;
       }
 
-      // Get current position
-      await getCurrentPositionWithRetry(
-        (position) => {
-          setCurrentLocation({
-            lat: position.coords.latitude,
-            lng: position.coords.longitude
-          });
-          setLocationError(null);
-          setHasLocationPermission(true);
-        },
-        (error) => {
-          console.warn('Location request failed:', error);
-          setLocationError(formatLocationError(error));
-          setHasLocationPermission(false);
-        }
-      );
+      return await new Promise<LocationData | null>((resolve) => {
+        getCurrentPositionWithRetry(
+          (position) => {
+            const loc = {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude
+            };
+            setCurrentLocation(loc);
+            setLocationError(null);
+            setHasLocationPermission(true);
+            // Weak GPS heading fallback when orientation has not produced a sample yet
+            const gpsHeading = position.coords.heading;
+            if (
+              filteredHeadingRef.current == null &&
+              typeof gpsHeading === 'number' &&
+              !Number.isNaN(gpsHeading) &&
+              gpsHeading >= 0
+            ) {
+              applyHeadingSample(gpsHeading);
+            }
+            resolve(loc);
+          },
+          (error) => {
+            console.warn('Location request failed:', error);
+            setLocationError(formatLocationError(error));
+            setHasLocationPermission(false);
+            resolve(null);
+          }
+        );
+      });
     } catch (error) {
       console.warn('Location request error:', error);
       setLocationError('获取位置信息时发生错误。请检查网络连接和位置权限设置。');
+      return null;
     }
-  }, [getCurrentPositionWithRetry, checkLocationPermission, formatLocationError]);
+  }, [
+    getCurrentPositionWithRetry,
+    checkLocationPermission,
+    formatLocationError,
+    requestOrientationPermission,
+    applyHeadingSample
+  ]);
 
-  // Initialize only permission check and device orientation (no automatic location request)
+  // Initialize permission check; attach orientation when no iOS gate (non-gesture OK)
   useEffect(() => {
-    if (!isMapMode) return;
+    if (!isMapMode) {
+      detachOrientationListeners();
+      return;
+    }
 
-    // Special handling for mobile browsers and WeChat
     const isWeChat = /micromessenger/i.test(navigator.userAgent);
     const isMobile = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(navigator.userAgent);
 
-    // Check permission status without requesting location
     checkLocationPermission().then(permission => {
       setHasLocationPermission(permission === 'granted');
 
-      // For WeChat and mobile browsers, provide additional guidance
       if ((isWeChat || isMobile) && permission === 'unknown') {
         console.log('Mobile browser detected, location permission status unclear');
-        // Don't set an error here, let the user try to request location
       }
     }).catch((error) => {
       console.warn('Permission check failed:', error);
       setHasLocationPermission(false);
 
-      // For mobile browsers, don't immediately show error - let user try
       if (isWeChat || isMobile) {
         console.log('Mobile browser permission check failed, will retry on user request');
       }
     });
 
-    // Set up device orientation listener for heading
-    const handleDeviceOrientation = (event: DeviceOrientationEvent) => {
-      // Use webkitCompassHeading if available (iOS), otherwise calculate from alpha
-      let heading = (event as any).webkitCompassHeading || event.alpha;
-
-      if (heading !== null && heading !== undefined) {
-        // Convert to 0-360 range and adjust for magnetic declination if needed
-        heading = Math.round(heading);
-        setDeviceHeading(heading);
-      }
-    };
-
-    // Add orientation listener
-    if ('DeviceOrientationEvent' in window) {
-      window.addEventListener('deviceorientation', handleDeviceOrientation, true);
+    const DOE = DeviceOrientationEvent as DeviceOrientationConstructor;
+    // iOS requires gesture + requestPermission; skip auto-attach there.
+    if (typeof DOE.requestPermission !== 'function') {
+      attachOrientationListeners();
     }
 
     return () => {
-      if ('DeviceOrientationEvent' in window) {
-        window.removeEventListener('deviceorientation', handleDeviceOrientation, true);
-      }
+      detachOrientationListeners();
     };
-  }, [isMapMode, checkLocationPermission]);
+  }, [isMapMode, checkLocationPermission, attachOrientationListeners, detachOrientationListeners]);
 
   return {
     currentLocation,
@@ -327,6 +464,7 @@ export const useGeolocation = (isMapMode: boolean) => {
     locationError,
     setLocationError,
     requestLocation,
+    requestOrientationPermission,
     getCurrentBrowserLocation,
     checkLocationPermission
   };

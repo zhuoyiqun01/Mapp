@@ -354,21 +354,18 @@ const MenuDropdown: React.FC<{
           <div className="h-px bg-gray-100 my-1" />
         </>
       )}
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          if (!canDelete) return;
-          onDelete(project.id);
-          onClose();
-        }}
-        disabled={!canDelete}
-        className={`w-full text-left px-4 py-2.5 text-sm flex items-center gap-2 ${
-          canDelete ? 'hover:bg-red-50 text-red-500' : 'text-gray-400 cursor-not-allowed'
-        }`}
-        title={!canDelete ? '示例项目：仅开发者维护模式可删除' : undefined}
-      >
-        <Trash2 size={16} /> Delete Project
-      </button>
+      {canDelete ? (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(project.id);
+            onClose();
+          }}
+          className="w-full text-left px-4 py-2.5 text-sm hover:bg-red-50 text-red-500 flex items-center gap-2"
+        >
+          <Trash2 size={16} /> Delete Project
+        </button>
+      ) : null}
     </div>
   );
 };
@@ -507,7 +504,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     return [...list].sort((a, b) => {
       const ax = builtinExampleIds.has(a.id) ? 0 : 1;
       const bx = builtinExampleIds.has(b.id) ? 0 : 1;
-      if (ax !== bx) return ax - bx; // 示例/只读置顶
+      if (ax !== bx) return ax - bx; // 示例项目置顶
       return (b.createdAt ?? 0) - (a.createdAt ?? 0);
     });
   }, [projects, builtinExampleIds, exampleDevMaintenanceMode]);
@@ -541,6 +538,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
   /** 导入失败时展示带位置说明的弹窗 */
   const [importErrorMessage, setImportErrorMessage] = useState<string | null>(null);
   const importFileInputRef = React.useRef<HTMLInputElement>(null);
+  const newProjectFileInputRef = React.useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [showThemeColorPicker, setShowThemeColorPicker] = useState(false);
   const [showHomeSettings, setShowHomeSettings] = useState(false);
@@ -1232,8 +1230,12 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       
       setShowImportDialog(false);
       setIsImportingFromData(false);
+      setIsCreating(false);
       if (importFileInputRef.current) {
         importFileInputRef.current.value = '';
+      }
+      if (newProjectFileInputRef.current) {
+        newProjectFileInputRef.current.value = '';
       }
     } catch (error) {
       console.error('Failed to import project:', error);
@@ -2021,9 +2023,9 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                             backdropFilter: mapChromeSurface.backdropFilter as any,
                             WebkitBackdropFilter: (mapChromeSurface as any).WebkitBackdropFilter
                           }}
-                          title="只读示例项目"
+                          title="示例项目"
                         >
-                          只读
+                          示例
                         </span>
                       ) : null}
                     </div>
@@ -2044,41 +2046,21 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
               </div>
 
               <div className="relative z-[1]">
-                {builtinExampleIds.has(p.id) ? (
-                  exampleDevMaintenanceMode ? (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDeleteProject(p.id);
-                      }}
-                      className={`p-2 rounded-full transition-colors ${
-                        onGlassPanel
-                          ? 'text-red-600 hover:bg-red-500/10'
-                          : 'text-theme-chrome-fg/80 hover:text-red-500 hover:bg-white/10'
-                      }`}
-                      title="删除示例项目"
-                    >
-                      <Trash2 size={18} />
-                    </button>
-                  ) : null
-                ) : (
-                  <button 
-                    type="button"
-                    data-pm-more-btn
-                    onClick={(e) => { 
-                      e.stopPropagation(); 
-                      setOpenMenuId(openMenuId === p.id ? null : p.id); 
-                    }}
-                    className={`p-2 rounded-full transition-colors ${
-                      onGlassPanel
-                        ? 'text-gray-900/90 hover:bg-black/[0.06]'
-                        : 'text-theme-chrome-fg opacity-80 hover:opacity-100 hover:bg-white/10'
-                    }`}
-                  >
-                    <MoreHorizontal size={20} />
-                  </button>
-                )}
+                <button
+                  type="button"
+                  data-pm-more-btn
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOpenMenuId(openMenuId === p.id ? null : p.id);
+                  }}
+                  className={`p-2 rounded-full transition-colors ${
+                    onGlassPanel
+                      ? 'text-gray-900/90 hover:bg-black/[0.06]'
+                      : 'text-theme-chrome-fg opacity-80 hover:opacity-100 hover:bg-white/10'
+                  }`}
+                >
+                  <MoreHorizontal size={20} />
+                </button>
               </div>
             </MotionDiv>
             );
@@ -2217,6 +2199,39 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                     </span>
                   </button>
                 </div>
+              </div>
+
+              <div>
+                <div className="relative flex items-center gap-3 mb-2">
+                  <div className="h-px flex-1 bg-gray-200/80" />
+                  <span className="text-[11px] font-medium text-gray-400 shrink-0">或从本地导入</span>
+                  <div className="h-px flex-1 bg-gray-200/80" />
+                </div>
+                <input
+                  ref={newProjectFileInputRef}
+                  type="file"
+                  accept=".json,application/json"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    setIsCreating(false);
+                    setNewProjectName('');
+                    setNewProjectKind('mapping');
+                    void handleImportProject(file, { merge: false });
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => newProjectFileInputRef.current?.click()}
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-dashed border-gray-300 bg-gray-50/80 text-sm font-bold text-gray-700 hover:bg-gray-100 hover:border-gray-400 transition-colors"
+                >
+                  <Upload size={18} strokeWidth={2} aria-hidden />
+                  上传项目 JSON
+                </button>
+                <p className="mt-1.5 text-[11px] text-gray-400 leading-snug">
+                  选择导出的项目文件，将作为新项目导入（名称与类型以文件为准）
+                </p>
               </div>
             </div>
 
@@ -2439,18 +2454,22 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                   >
                     <ImageIcon size={16} /> Data Check
                   </button>
-                  <div className="h-px bg-gray-100 my-1" />
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteProject(pm.id);
-                      setOpenMenuId(null);
-                    }}
-                    className="w-full text-left px-4 py-2.5 text-sm hover:bg-red-50 text-red-500 flex items-center gap-2"
-                  >
-                    <Trash2 size={16} /> Delete Project
-                  </button>
+                  {(!builtinExampleIds.has(pm.id) || exampleDevMaintenanceMode) ? (
+                    <>
+                      <div className="h-px bg-gray-100 my-1" />
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteProject(pm.id);
+                          setOpenMenuId(null);
+                        }}
+                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-red-50 text-red-500 flex items-center gap-2"
+                      >
+                        <Trash2 size={16} /> Delete Project
+                      </button>
+                    </>
+                  ) : null}
                 </div>
               ) : projectMoreAnchor ? (
                 (() => {

@@ -21,7 +21,7 @@ const PANEL_PAD = 8;
 interface SettingsPanelProps {
   isOpen: boolean;
   onClose: () => void;
-  /** 锚定到左上角设置按钮；面板在其下方左对齐展开 */
+  /** 锚定到左上角设置按钮；面板在其下方展开，左缘与页面顶栏左边距对齐 */
   anchorRef: RefObject<HTMLElement | null>;
   /** 当前一级视图：仅渲染该视图相关设置 */
   settingsContextView: SettingsContextView;
@@ -105,11 +105,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       if (!el) return;
       const r = el.getBoundingClientRect();
       const width = Math.min(PANEL_WIDTH, window.innerWidth - PANEL_PAD * 2);
-      let left = r.left;
-      left = Math.max(PANEL_PAD, Math.min(left, window.innerWidth - width - PANEL_PAD));
       const top = r.bottom + PANEL_GAP;
       const maxHeight = Math.max(160, window.innerHeight - top - PANEL_PAD);
-      setPanelRect({ top, left, width, maxHeight });
+      // left 由 .ui-chrome-menu-page-left 与工作区左边距对齐，此处仅占位
+      setPanelRect({ top, left: 0, width, maxHeight });
     };
     update();
     window.addEventListener('resize', update);
@@ -214,10 +213,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         data-graph-top-left-panel
         role="dialog"
         aria-label="设置"
-        className="fixed z-[5001] overflow-hidden rounded-xl border border-gray-100/80 shadow-xl flex flex-col"
+        className="fixed z-[5001] ui-chrome-menu-page-left overflow-hidden rounded-xl border border-gray-100/80 shadow-xl flex flex-col"
         style={{
           top: panelRect.top,
-          left: panelRect.left,
           width: panelRect.width,
           maxHeight: panelRect.maxHeight,
           ...settingsCardChrome

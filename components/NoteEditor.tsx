@@ -19,6 +19,10 @@ import { Plus, Smile, Camera, PenTool, Minus } from 'lucide-react';
 import { EmojiPicker } from './note-editor/EmojiPicker';
 import { DeleteConfirmDialog } from './ui/DeleteConfirmDialog';
 import { MODAL_BACKDROP_MASK_STYLE } from '../utils/map/mapChromeStyle';
+import {
+  hasNavigableGpsCoords,
+  openExternalNavigation
+} from '../utils/map/openExternalNavigation';
 
 interface NoteEditorProps {
   initialNote?: Partial<Note>;
@@ -508,6 +512,14 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
               onLocateMap={() => {
                 dismissOverlays();
                 onSwitchToMapView?.(initialNote!.coords);
+              }}
+              showNavigateGo={hasNavigableGpsCoords(initialNote?.coords)}
+              onNavigateGo={() => {
+                const c = initialNote?.coords;
+                if (!c) return;
+                openExternalNavigation(c.lat, c.lng, {
+                  label: parseNoteContent(initialNote?.text || '').title || undefined
+                });
               }}
               showLocateGraph={!!(initialNote?.id && onSwitchToGraphView)}
               onLocateGraph={() => {

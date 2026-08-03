@@ -1,5 +1,5 @@
 import React from 'react';
-import { Code, Zap, Star, ArrowUp, Locate, Check } from 'lucide-react';
+import { Code, Zap, Star, ArrowUp, Locate, Check, Navigation } from 'lucide-react';
 import { NoteIconButton } from './NoteIconButton';
 
 interface NoteHeaderProps {
@@ -18,6 +18,10 @@ interface NoteHeaderProps {
 
   showLocateMap: boolean;
   onLocateMap?: () => void;
+
+  /** 有 GPS 时：打开外部地图 App / 网页导航 */
+  showNavigateGo?: boolean;
+  onNavigateGo?: () => void;
 
   showLocateGraph?: boolean;
   onLocateGraph?: () => void;
@@ -41,6 +45,8 @@ export const NoteHeader: React.FC<NoteHeaderProps> = ({
   onLocateBoard,
   showLocateMap,
   onLocateMap,
+  showNavigateGo = false,
+  onNavigateGo,
   showLocateGraph = false,
   onLocateGraph,
   onSave,
@@ -121,6 +127,12 @@ export const NoteHeader: React.FC<NoteHeaderProps> = ({
           </NoteIconButton>
         )}
 
+        {showNavigateGo && onNavigateGo && (
+          <NoteIconButton onClick={onNavigateGo} variant="neutral" title="Go · 外部导航">
+            <Navigation size={22} strokeWidth={2} className="text-gray-400 hover:text-gray-600" />
+          </NoteIconButton>
+        )}
+
         {showLocateGraph && onLocateGraph && (
           <NoteIconButton onClick={onLocateGraph} variant="neutral" title="定位到图谱">
             <Locate size={22} strokeWidth={2} className="text-gray-400 hover:text-gray-600" />
@@ -134,4 +146,3 @@ export const NoteHeader: React.FC<NoteHeaderProps> = ({
     </div>
   );
 };
-

@@ -39,6 +39,7 @@ export const MapControls: React.FC<MapControlsProps> = ({
   const neutralHover = chromeHoverBackground;
   const map = useMap();
   const [showLocateMenu, setShowLocateMenu] = useState(false);
+  const controlsRef = useRef<HTMLDivElement>(null);
   const locateMenuRef = useRef<HTMLDivElement>(null);
 
   const locateToLatestPin = () => {
@@ -51,7 +52,7 @@ export const MapControls: React.FC<MapControlsProps> = ({
   // Close menus when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (locateMenuRef.current && !locateMenuRef.current.contains(event.target as Node)) {
+      if (controlsRef.current && !controlsRef.current.contains(event.target as Node)) {
         setShowLocateMenu(false);
       }
     };
@@ -60,8 +61,6 @@ export const MapControls: React.FC<MapControlsProps> = ({
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
   }, [showLocateMenu]);
-
-  const controlsRef = useRef<HTMLDivElement>(null);
 
   // Block map container from receiving pointer down events when pointer is in UI area
   useEffect(() => {
@@ -89,7 +88,7 @@ export const MapControls: React.FC<MapControlsProps> = ({
   return (
     <div
       ref={controlsRef}
-      className="flex flex-row items-center gap-1.5 sm:gap-2 pointer-events-auto"
+      className="relative flex flex-row items-center gap-1.5 sm:gap-2 pointer-events-auto"
       onPointerDown={(e) => e.stopPropagation()}
       onPointerMove={(e) => e.stopPropagation()}
       onPointerUp={(e) => e.stopPropagation()}
@@ -119,7 +118,7 @@ export const MapControls: React.FC<MapControlsProps> = ({
         <Settings size={18} className="sm:w-5 sm:h-5" />
       </ChromeIconButton>
 
-      <div className="relative" ref={locateMenuRef}>
+      <div ref={locateMenuRef}>
         <ChromeIconButton
           className="group"
           themeColor={themeColor}
@@ -132,59 +131,6 @@ export const MapControls: React.FC<MapControlsProps> = ({
         >
           <Locate size={18} className="sm:w-5 sm:h-5" />
         </ChromeIconButton>
-        {showLocateMenu && (
-          <div
-            className={`absolute left-0 top-full mt-2 w-48 rounded-xl shadow-xl border border-gray-100 py-1 z-[2000] ${neutralStyle ? '' : 'bg-white'}`}
-            style={neutralStyle}
-            onPointerDown={(e) => {
-              e.stopPropagation();
-            }}
-            onPointerMove={(e) => {
-              e.stopPropagation();
-            }}
-            onPointerUp={(e) => {
-              e.stopPropagation();
-            }}
-            onMouseDown={(e) => {
-              e.stopPropagation();
-            }}
-            onMouseMove={(e) => {
-              e.stopPropagation();
-            }}
-          >
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onLocateCurrentPosition();
-                setShowLocateMenu(false);
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-              onPointerMove={(e) => e.stopPropagation()}
-              disabled={isLocating}
-              className="group w-full text-left px-4 py-3 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-3 text-sm transition-colors"
-            >
-              {isLocating ? (
-                <Loader2 size={16} className="text-blue-500 animate-spin" />
-              ) : (
-                <Locate size={16} className="text-gray-400 group-hover:text-blue-500 transition-colors" />
-              )}
-              <span>{isLocating ? 'Locating...' : 'My Location'}</span>
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                locateToLatestPin();
-                setShowLocateMenu(false);
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-              onPointerMove={(e) => e.stopPropagation()}
-              className="group w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-3 text-sm transition-colors"
-            >
-              <MapPin size={16} className="text-gray-400 group-hover:text-red-500 transition-colors" />
-              <span>Latest Note</span>
-            </button>
-          </div>
-        )}
       </div>
 
       <ChromeIconButton
@@ -198,6 +144,52 @@ export const MapControls: React.FC<MapControlsProps> = ({
       >
         <Type size={18} className="sm:w-5 sm:h-5" />
       </ChromeIconButton>
+
+      {/* 菜单左缘与顶栏左侧（本控件左缘）对齐，而非与定位按钮齐平 */}
+      {showLocateMenu && (
+        <div
+          data-locate-menu
+          className={`absolute left-0 top-full mt-2 w-48 rounded-xl shadow-xl border border-gray-100 py-1 z-[2000] ${neutralStyle ? '' : 'bg-white'}`}
+          style={neutralStyle}
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerMove={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onMouseMove={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onLocateCurrentPosition();
+              setShowLocateMenu(false);
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onPointerMove={(e) => e.stopPropagation()}
+            disabled={isLocating}
+            className="group w-full text-left px-4 py-3 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-3 text-sm transition-colors"
+          >
+            {isLocating ? (
+              <Loader2 size={16} className="text-blue-500 animate-spin" />
+            ) : (
+              <Locate size={16} className="text-gray-400 group-hover:text-blue-500 transition-colors" />
+            )}
+            <span>{isLocating ? 'Locating...' : 'My Location'}</span>
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              locateToLatestPin();
+              setShowLocateMenu(false);
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onPointerMove={(e) => e.stopPropagation()}
+            className="group w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-3 text-sm transition-colors"
+          >
+            <MapPin size={16} className="text-gray-400 group-hover:text-red-500 transition-colors" />
+            <span>Latest Note</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 };

@@ -19,6 +19,12 @@ export const MapLongPressHandler: React.FC<MapLongPressHandlerProps> = ({ onLong
 
     const element = target as HTMLElement;
 
+    // Current-location indicator is visual-only; allow long-press through it
+    if (element.classList.contains('user-location-marker') ||
+        element.closest('.user-location-marker')) {
+      return false;
+    }
+
     // Check if it's a Leaflet marker element
     if (element.classList.contains('leaflet-marker-icon') ||
         element.closest('.leaflet-marker-icon') ||

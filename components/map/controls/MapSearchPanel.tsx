@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Search, X, Copy, Loader2 } from 'lucide-react';
 import { ChromeIconButton } from '../../ui/ChromeIconButton';
+import { useChromeMenuTop } from '../../../utils/ui/chromeMenuPosition';
 
 export interface BorderSearchState {
   borderSearchQuery: string;
@@ -51,25 +53,14 @@ export const MapSearchPanel: React.FC<MapSearchPanelProps> = ({
     handleCopyBorder
   } = borderSearch;
 
-  return (
-  <div className="relative">
-    <ChromeIconButton
-      themeColor={themeColor}
-      chromeSurfaceStyle={chromeSurfaceStyle}
-      chromeHoverBackground={chromeHoverBackground}
-      active={isOpen}
-      nonChromeIdleHover="none"
-      className="transition-all hover:scale-105 active:scale-95"
-      onClick={onToggle}
-      tooltip="检索"
-    >
-      <Search size={18} className="sm:w-5 sm:h-5" />
-    </ChromeIconButton>
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const menuTop = useChromeMenuTop(isOpen, wrapRef, 8);
 
-    {isOpen && (
+  const panel =
+    isOpen && menuTop != null ? (
       <div
-        className={`absolute right-0 top-full mt-2 w-72 sm:w-80 rounded-2xl shadow-2xl border border-gray-100/80 p-4 z-[2000] animate-in fade-in slide-in-from-top-4 ${chromeSurfaceStyle ? '' : 'bg-white'}`}
-        style={chromeSurfaceStyle}
+        className={`fixed z-[2000] ui-chrome-menu-page-right w-72 sm:w-80 rounded-2xl shadow-2xl border border-gray-100/80 p-4 animate-in fade-in slide-in-from-top-4 ${chromeSurfaceStyle ? '' : 'bg-white'}`}
+        style={{ top: menuTop, ...chromeSurfaceStyle }}
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       >
@@ -200,7 +191,23 @@ export const MapSearchPanel: React.FC<MapSearchPanelProps> = ({
           </div>
         )}
       </div>
-    )}
-  </div>
+    ) : null;
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <ChromeIconButton
+        themeColor={themeColor}
+        chromeSurfaceStyle={chromeSurfaceStyle}
+        chromeHoverBackground={chromeHoverBackground}
+        active={isOpen}
+        nonChromeIdleHover="none"
+        className="transition-all hover:scale-105 active:scale-95"
+        onClick={onToggle}
+        tooltip="检索"
+      >
+        <Search size={18} className="sm:w-5 sm:h-5" />
+      </ChromeIconButton>
+      {panel ? createPortal(panel, document.body) : null}
+    </div>
   );
 };

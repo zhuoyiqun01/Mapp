@@ -124,7 +124,8 @@
   // utils/map/mapChromeStyle.ts
   var DEFAULT_MAP_UI_CHROME_OPACITY = 0.9;
   var DEFAULT_MAP_UI_CHROME_BLUR_PX = 8;
-  var MAP_CHROME_SURFACE_SHELL_CLASS = "rounded-lg shadow-lg border border-gray-100/80";
+  var MAP_CHROME_SURFACE_BORDER_CLASS = "border border-gray-100/80";
+  var MAP_CHROME_SURFACE_SHELL_CLASS = `rounded-lg shadow-lg ${MAP_CHROME_SURFACE_BORDER_CLASS}`;
   function mapChromeSurfaceStyle(opacity, blurPx) {
     const o = Math.min(1, Math.max(0, opacity));
     const b = Math.min(48, Math.max(0, blurPx));
@@ -141,6 +142,7 @@
 
   // utils/graph/graphRuntimeCore.ts
   var GRAPH_SORT_LOCALE = "zh-Hans-CN";
+  var GRAPH_UNTAGGED_TAG_GROUP = "\u65E0\u6807\u7B7E";
   var GRAPH_LAYER_WEIGHT_MIN = 0.1;
   var GRAPH_LAYER_WEIGHT_MAX = 1;
   var GRAPH_LAYER_WEIGHT_SPAN = GRAPH_LAYER_WEIGHT_MAX - GRAPH_LAYER_WEIGHT_MIN;
@@ -177,6 +179,37 @@
         if (disp === "element") {
           const lh = node.data("layerItemHidden");
           if (lh === true || lh === "yes" || lh === 1) disp = "none";
+        }
+        node.style("display", disp);
+      });
+    });
+    applyGraphNodeStackZIndex(cy);
+  }
+  function applyGraphDualLayerNodeVisibility(cy, tagHidden, frameHidden, tagVisibilityLogic = "or") {
+    const tagSet = new Set(tagHidden.map((h) => String(h).trim()));
+    const frameSet = new Set(frameHidden.map((h) => String(h).trim()));
+    const logic = tagVisibilityLogic === "and" ? "and" : "or";
+    cy.batch(() => {
+      cy.nodes().forEach((node) => {
+        if (node.hasClass("frame-cluster-halo") || node.hasClass("frame-cluster-label")) return;
+        const rawLabels = node.data("tagLabels");
+        const tagLabels = Array.isArray(rawLabels) ? rawLabels.map((x) => String(x).trim()).filter(Boolean) : [];
+        let tagBlocked;
+        if (tagLabels.length === 0) {
+          tagBlocked = tagSet.has(GRAPH_UNTAGGED_TAG_GROUP);
+        } else if (logic === "and") {
+          tagBlocked = tagLabels.some((l) => tagSet.has(l));
+        } else {
+          tagBlocked = tagLabels.every((l) => tagSet.has(l));
+        }
+        const frameKey = getGraphLayerEffectiveGroupKey(node, "frame", frameSet);
+        let disp = tagBlocked || frameSet.has(frameKey) ? "none" : "element";
+        if (disp === "element") {
+          const lh = node.data("layerItemHidden");
+          if (lh === true || lh === "yes" || lh === 1) disp = "none";
+        }
+        if (disp === "none" && (node.hasClass("focus-core") || node.hasClass("focus-nh") || node.hasClass("focus-edge-endpoint"))) {
+          disp = "element";
         }
         node.style("display", disp);
       });
@@ -279,6 +312,41 @@
         if (!isCyActive(cy)) return;
         cy.resize();
         cy.fit(void 0, 40);
+      });
+    });
+  }
+  function updateGraphStylesheet(cy, stylesheet) {
+    cy.style().fromJson(stylesheet).update();
+  }
+  function syncGraphEdgeCurveDistances(cy) {
+    const pairIndex = /* @__PURE__ */ new Map();
+    cy.batch(() => {
+      cy.edges().forEach((edge) => {
+        const s = edge.source();
+        const t = edge.target();
+        if (s.empty() || t.empty() || !s.isNode() || !t.isNode()) return;
+        if (s.hasClass("frame-cluster-label") || t.hasClass("frame-cluster-label") || s.hasClass("frame-cluster-halo") || t.hasClass("frame-cluster-halo")) {
+          return;
+        }
+        const sp = s.position();
+        const tp = t.position();
+        const dx = tp.x - sp.x;
+        const dy = tp.y - sp.y;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        if (!Number.isFinite(len) || len < 1e-3) {
+          edge.data("controlPointDistance", 0);
+          return;
+        }
+        const a = s.id();
+        const b = t.id();
+        const pairKey = a < b ? `${a}\0${b}` : `${b}\0${a}`;
+        const idx = pairIndex.get(pairKey) ?? 0;
+        pairIndex.set(pairKey, idx + 1);
+        const sign = idx % 2 === 0 ? 1 : -1;
+        const band = Math.floor(idx / 2) + 1;
+        const mag = Math.max(14, Math.min(140, len * 0.2)) * (0.85 + (band - 1) * 0.45);
+        edge.data("controlPointDistance", sign * mag);
+        edge.data("curveSign", sign);
       });
     });
   }
@@ -571,7 +639,8 @@
       </div>`;
       };
       relatedEl.innerHTML = `
-      <div data-allow-context-menu class="relative w-72 sm:w-80 rounded-2xl shadow-2xl border border-gray-100 overflow-hidden flex flex-col pointer-events-auto bg-white shrink-0" style="max-height:min(40vh,22rem)">
+      <div class="relative w-72 sm:w-80 shrink-0 pointer-events-auto" style="filter:drop-shadow(0 25px 50px rgb(0 0 0 / 0.15))">
+        <div data-allow-context-menu class="relative rounded-2xl border border-gray-100/80 overflow-hidden flex flex-col map-chrome-surface" style="max-height:min(40vh,22rem)">
         <div class="shrink-0 flex items-center justify-between gap-2 border-b border-gray-100 px-3 py-2.5">
           <div class="min-w-0 flex-1">
             <div class="text-[10px] font-semibold uppercase tracking-wide text-gray-400">\u5173\u8054</div>
@@ -591,6 +660,7 @@
                   <div class="w-px shrink-0 self-stretch bg-gray-100" aria-hidden="true"></div>
                   ${colHtml("To", "to", groups.to)}
                 </div>`}
+        </div>
         </div>
       </div>`;
       relatedEl.querySelectorAll("input[data-rel-key]").forEach((input) => {
@@ -671,7 +741,8 @@
           </div>` : "";
       previewEl.classList.remove("hidden");
       previewEl.innerHTML = `
-      <div data-allow-context-menu class="relative w-72 sm:w-80 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden pointer-events-auto flex flex-col shrink-0" style="max-height:min(52vh,28rem)">
+      <div class="relative w-72 sm:w-80 shrink-0 pointer-events-auto" style="filter:drop-shadow(0 25px 50px rgb(0 0 0 / 0.15))">
+        <div data-allow-context-menu class="relative rounded-2xl border border-gray-100/80 overflow-hidden flex flex-col map-chrome-surface" style="max-height:min(52vh,28rem)">
         <div class="p-4 pb-2 flex items-start justify-between gap-3 border-b border-gray-100 shrink-0">
           <div class="flex items-start gap-3 flex-1 min-w-0">
             ${p.emoji ? `<span class="text-2xl mt-0.5 shrink-0">${escapeHtml(p.emoji)}</span>` : ""}
@@ -684,6 +755,7 @@
         <div class="flex-1 overflow-y-auto text-sm min-h-0">
           ${detailHtml ? `<div class="px-4 py-3 text-gray-800 leading-snug break-words border-b border-gray-50 bg-gray-50/30 mapping-preview-markdown">${detailHtml}</div>` : ""}
           ${imgSection}
+        </div>
         </div>
       </div>`;
       const prev = previewEl.querySelector(".km-g-prev");
@@ -749,45 +821,33 @@
         clearFocus();
       }
     });
-  }
-  function downloadGraphPayloadJson(payload, safeName) {
-    const text = JSON.stringify(payload, null, 2);
-    const blob = new Blob([text], { type: "application/json;charset=utf-8" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${safeName}-graph-data.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  }
-  function copyGraphPayloadJson(payload, safeName, alertFn = (m) => window.alert(m)) {
-    const text = JSON.stringify(payload, null, 2);
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(text).then(
-        () => alertFn("\u5DF2\u590D\u5236\u5230\u526A\u8D34\u677F"),
-        () => downloadGraphPayloadJson(payload, safeName)
-      );
-    } else {
-      downloadGraphPayloadJson(payload, safeName);
-    }
-  }
-  function wireStandaloneGraphControls(_cy, payload, safeName) {
-    const dl = document.getElementById("btnDlJson");
-    const cp = document.getElementById("btnCopyJson");
-    if (dl) {
-      dl.onclick = (e) => {
-        e.stopPropagation();
-        downloadGraphPayloadJson(payload, safeName);
-      };
-    }
-    if (cp) {
-      cp.onclick = (e) => {
-        e.stopPropagation();
-        copyGraphPayloadJson(payload, safeName);
-      };
-    }
+    const focusNote = (noteId) => {
+      const n = cy.getElementById(noteId);
+      if (n.empty() || !n.isNode()) return;
+      if (n.hasClass?.("frame-cluster-label") || n.hasClass?.("frame-cluster-halo")) return;
+      cy.elements().unselect();
+      focusedId = noteId;
+      const groups = collectRelatedEdgeLabelEntries(noteId, connections, chainLength);
+      relatedKeys = new Set(flattenRelatedEdgeLabelGroups(groups).map((e) => e.key));
+      previewImgIdx = 0;
+      applyFocusHighlight(noteId);
+      applyGraphHoverHighlight(cy, hoverId);
+      renderRelatedPanel();
+      renderPreview();
+    };
+    return { focusNote, clearFocus };
   }
 
   // utils/graph/graphData.ts
+  var GRAPH_NODE_SIZE_MAX_PX = 36;
+  function graphNodeSizeFromDegree(degree, maxDegree, minSize) {
+    const minS = Math.min(GRAPH_NODE_SIZE_MAX_PX, Math.max(1, minSize));
+    const maxS = GRAPH_NODE_SIZE_MAX_PX;
+    if (maxS <= minS || maxDegree <= 0 || !(degree > 0)) return minS;
+    const t = Math.max(0, Math.min(1, degree / maxDegree));
+    const eased = Math.pow(t, 0.65);
+    return Math.round((minS + (maxS - minS) * eased) * 100) / 100;
+  }
   var DEFAULT_GRAPH_STYLESHEET_SIZING = {
     nodeSize: 28,
     labelFontPx: 10,
@@ -885,6 +945,389 @@
       vpEdgeOff,
       themeColor
     };
+  }
+  function getGraphStylesheet(themeColor, sizingPartial, _chrome, opts) {
+    const sizing = mergeGraphSizing(sizingPartial);
+    const z = graphSizingCss(themeColor, sizing);
+    const edgeCurveOn = opts?.edgeCurve !== false;
+    const curveStyle = edgeCurveOn ? "unbundled-bezier" : "straight";
+    return [
+      {
+        selector: "node",
+        style: {
+          label: "data(label)",
+          "background-color": "data(color)",
+          // 交互命中区域：略外扩，减少贴边时误点到连线
+          "bounds-expansion": 4,
+          /** 未选中：与地图 label 未强调态一致的浅灰字，无衬底 */
+          color: "#9ca3af",
+          "text-valign": "bottom",
+          "text-margin-y": z.marginY,
+          "font-size": z.px(z.nf),
+          "font-weight": "600",
+          "line-height": 1,
+          width: "data(nodeSize)",
+          height: "data(nodeSize)",
+          "border-width": z.borderBase,
+          "border-color": "#ffffff",
+          /** label 改由 HTML 层绘制，避免节点圆盖住其他节点文字 */
+          "text-opacity": 0,
+          "text-background-opacity": 0,
+          "text-border-width": 0,
+          /**
+           * 普通节点留在 auto 层（z > 普通边），避免挡住高亮连线（高亮边在 top）。
+           * 高亮节点单独抬到 top。
+           */
+          "z-compound-depth": "auto",
+          "z-index-compare": "manual",
+          "z-index": 100
+        }
+      },
+      {
+        selector: 'node[graphLinked = "no"]',
+        style: {
+          opacity: 0.42
+        }
+      },
+      {
+        selector: 'node[favorite = "yes"]',
+        style: {
+          "text-margin-y": z.marginYFav,
+          "font-size": z.px(z.favNf),
+          width: "data(nodeSizeFav)",
+          height: "data(nodeSizeFav)",
+          "border-width": z.borderBaseFav
+        }
+      },
+      {
+        selector: "node:selected",
+        style: {
+          opacity: 1,
+          "border-width": z.borderSel,
+          "border-color": z.themeColor
+        }
+      },
+      {
+        selector: 'node:selected[favorite = "yes"]',
+        style: {
+          opacity: 1,
+          "border-width": z.borderSelFav,
+          "border-color": z.themeColor
+        }
+      },
+      /** 与选中点相连：节点描边高亮；label 由 HTML chrome 层绘制（隐藏 canvas 字） */
+      {
+        selector: "node.focus-nh",
+        style: {
+          "border-width": z.borderNh,
+          "border-color": z.themeColor,
+          opacity: 1,
+          "text-opacity": 0,
+          "text-background-opacity": 0,
+          "text-border-width": 0,
+          "z-compound-depth": "top",
+          "z-index-compare": "manual",
+          "z-index": 200
+        }
+      },
+      {
+        selector: 'node.focus-nh[favorite = "yes"]',
+        style: {
+          "border-width": z.borderNhFav,
+          "font-size": z.px(z.favNf)
+        }
+      },
+      /** 选中边时两端便签 */
+      {
+        selector: "node.focus-edge-endpoint",
+        style: {
+          "border-width": z.borderNh,
+          "border-color": z.themeColor,
+          opacity: 1,
+          "text-opacity": 0,
+          "text-background-opacity": 0,
+          "text-border-width": 0,
+          "z-compound-depth": "top",
+          "z-index-compare": "manual",
+          "z-index": 250
+        }
+      },
+      {
+        selector: 'node.focus-edge-endpoint[favorite = "yes"]',
+        style: {
+          "border-width": z.borderNhFav,
+          "font-size": z.px(z.favNf)
+        }
+      },
+      /** 选中（焦点中心）：label 由 HTML chrome 层绘制 */
+      {
+        selector: "node.focus-core",
+        style: {
+          opacity: 1,
+          width: "data(nodeSizeCore)",
+          height: "data(nodeSizeCore)",
+          "text-margin-y": z.marginYCore,
+          "border-width": z.borderCore,
+          "border-color": z.themeColor,
+          "text-opacity": 0,
+          "text-background-opacity": 0,
+          "text-border-width": 0,
+          "z-compound-depth": "top",
+          "z-index-compare": "manual",
+          "z-index": 300
+        }
+      },
+      {
+        selector: 'node.focus-core[favorite = "yes"]',
+        style: {
+          opacity: 1,
+          width: "data(nodeSizeFavCore)",
+          height: "data(nodeSizeFavCore)",
+          "text-margin-y": z.marginYFavCore,
+          "border-width": z.borderCoreFav,
+          "font-size": z.px(z.favNf)
+        }
+      },
+      /** 悬停节点：label 由 HTML chrome 层绘制 */
+      {
+        selector: "node.focus-hover",
+        style: {
+          opacity: 1,
+          "border-width": z.borderCore,
+          "border-color": z.themeColor,
+          "text-opacity": 0,
+          "text-background-opacity": 0,
+          "text-border-width": 0,
+          "z-compound-depth": "top",
+          "z-index-compare": "manual",
+          "z-index": 400
+        }
+      },
+      {
+        selector: 'node.focus-hover[favorite = "yes"]',
+        style: {
+          opacity: 1,
+          "border-width": z.borderCoreFav,
+          "font-size": z.px(z.favNf)
+        }
+      },
+      {
+        selector: "edge",
+        style: {
+          label: "data(label)",
+          opacity: 0.4,
+          "line-color": "#d1d5db",
+          width: "data(edgeLineWidth)",
+          "arrow-scale": "data(edgeArrowScale)",
+          "curve-style": curveStyle,
+          ...edgeCurveOn ? {
+            // bundled bezier 在单边时会退回直线；unbundled + 距离控制点才能看到弧度
+            "control-point-distances": "data(controlPointDistance)",
+            "control-point-weights": 0.5
+          } : {},
+          "target-arrow-shape": "triangle",
+          "target-arrow-color": "#d1d5db",
+          "source-arrow-shape": "none",
+          "font-size": z.px(z.edgeFont),
+          "text-rotation": "autorotate",
+          "text-margin-y": -z.edgeMarginY,
+          color: "#9ca3af",
+          /**
+           * 普通连线：auto 层且 z 低于普通节点，点在节点上优先命中节点。
+           */
+          "z-compound-depth": "auto",
+          "z-index": 1,
+          "z-index-compare": "manual"
+        }
+      },
+      {
+        selector: 'edge[direction = "forward"]',
+        style: {
+          "source-arrow-shape": "none",
+          "target-arrow-shape": "triangle"
+        }
+      },
+      {
+        selector: 'edge[direction = "backward"]',
+        style: {
+          "source-arrow-shape": "triangle",
+          "target-arrow-shape": "none",
+          "source-arrow-color": "#d1d5db"
+        }
+      },
+      {
+        selector: 'edge[direction = "both"]',
+        style: {
+          "source-arrow-shape": "triangle",
+          "target-arrow-shape": "triangle",
+          "source-arrow-color": "#d1d5db"
+        }
+      },
+      {
+        selector: 'edge[direction = "none"]',
+        style: {
+          "source-arrow-shape": "none",
+          "target-arrow-shape": "none"
+        }
+      },
+      {
+        selector: "edge:selected",
+        style: {
+          opacity: 1,
+          "line-color": z.themeColor,
+          "target-arrow-color": z.themeColor,
+          "source-arrow-color": z.themeColor,
+          /** top：盖过未高亮节点/边；仍低于高亮节点（200+） */
+          "z-compound-depth": "top",
+          "z-index-compare": "manual",
+          "z-index": 50
+        }
+      },
+      {
+        selector: "edge.focus-e",
+        style: {
+          opacity: 1,
+          "line-color": z.themeColor,
+          "target-arrow-color": z.themeColor,
+          "source-arrow-color": z.themeColor,
+          width: "data(edgeLineFocusWidth)",
+          "arrow-scale": "data(edgeArrowScaleFocus)",
+          "z-compound-depth": "top",
+          "z-index-compare": "manual",
+          "z-index": 50,
+          "font-weight": "600",
+          color: "#374151",
+          "text-outline-width": z.edgeOutlineHighlight,
+          "text-outline-color": "#ffffff",
+          "text-outline-opacity": 1
+        }
+      },
+      /** 悬停边：高于未高亮内容，低于高亮节点 */
+      {
+        selector: "edge.focus-edge-hover",
+        style: {
+          opacity: 1,
+          "line-color": z.themeColor,
+          "target-arrow-color": z.themeColor,
+          "source-arrow-color": z.themeColor,
+          width: "data(edgeLineHiWidth)",
+          "arrow-scale": "data(edgeArrowScaleHi)",
+          "z-compound-depth": "top",
+          "z-index-compare": "manual",
+          "z-index": 80,
+          "font-weight": "600",
+          color: "#374151",
+          "text-outline-width": z.edgeOutlineHighlight,
+          "text-outline-color": "#ffffff",
+          "text-outline-opacity": 1
+        }
+      },
+      /** 选中边：同悬停，盖过未高亮节点/边 */
+      {
+        selector: "edge.focus-edge-selected",
+        style: {
+          opacity: 1,
+          "line-color": z.themeColor,
+          "target-arrow-color": z.themeColor,
+          "source-arrow-color": z.themeColor,
+          width: "data(edgeLineHiWidth)",
+          "arrow-scale": "data(edgeArrowScaleHi)",
+          "z-compound-depth": "top",
+          "z-index-compare": "manual",
+          "z-index": 80,
+          "font-weight": "600",
+          color: "#374151",
+          "text-outline-width": z.edgeOutlineHighlight,
+          "text-outline-color": "#ffffff",
+          "text-outline-opacity": 1
+        }
+      },
+      /**
+       * 仅一端在视口内时：主 label 改到屏内端（source-label / target-label），避免放大后中点在屏外。
+       * 由 applyGraphEdgeLabelViewportPlacement 挂类 edge-lbl-vp-src | edge-lbl-vp-tgt。
+       */
+      {
+        selector: "edge.focus-e.edge-lbl-vp-src, edge.focus-edge-hover.edge-lbl-vp-src, edge.focus-edge-selected.edge-lbl-vp-src",
+        style: {
+          label: "",
+          "source-label": "data(label)",
+          "target-label": "",
+          /** 沿边远离 source 端（屏内可见节点），避免贴在节点旁 */
+          "source-text-offset": z.vpEdgeOff,
+          "source-text-rotation": "autorotate",
+          "source-text-margin-y": -z.edgeMarginY,
+          "font-size": z.px(z.edgeFont),
+          "font-weight": "600",
+          color: "#374151",
+          "text-outline-width": z.edgeOutlineHighlight,
+          "text-outline-color": "#ffffff",
+          "text-outline-opacity": 1
+        }
+      },
+      {
+        selector: "edge.focus-e.edge-lbl-vp-tgt, edge.focus-edge-hover.edge-lbl-vp-tgt, edge.focus-edge-selected.edge-lbl-vp-tgt",
+        style: {
+          label: "",
+          "source-label": "",
+          "target-label": "data(label)",
+          /** 沿边远离 target 端（屏内可见节点） */
+          "target-text-offset": z.vpEdgeOff,
+          "target-text-rotation": "autorotate",
+          "target-text-margin-y": -z.edgeMarginY,
+          "font-size": z.px(z.edgeFont),
+          "font-weight": "600",
+          color: "#374151",
+          "text-outline-width": z.edgeOutlineHighlight,
+          "text-outline-color": "#ffffff",
+          "text-outline-opacity": 1
+        }
+      },
+      {
+        // 无标签节点直接隐藏：确保它们不参与渲染（含 label / 框）
+        selector: 'node[tagGroup = ""]',
+        style: {
+          display: "none"
+        }
+      },
+      {
+        // 避免无标签节点“把边线留在画面上”
+        selector: 'edge[edgeUntagged = "yes"]',
+        style: {
+          display: "none"
+        }
+      },
+      {
+        selector: "node.graph-layer-hidden",
+        style: {
+          display: "none"
+        }
+      },
+      /** 有选中对象时（GraphView 会给未高亮元素挂 graph-dim 类）：在“原透明度基础上再 *0.5” */
+      {
+        selector: "node.graph-dim",
+        style: {
+          opacity: 0.5
+        }
+      },
+      {
+        selector: 'node[graphLinked = "no"].graph-dim',
+        style: {
+          opacity: 0.21
+        }
+      },
+      {
+        selector: "edge.graph-dim",
+        style: {
+          opacity: 0.2
+        }
+      },
+      {
+        selector: "edge.graph-layer-hidden",
+        style: {
+          display: "none"
+        }
+      }
+    ];
   }
   function applyGraphHighlightLabelScreenSize(cy, sizingPartial, _chrome) {
     if (!cy || cy.destroyed?.()) return;
@@ -1242,6 +1685,314 @@
     return forceRefresh;
   }
 
+  // utils/graph/graphPresets.ts
+  function isDecorNode(cy, id) {
+    const n = cy.getElementById(id);
+    if (n.empty() || !n.isNode()) return true;
+    return n.hasClass("frame-cluster-label") || n.hasClass("frame-cluster-halo");
+  }
+  function normalizeHiddenList(raw) {
+    if (!Array.isArray(raw)) return [];
+    return raw.map((h) => String(h).trim()).filter(Boolean);
+  }
+  function applyGraphViewPresetToCy(cy, preset) {
+    cy.batch(() => {
+      for (const [id, pos] of Object.entries(preset.positions ?? {})) {
+        if (isDecorNode(cy, id)) continue;
+        const n = cy.getElementById(id);
+        if (n.empty() || !n.isNode()) continue;
+        if (typeof pos?.x === "number" && typeof pos?.y === "number" && Number.isFinite(pos.x) && Number.isFinite(pos.y)) {
+          n.position({ x: pos.x, y: pos.y });
+        }
+      }
+      for (const [id, color] of Object.entries(preset.nodeColors ?? {})) {
+        if (isDecorNode(cy, id)) continue;
+        const n = cy.getElementById(id);
+        if (n.empty() || !n.isNode()) continue;
+        const c = String(color ?? "").trim();
+        if (c) n.data("color", c);
+      }
+      if (preset.layerItemHidden) {
+        for (const [id, hidden] of Object.entries(preset.layerItemHidden)) {
+          if (isDecorNode(cy, id)) continue;
+          const n = cy.getElementById(id);
+          if (n.empty() || !n.isNode()) continue;
+          n.data("layerItemHidden", Boolean(hidden));
+        }
+      }
+    });
+  }
+  function applyGraphViewPresetVisibility(cy, preset) {
+    if (preset.tagHidden == null && preset.frameHidden == null) return;
+    applyGraphDualLayerNodeVisibility(
+      cy,
+      normalizeHiddenList(preset.tagHidden),
+      normalizeHiddenList(preset.frameHidden),
+      preset.tagVisibilityLogic === "and" ? "and" : "or"
+    );
+  }
+
+  // utils/graph/graphStandaloneChrome.ts
+  function escapeHtml2(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function setBtnActive(btn, active, themeColor) {
+    if (!btn) return;
+    if (active) {
+      btn.style.backgroundColor = themeColor;
+      btn.style.backdropFilter = "none";
+      btn.style.webkitBackdropFilter = "none";
+      btn.classList.add("text-white");
+      btn.classList.remove("text-gray-700");
+    } else {
+      btn.style.backgroundColor = "";
+      btn.style.backdropFilter = "";
+      btn.style.webkitBackdropFilter = "";
+      btn.classList.remove("text-white");
+      btn.classList.add("text-gray-700");
+    }
+  }
+  function applyChromeCssVars(chrome) {
+    const root = document.documentElement;
+    const o = Math.min(1, Math.max(0, chrome.opacity));
+    const b = Math.min(48, Math.max(0, chrome.blurPx));
+    root.style.setProperty("--map-ui-chrome-opacity", String(o));
+    root.style.setProperty("--map-ui-chrome-blur-px", b === 0 ? "0px" : `${b}px`);
+  }
+  function renderLegendItems(items, labelFontPx) {
+    const host = document.getElementById("graph-node-legend");
+    if (!host) return;
+    if (!items || items.length === 0) {
+      host.innerHTML = "";
+      host.classList.add("hidden");
+      return;
+    }
+    host.classList.remove("hidden");
+    const swatch = Math.max(6, Math.round(labelFontPx * 0.9));
+    const shown = items.slice(0, 8);
+    const rows = shown.map((item) => {
+      const dots = (item.colors ?? []).slice(0, 3).map(
+        (c) => `<span class="inline-block rounded-full border border-white/90 shadow-sm shrink-0" style="background-color:${escapeHtml2(c)};width:${swatch}px;height:${swatch}px"></span>`
+      ).join("");
+      return `<div class="flex items-center gap-2">
+        <div class="flex items-center gap-1.5">${dots}</div>
+        <span class="text-gray-500 font-medium truncate" style="font-size:${labelFontPx}px">${escapeHtml2(item.label)}</span>
+      </div>`;
+    }).join("");
+    const more = items.length > 8 ? `<div class="text-gray-500 mt-1" style="font-size:${Math.max(8, labelFontPx - 1)}px">\u2026\u5171 ${items.length} \u7C7B</div>` : "";
+    host.innerHTML = `<div class="flex flex-col gap-1.5">${rows}${more}</div>`;
+  }
+  function wireStandaloneGraphChrome(cy, payload, opts) {
+    const themeColor = payload.themeColor || "#2563eb";
+    let sizing = {
+      nodeSize: payload.nodeSize ?? DEFAULT_GRAPH_STYLESHEET_SIZING.nodeSize,
+      labelFontPx: payload.labelFontPx ?? DEFAULT_GRAPH_STYLESHEET_SIZING.labelFontPx,
+      edgeWeight: payload.edgeWeight ?? DEFAULT_GRAPH_STYLESHEET_SIZING.edgeWeight,
+      edgeLabelFontPx: payload.edgeLabelFontPx ?? DEFAULT_GRAPH_STYLESHEET_SIZING.edgeLabelFontPx
+    };
+    let legendFontPx = Math.max(
+      6,
+      Math.min(24, Math.round(payload.labelFontPx ?? DEFAULT_GRAPH_STYLESHEET_SIZING.labelFontPx))
+    );
+    let edgeCurve = payload.edgeCurve !== false;
+    let chrome = {
+      opacity: payload.chrome?.opacity ?? DEFAULT_MAP_UI_CHROME_OPACITY,
+      blurPx: payload.chrome?.blurPx ?? DEFAULT_MAP_UI_CHROME_BLUR_PX
+    };
+    let settingsOpen = false;
+    const btnSettings = document.getElementById("btnSettings");
+    const panelSettings = document.getElementById("graph-settings-panel");
+    let currentLegendItems = [...payload.legendItems ?? []];
+    const presets = (payload.presets ?? []).filter((p) => p && p.id);
+    let activePresetId = payload.activePresetId ?? null;
+    const applyStyles = () => {
+      applyChromeCssVars(chrome);
+      updateGraphStylesheet(
+        cy,
+        getGraphStylesheet(themeColor, sizing, chrome, { edgeCurve })
+      );
+      let maxDegree = 0;
+      cy.nodes().forEach((node) => {
+        if (node.hasClass("frame-cluster-halo") || node.hasClass("frame-cluster-label")) return;
+        const d = Number(node.data("linkDegree") ?? 0);
+        if (Number.isFinite(d) && d > maxDegree) maxDegree = d;
+      });
+      const favScale = 1.5;
+      const coreScale = GRAPH_FOCUS_CORE_NODE_SCALE;
+      cy.batch(() => {
+        cy.nodes().forEach((node) => {
+          if (node.hasClass("frame-cluster-halo") || node.hasClass("frame-cluster-label")) return;
+          const degree = Number(node.data("linkDegree") ?? 0);
+          const ns = graphNodeSizeFromDegree(
+            Number.isFinite(degree) ? degree : 0,
+            maxDegree,
+            sizing.nodeSize
+          );
+          node.data("nodeSize", ns);
+          node.data("nodeSizeFav", Math.round(ns * favScale * 100) / 100);
+          node.data("nodeSizeCore", Math.round(ns * coreScale * 100) / 100);
+          node.data("nodeSizeFavCore", Math.round(ns * favScale * coreScale * 100) / 100);
+        });
+      });
+      applyGraphHighlightLabelScreenSize(cy, sizing, chrome);
+      if (edgeCurve) syncGraphEdgeCurveDistances(cy);
+      if (opts?.chromeLabelOpts) {
+        opts.chromeLabelOpts.nodeSize = sizing.nodeSize;
+        opts.chromeLabelOpts.labelFontPx = sizing.labelFontPx;
+        opts.chromeLabelOpts.chromeOpacity = chrome.opacity;
+        opts.chromeLabelOpts.chromeBlurPx = chrome.blurPx;
+      }
+      renderLegendItems(currentLegendItems, legendFontPx);
+      opts?.onRefreshChromeLabels?.();
+    };
+    const applyPresetById = (id) => {
+      const preset = presets.find((p) => p.id === id);
+      if (!preset) return;
+      activePresetId = id;
+      applyGraphViewPresetToCy(cy, preset);
+      applyGraphViewPresetVisibility(cy, preset);
+      if (preset.tagHidden == null && preset.frameHidden == null) {
+        applyGraphDualLayerNodeVisibility(
+          cy,
+          payload.graphLayers?.hidden ?? [],
+          payload.graphFrameLayers?.hidden ?? [],
+          payload.graphLayers?.tagVisibilityLogic ?? "or"
+        );
+      }
+      if (edgeCurve) syncGraphEdgeCurveDistances(cy);
+      currentLegendItems = [...preset.legendItems ?? []];
+      renderLegendItems(currentLegendItems, legendFontPx);
+      scheduleGraphResizeAndFit(cy);
+      opts?.onRefreshChromeLabels?.();
+      const sel = document.getElementById("graph-preset-select");
+      if (sel) sel.value = id;
+    };
+    const syncOpenUi = () => {
+      setBtnActive(btnSettings, settingsOpen, themeColor);
+      panelSettings?.classList.toggle("hidden", !settingsOpen);
+    };
+    function renderSettings() {
+      if (!panelSettings) return;
+      const slider = (id, label, value, min, max, step, fmt) => `
+      <label class="block min-w-0">
+        <div class="mb-1 flex items-center justify-between gap-2">
+          <span class="text-xs font-medium text-gray-600">${label}</span>
+          <span class="tabular-nums text-[10px] text-gray-400" data-val-for="${id}">${fmt(value)}</span>
+        </div>
+        <input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}"
+          class="w-full" style="accent-color:${escapeHtml2(themeColor)}" />
+      </label>`;
+      panelSettings.innerHTML = `
+      <div class="flex items-center justify-between border-b border-gray-200/60 px-3 py-2.5">
+        <div class="text-sm font-semibold text-gray-900">\u8BBE\u7F6E</div>
+        <button type="button" data-close class="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100" aria-label="\u5173\u95ED">\u2715</button>
+      </div>
+      <div class="overflow-y-auto px-3 py-3 space-y-4" style="max-height:min(22rem,60dvh)">
+        <div>
+          <div class="mb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400">\u754C\u9762\u5916\u89C2</div>
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            ${slider("st-chrome-op", "\u9762\u677F\u80CC\u666F\u900F\u660E\u5EA6", chrome.opacity, 0.15, 1, 0.05, (v) => `${Math.round(v * 100)}%`)}
+            ${slider("st-chrome-blur", "\u80CC\u666F\u6A21\u7CCA\u534A\u5F84", chrome.blurPx, 0, 24, 1, (v) => `${Math.round(v)}px`)}
+          </div>
+        </div>
+        <div>
+          <div class="mb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Graph Style</div>
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            ${slider("st-node", "\u8282\u70B9\u6700\u5C0F\u5C3A\u5BF8", sizing.nodeSize, 1, GRAPH_NODE_SIZE_MAX_PX, 1, (v) => `${Math.round(v)}px`)}
+            ${slider("st-label", "\u8282\u70B9\u6807\u7B7E\u5B57\u53F7", sizing.labelFontPx, 4, 16, 1, (v) => `${Math.round(v)}px`)}
+            ${slider("st-legend", "\u56FE\u4F8B\u5B57\u53F7", legendFontPx, 6, 24, 1, (v) => `${Math.round(v)}px`)}
+            ${slider("st-edge-label", "\u8FB9\u6807\u7B7E\u5B57\u53F7", sizing.edgeLabelFontPx, 3, 16, 1, (v) => `${Math.round(v)}px`)}
+            <label class="flex min-w-0 cursor-pointer items-center justify-between gap-3 sm:col-span-2">
+              <span class="text-xs font-medium text-gray-600">\u8FDE\u7EBF\u66F2\u7EBF</span>
+              <input id="st-curve" type="checkbox" class="h-4 w-4 rounded border-gray-200" ${edgeCurve ? "checked" : ""} style="accent-color:${escapeHtml2(themeColor)}" />
+            </label>
+          </div>
+        </div>
+      </div>`;
+      panelSettings.querySelector("[data-close]")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        settingsOpen = false;
+        syncOpenUi();
+      });
+      const bindRange = (id, apply) => {
+        const el = panelSettings.querySelector(`#${id}`);
+        if (!el) return;
+        el.addEventListener("input", () => {
+          const v = Number(el.value);
+          apply(v);
+          const label = panelSettings.querySelector(`[data-val-for="${id}"]`);
+          if (label) {
+            if (id === "st-node" || id === "st-label" || id === "st-legend" || id === "st-edge-label" || id === "st-chrome-blur") {
+              label.textContent = `${Math.round(v)}px`;
+            } else if (id === "st-chrome-op") {
+              label.textContent = `${Math.round(v * 100)}%`;
+            } else {
+              label.textContent = String(Math.round(v));
+            }
+          }
+          applyStyles();
+        });
+      };
+      bindRange("st-node", (v) => {
+        sizing = { ...sizing, nodeSize: Math.round(Math.min(GRAPH_NODE_SIZE_MAX_PX, Math.max(1, v))) };
+      });
+      bindRange("st-label", (v) => {
+        sizing = { ...sizing, labelFontPx: Math.round(Math.min(16, Math.max(4, v))) };
+      });
+      bindRange("st-legend", (v) => {
+        legendFontPx = Math.round(Math.min(24, Math.max(6, v)));
+      });
+      bindRange("st-edge-label", (v) => {
+        sizing = { ...sizing, edgeLabelFontPx: Math.round(Math.min(16, Math.max(3, v))) };
+      });
+      bindRange("st-chrome-op", (v) => {
+        chrome = { ...chrome, opacity: Math.max(0.15, Math.min(1, v)) };
+      });
+      bindRange("st-chrome-blur", (v) => {
+        chrome = { ...chrome, blurPx: Math.round(Math.max(0, Math.min(24, v))) };
+      });
+      panelSettings.querySelector("#st-curve")?.addEventListener("change", (e) => {
+        edgeCurve = e.target.checked;
+        applyStyles();
+      });
+    }
+    btnSettings?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      settingsOpen = !settingsOpen;
+      syncOpenUi();
+      if (settingsOpen) renderSettings();
+    });
+    document.addEventListener("pointerdown", (e) => {
+      if (!settingsOpen) return;
+      const t = e.target;
+      const host = document.getElementById("graph-top-left");
+      if (host && t && host.contains(t)) return;
+      settingsOpen = false;
+      syncOpenUi();
+    });
+    renderLegendItems(currentLegendItems, legendFontPx);
+    applyChromeCssVars(chrome);
+    syncOpenUi();
+    const presetHost = document.getElementById("graph-preset-switcher");
+    const presetSelect = document.getElementById("graph-preset-select");
+    if (presets.length > 0 && presetHost && presetSelect) {
+      presetHost.classList.remove("hidden");
+      presetSelect.innerHTML = presets.map(
+        (p) => `<option value="${escapeHtml2(p.id)}">${escapeHtml2(p.name || "\u9884\u8BBE")}</option>`
+      ).join("");
+      const initial = (activePresetId && presets.some((p) => p.id === activePresetId) ? activePresetId : presets[0]?.id) || "";
+      if (initial) {
+        applyPresetById(initial);
+      }
+      presetSelect.addEventListener("change", () => {
+        applyPresetById(presetSelect.value);
+      });
+    } else {
+      presetHost?.classList.add("hidden");
+      scheduleGraphResizeAndFit(cy);
+    }
+  }
+
   // graph-standalone-entry.ts
   function main() {
     const boot = window.__KM_GRAPH__;
@@ -1266,7 +2017,14 @@
       wheelSensitivity: 0
     });
     attachBoardlikeWheelZoom(cy);
-    if (payload.graphLayers?.hidden?.length) {
+    if (payload.graphFrameLayers != null) {
+      applyGraphDualLayerNodeVisibility(
+        cy,
+        payload.graphLayers?.hidden ?? [],
+        payload.graphFrameLayers.hidden ?? [],
+        payload.graphLayers?.tagVisibilityLogic ?? "or"
+      );
+    } else if (payload.graphLayers?.hidden?.length) {
       applyGraphLayerNodeVisibility(
         cy,
         payload.graphLayers.hidden,
@@ -1280,18 +2038,17 @@
     const nodeSize = payload.nodeSize ?? DEFAULT_GRAPH_STYLESHEET_SIZING.nodeSize;
     applyGraphHighlightLabelScreenSize(cy, { nodeSize }, { opacity: chromeOpacity, blurPx: chromeBlurPx });
     attachGraphResizeObserver(cy, container);
-    scheduleGraphResizeAndFit(cy);
-    wireStandaloneGraphControls(cy, payload, boot.safeName);
     let refreshChromeLabels = null;
+    const chromeLabelOpts = {
+      themeColor: payload.themeColor,
+      nodeSize,
+      chromeOpacity,
+      chromeBlurPx,
+      host: stage,
+      labelFontPx: payload.labelFontPx ?? DEFAULT_GRAPH_STYLESHEET_SIZING.labelFontPx
+    };
     if (chromeLayer) {
-      refreshChromeLabels = wireStandaloneHighlightChromeLabels(cy, chromeLayer, {
-        themeColor: payload.themeColor,
-        nodeSize,
-        chromeOpacity,
-        chromeBlurPx,
-        host: stage,
-        labelFontPx: payload.labelFontPx ?? DEFAULT_GRAPH_STYLESHEET_SIZING.labelFontPx
-      });
+      refreshChromeLabels = wireStandaloneHighlightChromeLabels(cy, chromeLayer, chromeLabelOpts);
     }
     wireStandaloneGraphInteractions(
       cy,
@@ -1300,6 +2057,10 @@
       window.marked ?? null,
       () => refreshChromeLabels?.()
     );
+    wireStandaloneGraphChrome(cy, payload, {
+      onRefreshChromeLabels: () => refreshChromeLabels?.(),
+      chromeLabelOpts
+    });
     let labelSizeRaf = null;
     cy.on("viewport", () => {
       if (labelSizeRaf != null) return;
@@ -1308,8 +2069,8 @@
         if (cy.destroyed?.()) return;
         applyGraphHighlightLabelScreenSize(
           cy,
-          { nodeSize },
-          { opacity: chromeOpacity, blurPx: chromeBlurPx }
+          { nodeSize: chromeLabelOpts.nodeSize, labelFontPx: chromeLabelOpts.labelFontPx },
+          { opacity: chromeLabelOpts.chromeOpacity, blurPx: chromeLabelOpts.chromeBlurPx }
         );
       });
     });

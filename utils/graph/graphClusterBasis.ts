@@ -1,5 +1,5 @@
 import type { Frame, Note, Tag } from '../../types';
-import { tagHierarchyPrefix } from '../layer/tagHierarchy';
+import { tagHierarchyPrefix, tagHierarchySuffix } from '../layer/tagHierarchy';
 
 /** 与 graphRuntimeCore.GRAPH_UNTAGGED_TAG_GROUP 保持一致 */
 const UNTAGGED = '无标签';
@@ -106,4 +106,132 @@ export function resolveCyClusterGroupKey(
     if (tagHierarchyPrefix(label) === b) return label;
   }
   return '';
+}
+
+export type GraphNodeColorLegendItem = {
+  key: string;
+  label: string;
+  colors: string[];
+};
+
+/**
+ * 节点颜色图例条目（顺序：图层 order 优先，其余字母序）。
+ * 与 GraphView 左下角图例一致。
+ */
+export function buildGraphNodeColorLegendItems(opts: {
+  notes: Note[];
+  themeColor: string;
+  frames?: Frame[] | null;
+  clusterBasis?: unknown;
+  tagLayerOrder?: string[] | null;
+  frameLayerOrder?: string[] | null;
+}): GraphNodeColorLegendItem[] {
+  const themeColor = opts.themeColor;
+  const notes = opts.notes ?? [];
+  const frames = opts.frames ?? [];
+  const framesById = new Map(frames.map((f) => [String(f.id).trim(), f]));
+
+  const tagOrder = opts.tagLayerOrder ?? [];
+  const prefixes = new Set(
+    tagOrder
+      .map((k) => tagHierarchyPrefix(String(k).trim()))
+      .filter((p) => p && p !== UNTAGGED)
+  );
+  const raw = normalizeGraphClusterBasis(opts.clusterBasis);
+  const clusterBasis =
+    isFrameClusterBasis(raw) || prefixes.has(raw) ? raw : GRAPH_CLUSTER_BASIS_FRAME;
+
+  if (isFrameClusterBasis(clusterBasis)) {
+    const usedFrameIds = new Set<string>();
+    let hasUnframed = false;
+    for (const note of notes) {
+      const fid = String(note.groupIds?.[0] ?? note.groupId ?? '').trim();
+      if (fid && framesById.has(fid)) usedFrameIds.add(fid);
+      else hasUnframed = true;
+    }
+
+    const keysInOrder = opts.frameLayerOrder ?? [];
+    const seen = new Set<string>();
+    const ordered: string[] = [];
+    for (const k of keysInOrder) {
+      const key = String(k).trim();
+      if (!key) continue;
+      if (usedFrameIds.has(key) && !seen.has(key)) {
+        ordered.push(key);
+        seen.add(key);
+      }
+    }
+    const rest = [...usedFrameIds]
+      .filter((k) => !seen.has(k))
+      .sort((a, b) => {
+        const ta = framesById.get(a)?.title ?? a;
+        const tb = framesById.get(b)?.title ?? b;
+        return ta.localeCompare(tb, 'zh-Hans-CN');
+      });
+
+    const items = [...ordered, ...rest].map((id) => {
+      const f = framesById.get(id);
+      const color = (f?.color ?? themeColor).toString().trim() || themeColor;
+      return {
+        key: id,
+        label: f?.title?.trim() || id,
+        colors: [color]
+      };
+    });
+
+    if (hasUnframed) {
+      items.push({
+        key: '__no_frame__',
+        label: '无簇',
+        colors: [themeColor]
+      });
+    }
+    return items;
+  }
+
+  const usedKeys = new Set<string>();
+  let hasOther = false;
+  const colorByKey = new Map<string, string>();
+  for (const note of notes) {
+    const key = resolveNoteClusterGroupKey(note, clusterBasis);
+    if (!key) {
+      hasOther = true;
+      continue;
+    }
+    usedKeys.add(key);
+    if (!colorByKey.has(key)) {
+      const c = noteTagMatchingClusterBasis(note, clusterBasis)?.color?.trim();
+      if (c) colorByKey.set(key, c);
+    }
+  }
+
+  const keysInOrder = tagOrder;
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  for (const k of keysInOrder) {
+    const key = String(k).trim();
+    if (!key || tagHierarchyPrefix(key) !== clusterBasis) continue;
+    if (usedKeys.has(key) && !seen.has(key)) {
+      ordered.push(key);
+      seen.add(key);
+    }
+  }
+  const rest = [...usedKeys]
+    .filter((k) => !seen.has(k))
+    .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+
+  const items = [...ordered, ...rest].map((id) => ({
+    key: id,
+    label: tagHierarchySuffix(id) || id,
+    colors: [colorByKey.get(id) ?? themeColor]
+  }));
+
+  if (hasOther) {
+    items.push({
+      key: '__no_cluster_tag__',
+      label: '无/其他',
+      colors: [themeColor]
+    });
+  }
+  return items;
 }

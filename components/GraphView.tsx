@@ -54,13 +54,26 @@ import {
   GRAPH_CLUSTER_BASIS_FRAME,
   isFrameClusterBasis,
   normalizeGraphClusterBasis,
-  noteTagMatchingClusterBasis,
-  resolveNoteClusterGroupKey
+  buildGraphNodeColorLegendItems,
+  resolveNoteClusterGroupKey,
+  type GraphNodeColorLegendItem
 } from '../utils/graph/graphClusterBasis';
-import { tagHierarchyPrefix, tagHierarchySuffix } from '../utils/layer/tagHierarchy';
+import {
+  applyGraphViewPresetToCy,
+  applyGraphViewPresetVisibility,
+  captureGraphViewPreset,
+  deletePresetInStore,
+  loadGraphPresetsStore,
+  renamePresetInStore,
+  saveGraphPresetsStore,
+  upsertPresetInStore,
+  type GraphPresetsStore
+} from '../utils/graph/graphPresets';
+import { tagHierarchyPrefix } from '../utils/layer/tagHierarchy';
 import { GraphConnectionPanel, connectionToPanelDraft, type ConnectionDraft } from './graph/GraphConnectionPanel';
 import { GraphHighlightChromeLabels } from './graph/GraphHighlightChromeLabels';
 import { GraphRelatedHighlightPanel } from './graph/GraphRelatedHighlightPanel';
+import { applyWorkspaceRightEdgeForInspector } from '../utils/ui/chromeMenuPosition';
 import { EditInspectorPanel } from './map/overlays/MapEditInspectorPanel';
 import { GraphTopLeftToolbar } from './graph/GraphTopLeftToolbar';
 import { GraphTopCenterConnectionButton } from './graph/GraphTopCenterConnectionButton';
@@ -131,10 +144,31 @@ export const GraphView: React.FC<GraphViewProps> = ({
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
   const [showTagLayerPanel, setShowTagLayerPanel] = useState(false);
   const [showFrameLayerPanel, setShowFrameLayerPanel] = useState(false);
+  /** 临时图谱预设（IndexedDB，不进项目 JSON） */
+  const [graphPresetsStore, setGraphPresetsStore] = useState<GraphPresetsStore>({
+    presets: [],
+    activePresetId: null
+  });
+  /** 应用预设后覆盖左下角图例顺序；布局/依据变更时清空 */
+  const [presetLegendOverride, setPresetLegendOverride] = useState<GraphNodeColorLegendItem[] | null>(
+    null
+  );
   const graphTopLeftChromeRef = useRef<HTMLDivElement>(null);
   /** 详情 / 关联面板 top：避开左上角按钮与已展开面板 */
   const [previewOffsetTopPx, setPreviewOffsetTopPx] = useState(64);
   const isGraphToolbarEditMode = workspaceEditMode;
+
+  useEffect(() => {
+    const active = isUIVisible && isGraphToolbarEditMode;
+    const apply = () => applyWorkspaceRightEdgeForInspector(active);
+    apply();
+    window.addEventListener('resize', apply);
+    return () => {
+      window.removeEventListener('resize', apply);
+      applyWorkspaceRightEdgeForInspector(false);
+    };
+  }, [isUIVisible, isGraphToolbarEditMode]);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const graphStageRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
@@ -302,104 +336,19 @@ export const GraphView: React.FC<GraphViewProps> = ({
   const edgeElasticity =
     project.graphEdgeElasticity ?? DEFAULT_GRAPH_EDGE_ELASTICITY;
 
-  /** 节点颜色图例：随聚类依据（簇 / 一级前缀下的首标签） */
+  /** 节点颜色图例：随聚类依据（簇 / 一级前缀下的首标签）与图层顺序；预设可覆盖 */
   const nodeColorLegendItems = useMemo(() => {
-    if (isFrameClusterBasis(clusterBasis)) {
-      const frames = project.frames ?? [];
-      const framesById = new Map(frames.map((f) => [String(f.id).trim(), f]));
-      const usedFrameIds = new Set<string>();
-      let hasUnframed = false;
-      for (const note of notes) {
-        const fid = String(note.groupIds?.[0] ?? note.groupId ?? '').trim();
-        if (fid && framesById.has(fid)) usedFrameIds.add(fid);
-        else hasUnframed = true;
-      }
-
-      const keysInOrder = mergedFrameGraphLayers.order ?? [];
-      const seen = new Set<string>();
-      const ordered: string[] = [];
-      for (const k of keysInOrder) {
-        const key = String(k).trim();
-        if (!key) continue;
-        if (usedFrameIds.has(key) && !seen.has(key)) {
-          ordered.push(key);
-          seen.add(key);
-        }
-      }
-      const rest = [...usedFrameIds]
-        .filter((k) => !seen.has(k))
-        .sort((a, b) => {
-          const ta = framesById.get(a)?.title ?? a;
-          const tb = framesById.get(b)?.title ?? b;
-          return ta.localeCompare(tb, 'zh-Hans-CN');
-        });
-
-      const items = [...ordered, ...rest].map((id) => {
-        const f = framesById.get(id);
-        const color = (f?.color ?? themeColor).toString().trim() || themeColor;
-        return {
-          key: id,
-          label: f?.title?.trim() || id,
-          colors: [color]
-        };
-      });
-
-      if (hasUnframed) {
-        items.push({
-          key: '__no_frame__',
-          label: '无簇',
-          colors: [themeColor]
-        });
-      }
-      return items;
-    }
-
-    const usedKeys = new Set<string>();
-    let hasOther = false;
-    const colorByKey = new Map<string, string>();
-    for (const note of notes) {
-      const key = resolveNoteClusterGroupKey(note, clusterBasis);
-      if (!key) {
-        hasOther = true;
-        continue;
-      }
-      usedKeys.add(key);
-      if (!colorByKey.has(key)) {
-        const c = noteTagMatchingClusterBasis(note, clusterBasis)?.color?.trim();
-        if (c) colorByKey.set(key, c);
-      }
-    }
-
-    const keysInOrder = mergedTagGraphLayers.order ?? [];
-    const seen = new Set<string>();
-    const ordered: string[] = [];
-    for (const k of keysInOrder) {
-      const key = String(k).trim();
-      if (!key || tagHierarchyPrefix(key) !== clusterBasis) continue;
-      if (usedKeys.has(key) && !seen.has(key)) {
-        ordered.push(key);
-        seen.add(key);
-      }
-    }
-    const rest = [...usedKeys]
-      .filter((k) => !seen.has(k))
-      .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
-
-    const items = [...ordered, ...rest].map((id) => ({
-      key: id,
-      label: tagHierarchySuffix(id) || id,
-      colors: [colorByKey.get(id) ?? themeColor]
-    }));
-
-    if (hasOther) {
-      items.push({
-        key: '__no_cluster_tag__',
-        label: '无/其他',
-        colors: [themeColor]
-      });
-    }
-    return items;
+    if (presetLegendOverride && presetLegendOverride.length > 0) return presetLegendOverride;
+    return buildGraphNodeColorLegendItems({
+      notes,
+      themeColor,
+      frames: project.frames,
+      clusterBasis,
+      tagLayerOrder: mergedTagGraphLayers.order,
+      frameLayerOrder: mergedFrameGraphLayers.order
+    });
   }, [
+    presetLegendOverride,
     notes,
     themeColor,
     project.frames,
@@ -1298,6 +1247,23 @@ export const GraphView: React.FC<GraphViewProps> = ({
       blurPx: mapUiChromeBlurPx
     });
     patchGraphElementsData(cy, elements);
+    // 数据同步会按 clusterBasis 重写颜色；若正在用预设图例覆盖，把预设色写回
+    if (presetLegendOverride && graphPresetsStore.activePresetId) {
+      const preset = graphPresetsStore.presets.find(
+        (p) => p.id === graphPresetsStore.activePresetId
+      );
+      if (preset?.nodeColors) {
+        cy.batch(() => {
+          for (const [id, color] of Object.entries(preset.nodeColors)) {
+            const n = cy.getElementById(id);
+            if (n.empty() || !n.isNode()) continue;
+            if (n.hasClass('frame-cluster-label') || n.hasClass('frame-cluster-halo')) continue;
+            const c = String(color ?? '').trim();
+            if (c) n.data('color', c);
+          }
+        });
+      }
+    }
     if (graphEdgeCurve) syncGraphEdgeCurveDistances(cy);
     applyGraphNeighborHighlight(
       cy,
@@ -1324,7 +1290,10 @@ export const GraphView: React.FC<GraphViewProps> = ({
     tagGraphLayersWeightsKey,
     syncDualLayerVisibility,
     clusterBasis,
-    project.frames
+    project.frames,
+    presetLegendOverride,
+    graphPresetsStore.activePresetId,
+    graphPresetsStore.presets
   ]);
 
   /** 边标签筛选变化时单独刷新高亮（避免整图数据重同步） */
@@ -1498,6 +1467,157 @@ export const GraphView: React.FC<GraphViewProps> = ({
     }
   }, [persistGraphLayout, timeLayoutOpts, timeClusterLayers, clusterBasis]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const store = await loadGraphPresetsStore(projectId);
+      if (cancelled) return;
+      setGraphPresetsStore(store);
+      setPresetLegendOverride(null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  /** 布局模式或聚类依据变化时，预设图例覆盖失效（点位仍可保留在 cy） */
+  useEffect(() => {
+    setPresetLegendOverride(null);
+  }, [activeGraphLayout, clusterBasis]);
+
+  const persistPresetsStore = useCallback(
+    (next: GraphPresetsStore) => {
+      setGraphPresetsStore(next);
+      void saveGraphPresetsStore(projectId, next);
+    },
+    [projectId]
+  );
+
+  const capturePresetOpts = useCallback(
+    (name: string, existingId?: string) => ({
+      name,
+      existingId,
+      notes,
+      themeColor,
+      frames: project.frames,
+      clusterBasis,
+      tagLayerOrder: mergedTagGraphLayers.order,
+      frameLayerOrder: mergedFrameGraphLayers.order,
+      tagHidden: mergedTagGraphLayers.hidden,
+      frameHidden: mergedFrameGraphLayers.hidden,
+      tagVisibilityLogic: mergedTagGraphLayers.tagVisibilityLogic
+    }),
+    [
+      notes,
+      themeColor,
+      project.frames,
+      clusterBasis,
+      mergedTagGraphLayers.order,
+      mergedTagGraphLayers.hidden,
+      mergedTagGraphLayers.tagVisibilityLogic,
+      mergedFrameGraphLayers.order,
+      mergedFrameGraphLayers.hidden
+    ]
+  );
+
+  const handleSaveGraphPreset = useCallback(
+    (name: string) => {
+      const cy = cyRef.current;
+      if (!cy) return;
+      const preset = captureGraphViewPreset(cy, capturePresetOpts(name));
+      const next = upsertPresetInStore(graphPresetsStore, preset);
+      persistPresetsStore(next);
+      setPresetLegendOverride(preset.legendItems);
+    },
+    [capturePresetOpts, graphPresetsStore, persistPresetsStore]
+  );
+
+  /** 用当前视图覆盖已有预设（保留 id / 名称） */
+  const handleUpdateGraphPreset = useCallback(
+    (id: string) => {
+      const cy = cyRef.current;
+      const existing = graphPresetsStore.presets.find((p) => p.id === id);
+      if (!cy || !existing) return;
+      const preset = captureGraphViewPreset(cy, capturePresetOpts(existing.name, id));
+      const next = upsertPresetInStore(graphPresetsStore, preset);
+      persistPresetsStore({ ...next, activePresetId: id });
+      setPresetLegendOverride(preset.legendItems);
+    },
+    [capturePresetOpts, graphPresetsStore, persistPresetsStore]
+  );
+
+  const handleApplyGraphPreset = useCallback(
+    (id: string) => {
+      const cy = cyRef.current;
+      const preset = graphPresetsStore.presets.find((p) => p.id === id);
+      if (!cy || !preset) return;
+      applyGraphViewPresetToCy(cy, preset);
+      applyGraphViewPresetVisibility(cy, preset);
+      if (project.graphEdgeCurve !== false) syncGraphEdgeCurveDistances(cy);
+      scheduleGraphResizeAndFit(cy);
+      setPresetLegendOverride(preset.legendItems);
+      persistPresetsStore({ ...graphPresetsStore, activePresetId: id });
+
+      // 同步图层面板眼睛（会话内项目状态；预设库本身仍不进项目导出 JSON）
+      if (onUpdateProject && projectId) {
+        if (preset.tagHidden != null || preset.frameHidden != null) {
+          void onUpdateProject(projectId, {
+            graphLayers: {
+              order: mergedTagGraphLayers.order ?? [],
+              hidden: preset.tagHidden ?? [],
+              weights: mergedTagGraphLayers.weights,
+              tagVisibilityLogic: preset.tagVisibilityLogic === 'and' ? 'and' : 'or'
+            },
+            graphFrameLayers: {
+              order: mergedFrameGraphLayers.order ?? [],
+              hidden: preset.frameHidden ?? [],
+              weights: mergedFrameGraphLayers.weights
+            }
+          });
+        }
+      }
+
+      if (preset.layerItemHidden && onUpdateProject) {
+        const map = preset.layerItemHidden;
+        const nextNotes = notes.map((n) => {
+          if (!(n.id in map)) return n;
+          const want = Boolean(map[n.id]);
+          if (Boolean(n.layerItemHidden) === want) return n;
+          return { ...n, layerItemHidden: want };
+        });
+        const changed = nextNotes.some((n, i) => n !== notes[i]);
+        if (changed) void handleBatchUpdateNotes(nextNotes);
+      }
+    },
+    [
+      graphPresetsStore,
+      persistPresetsStore,
+      project.graphEdgeCurve,
+      onUpdateProject,
+      projectId,
+      mergedTagGraphLayers,
+      mergedFrameGraphLayers,
+      notes,
+      handleBatchUpdateNotes
+    ]
+  );
+
+  const handleRenameGraphPreset = useCallback(
+    (id: string, name: string) => {
+      persistPresetsStore(renamePresetInStore(graphPresetsStore, id, name));
+    },
+    [graphPresetsStore, persistPresetsStore]
+  );
+
+  const handleDeleteGraphPreset = useCallback(
+    (id: string) => {
+      const next = deletePresetInStore(graphPresetsStore, id);
+      persistPresetsStore(next);
+      if (graphPresetsStore.activePresetId === id) setPresetLegendOverride(null);
+    },
+    [graphPresetsStore, persistPresetsStore]
+  );
+
   const saveEdgeLabel = useCallback(() => {
     if (!selectedConn || !onUpdateConnections) return;
     const next = connections.map((c) =>
@@ -1512,12 +1632,24 @@ export const GraphView: React.FC<GraphViewProps> = ({
     const payload = buildGraphExportPayload(project, themeColor, cy, {
       chromeOpacity: mapUiChromeOpacity,
       chromeBlurPx: mapUiChromeBlurPx,
-      chainLength
+      chainLength,
+      presets: graphPresetsStore.presets,
+      activePresetId: graphPresetsStore.activePresetId,
+      legendItemsOverride: presetLegendOverride
     });
     const html = buildStandaloneGraphHtml(payload);
     const safe = (project.name || 'graph').replace(/[/\\\\?%*:|"<>]/g, '_');
     downloadTextFile(`${safe}-graph-demo.html`, html, 'text/html;charset=utf-8');
-  }, [project, themeColor, mapUiChromeOpacity, mapUiChromeBlurPx, chainLength]);
+  }, [
+    project,
+    themeColor,
+    mapUiChromeOpacity,
+    mapUiChromeBlurPx,
+    chainLength,
+    graphPresetsStore.presets,
+    graphPresetsStore.activePresetId,
+    presetLegendOverride
+  ]);
 
   const exportJson = useCallback(() => {
     const cy = cyRef.current;
@@ -1525,11 +1657,23 @@ export const GraphView: React.FC<GraphViewProps> = ({
     const payload = buildGraphExportPayload(project, themeColor, cy, {
       chromeOpacity: mapUiChromeOpacity,
       chromeBlurPx: mapUiChromeBlurPx,
-      chainLength
+      chainLength,
+      presets: graphPresetsStore.presets,
+      activePresetId: graphPresetsStore.activePresetId,
+      legendItemsOverride: presetLegendOverride
     });
     const safe = (project.name || 'graph').replace(/[/\\\\?%*:|"<>]/g, '_');
     downloadGraphPayloadJson(payload, safe);
-  }, [project, themeColor, mapUiChromeOpacity, mapUiChromeBlurPx, chainLength]);
+  }, [
+    project,
+    themeColor,
+    mapUiChromeOpacity,
+    mapUiChromeBlurPx,
+    chainLength,
+    graphPresetsStore.presets,
+    graphPresetsStore.activePresetId,
+    presetLegendOverride
+  ]);
 
   const exportMappViz = useCallback(() => {
     if (!(project.notes || []).length) {
@@ -1746,6 +1890,13 @@ export const GraphView: React.FC<GraphViewProps> = ({
         onLocateNote={focusNoteOnGraphFromPanel}
         graphCyKey={nodeStructureKey}
         reserveRightForInspector={isGraphToolbarEditMode}
+        graphPresets={graphPresetsStore.presets}
+        activeGraphPresetId={graphPresetsStore.activePresetId}
+        onSaveGraphPreset={handleSaveGraphPreset}
+        onUpdateGraphPreset={handleUpdateGraphPreset}
+        onApplyGraphPreset={handleApplyGraphPreset}
+        onRenameGraphPreset={handleRenameGraphPreset}
+        onDeleteGraphPreset={handleDeleteGraphPreset}
       />
 
       <GraphLayoutModeBar

@@ -420,7 +420,7 @@ export const TableView: React.FC<TableViewProps> = ({
         onToggleConnectionPanel={toggleConnectionPanel}
       />
       <div
-        className="flex-1 min-h-0 overflow-auto pl-4 pb-28 box-border pr-16 sm:pr-[4.5rem]"
+        className="flex-1 min-h-0 overflow-auto px-4 sm:px-6 pb-28 box-border"
         style={{ paddingTop: tableScrollTopPad }}
       >
         {subView === 'points' ? (

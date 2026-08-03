@@ -1,5 +1,11 @@
 import { useState, useMemo } from 'react';
-import { MAP_STYLE_OPTIONS, MAP_SATELLITE_URL, MAP_SATELLITE_ATTRIBUTION } from '../../constants';
+import {
+  MAP_STYLE_OPTIONS,
+  MAP_SATELLITE_URL,
+  MAP_SATELLITE_ATTRIBUTION,
+  MAP_SATELLITE_MAX_NATIVE_ZOOM,
+  MAP_MAX_ZOOM
+} from '../../constants';
 
 interface UseMapStylingProps {
   mapStyleId?: string;
@@ -34,13 +40,18 @@ export const useMapStyling = ({ mapStyleId, onMapStyleChange }: UseMapStylingPro
     if (effectiveMapStyle === 'satellite') {
       return {
         url: MAP_SATELLITE_URL,
-        attribution: MAP_SATELLITE_ATTRIBUTION
+        attribution: MAP_SATELLITE_ATTRIBUTION,
+        // 高缩放下请求原生瓦片易得到 Esri 空占位图；限制原生级别并拉伸较低清晰度瓦片
+        maxNativeZoom: MAP_SATELLITE_MAX_NATIVE_ZOOM,
+        maxZoom: MAP_MAX_ZOOM
       };
     } else {
       const styleOption = MAP_STYLE_OPTIONS.find(s => s.id === effectiveMapStyle) || MAP_STYLE_OPTIONS[0];
       return {
         url: styleOption.url,
-        attribution: styleOption.attribution
+        attribution: styleOption.attribution,
+        maxNativeZoom: MAP_MAX_ZOOM,
+        maxZoom: MAP_MAX_ZOOM
       };
     }
   }, [effectiveMapStyle]);

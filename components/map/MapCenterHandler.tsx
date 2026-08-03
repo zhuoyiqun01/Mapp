@@ -4,12 +4,46 @@ import { useMap } from 'react-leaflet';
 interface MapCenterHandlerProps {
   center: [number, number];
   zoom: number;
+  /**
+   * When true, allow one additional setView after the initial center
+   * (e.g. empty project started on fallback, then geolocation arrived).
+   */
+  allowLateCenterUpdate?: boolean;
+  lateCenter?: [number, number] | null;
+  lateZoom?: number;
 }
 
-export const MapCenterHandler: React.FC<MapCenterHandlerProps> = ({ center, zoom }) => {
+export const MapCenterHandler: React.FC<MapCenterHandlerProps> = ({
+  center,
+  zoom,
+  allowLateCenterUpdate = false,
+  lateCenter = null,
+  lateZoom = 16
+}) => {
   const map = useMap();
   const hasCenteredRef = useRef(false);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const hasAppliedLateCenterRef = useRef(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lateCenterRef = useRef<[number, number] | null>(null);
+  const lateZoomRef = useRef(lateZoom);
+  const allowLateRef = useRef(allowLateCenterUpdate);
+
+  lateCenterRef.current = lateCenter;
+  lateZoomRef.current = lateZoom;
+  allowLateRef.current = allowLateCenterUpdate;
+
+  const tryApplyLateCenter = () => {
+    if (!allowLateRef.current || hasAppliedLateCenterRef.current || !lateCenterRef.current || !map) {
+      return;
+    }
+    if (!hasCenteredRef.current) return;
+    try {
+      map.setView(lateCenterRef.current, lateZoomRef.current, { animate: true });
+      hasAppliedLateCenterRef.current = true;
+    } catch (error) {
+      console.warn('MapCenterHandler: Failed to apply late center:', error);
+    }
+  };
 
   useEffect(() => {
     // 只在首次初始化时执行一次
@@ -30,6 +64,7 @@ export const MapCenterHandler: React.FC<MapCenterHandlerProps> = ({ center, zoom
               // 重新设置视图以确保居中（仅首次）
               map.setView(center, zoom, { animate: false });
               hasCenteredRef.current = true;
+              tryApplyLateCenter();
             } catch (error) {
               console.warn('MapCenterHandler: Failed to set view:', error);
             }
@@ -49,6 +84,10 @@ export const MapCenterHandler: React.FC<MapCenterHandlerProps> = ({ center, zoom
     };
   }, []); // 空依赖数组，只在组件挂载时执行一次
 
+  // Late geolocation center: one-shot after initial fallback
+  useEffect(() => {
+    tryApplyLateCenter();
+  }, [allowLateCenterUpdate, lateCenter, lateZoom, map]);
+
   return null;
 };
-

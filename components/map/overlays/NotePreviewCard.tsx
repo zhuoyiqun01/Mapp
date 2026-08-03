@@ -1,8 +1,10 @@
 import React from 'react';
-import { ChevronLeft, ChevronRight, Pencil } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Navigation, Pencil } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import type { Note } from '../../../types';
 import { parseNoteContent } from '../../../utils';
+import { noteHasRenderableMapPosition } from '../../../utils/layer/unifiedNoteLayer';
+import { openExternalNavigation } from '../../../utils/map/openExternalNavigation';
 import { chromePanelGhostIconButtonClass } from '../../ui/chromePanelIconButton';
 import { PortalTooltip } from '../../ui/PortalTooltip';
 
@@ -55,6 +57,7 @@ export const NotePreviewCard: React.FC<NotePreviewCardProps> = ({
 
   const topPx = offsetTopPx ?? 16;
   const showEdit = Boolean(onOpenEditor) && !passThrough;
+  const showGo = noteHasRenderableMapPosition(note) && !passThrough;
 
   return (
     <div
@@ -109,21 +112,43 @@ export const NotePreviewCard: React.FC<NotePreviewCardProps> = ({
             ) : null}
           </div>
         </div>
-        {showEdit ? (
-          <PortalTooltip content="编辑" compact>
-            <button
-              type="button"
-              className={`${chromePanelGhostIconButtonClass} mt-0.5`}
-              aria-label="编辑"
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenEditor?.(note.id);
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-            >
-              <Pencil size={14} strokeWidth={2} aria-hidden />
-            </button>
-          </PortalTooltip>
+        {showGo || showEdit ? (
+          <div className="flex shrink-0 items-center gap-0.5 mt-0.5">
+            {showGo ? (
+              <PortalTooltip content="Go · 外部导航" compact>
+                <button
+                  type="button"
+                  className={chromePanelGhostIconButtonClass}
+                  aria-label="Go 外部导航"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openExternalNavigation(note.coords.lat, note.coords.lng, {
+                      label: parseNoteContent(note.text || '').title || undefined
+                    });
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  <Navigation size={14} strokeWidth={2} aria-hidden />
+                </button>
+              </PortalTooltip>
+            ) : null}
+            {showEdit ? (
+              <PortalTooltip content="编辑" compact>
+                <button
+                  type="button"
+                  className={chromePanelGhostIconButtonClass}
+                  aria-label="编辑"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenEditor?.(note.id);
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  <Pencil size={14} strokeWidth={2} aria-hidden />
+                </button>
+              </PortalTooltip>
+            ) : null}
+          </div>
         ) : null}
       </div>
 

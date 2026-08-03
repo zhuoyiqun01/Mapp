@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Settings, Tag as TagIcon, Frame as FrameIcon } from 'lucide-react';
 import { ChromeIconButton } from '../ui/ChromeIconButton';
 import { ProjectNotesLayerPanel } from '../layer/ProjectNotesLayerPanel';
@@ -59,6 +59,9 @@ export const GraphTopLeftToolbar: React.FC<Props> = ({
   onActivateNoteFromLayer,
   chromeHostRef
 }) => {
+  const tagBtnWrapRef = useRef<HTMLDivElement>(null);
+  const frameBtnWrapRef = useRef<HTMLDivElement>(null);
+
   if (!isUIVisible) return null;
 
   const closePanels = () => {
@@ -95,7 +98,7 @@ export const GraphTopLeftToolbar: React.FC<Props> = ({
         </ChromeIconButton>
         {canShowLayer ? (
           <>
-            <div className="relative">
+            <div ref={tagBtnWrapRef}>
               <ChromeIconButton
                 themeColor={themeColor}
                 chromeSurfaceStyle={chromeSurfaceStyle}
@@ -114,28 +117,8 @@ export const GraphTopLeftToolbar: React.FC<Props> = ({
               >
                 <TagIcon size={18} className="sm:w-5 sm:h-5" />
               </ChromeIconButton>
-              {showTagLayerPanel ? (
-                <ProjectNotesLayerPanel
-                  themeColor={themeColor}
-                  panelChromeStyle={panelChromeStyle}
-                  variant="graph"
-                  embed={false}
-                  dockAlign="start"
-                  merged={mergedTagLayers}
-                  layerGroupStandard="tag"
-                  hideStandardToggle
-                  onLayerGroupStandardChange={() => {}}
-                  onStateChange={onTagLayersChange}
-                  notes={notes}
-                  onUpdateNote={onUpdateNote}
-                  onBatchUpdateNotes={onBatchUpdateNotes}
-                  frames={frames}
-                  projectId={projectId}
-                  onActivateNote={onActivateNoteFromLayer}
-                />
-              ) : null}
             </div>
-            <div className="relative">
+            <div ref={frameBtnWrapRef}>
               <ChromeIconButton
                 themeColor={themeColor}
                 chromeSurfaceStyle={chromeSurfaceStyle}
@@ -154,31 +137,57 @@ export const GraphTopLeftToolbar: React.FC<Props> = ({
               >
                 <FrameIcon size={18} className="sm:w-5 sm:h-5" />
               </ChromeIconButton>
-              {showFrameLayerPanel ? (
-                <ProjectNotesLayerPanel
-                  themeColor={themeColor}
-                  panelChromeStyle={panelChromeStyle}
-                  variant="graph"
-                  embed={false}
-                  dockAlign="start"
-                  merged={mergedFrameLayers}
-                  layerGroupStandard="frame"
-                  hideStandardToggle
-                  onLayerGroupStandardChange={() => {}}
-                  onStateChange={onFrameLayersChange}
-                  notes={notes}
-                  onUpdateNote={onUpdateNote}
-                  onBatchUpdateNotes={onBatchUpdateNotes}
-                  frames={frames}
-                  onUpdateFrame={onUpdateFrame}
-                  projectId={projectId}
-                  onActivateNote={onActivateNoteFromLayer}
-                />
-              ) : null}
             </div>
           </>
         ) : null}
       </div>
+      {showTagLayerPanel ? (
+        <div className="pointer-events-auto">
+          <ProjectNotesLayerPanel
+            themeColor={themeColor}
+            panelChromeStyle={panelChromeStyle}
+            variant="graph"
+            embed={false}
+            dockAlign="start"
+            menuAnchorRef={tagBtnWrapRef}
+            merged={mergedTagLayers}
+            layerGroupStandard="tag"
+            hideStandardToggle
+            onLayerGroupStandardChange={() => {}}
+            onStateChange={onTagLayersChange}
+            notes={notes}
+            onUpdateNote={onUpdateNote}
+            onBatchUpdateNotes={onBatchUpdateNotes}
+            frames={frames}
+            projectId={projectId}
+            onActivateNote={onActivateNoteFromLayer}
+          />
+        </div>
+      ) : null}
+      {showFrameLayerPanel ? (
+        <div className="pointer-events-auto">
+          <ProjectNotesLayerPanel
+            themeColor={themeColor}
+            panelChromeStyle={panelChromeStyle}
+            variant="graph"
+            embed={false}
+            dockAlign="start"
+            menuAnchorRef={frameBtnWrapRef}
+            merged={mergedFrameLayers}
+            layerGroupStandard="frame"
+            hideStandardToggle
+            onLayerGroupStandardChange={() => {}}
+            onStateChange={onFrameLayersChange}
+            notes={notes}
+            onUpdateNote={onUpdateNote}
+            onBatchUpdateNotes={onBatchUpdateNotes}
+            frames={frames}
+            onUpdateFrame={onUpdateFrame}
+            projectId={projectId}
+            onActivateNote={onActivateNoteFromLayer}
+          />
+        </div>
+      ) : null}
     </div>
   );
 };

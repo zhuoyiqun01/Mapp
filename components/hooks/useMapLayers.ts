@@ -32,12 +32,24 @@ export const useMapLayers = ({ notes, projectFrames }: UseMapLayersProps) => {
     }
   }, [projectFrames, frameLayerVisibility]);
 
-  // Close frame layer panel when clicking outside
+  // Close frame layer panel when clicking outside (panel is portaled to body)
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (frameLayerRef.current && !frameLayerRef.current.contains(event.target as Node)) {
-        setShowFrameLayerPanel(false);
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (frameLayerRef.current?.contains(target)) return;
+      if (target instanceof Element) {
+        // MapLayerControl / ProjectNotesLayerPanel / 颜色与时间浮层均可能 portal 到 body
+        if (
+          target.closest('[data-map-layer-chrome-panel]') ||
+          target.closest('[data-graph-top-left-panel]') ||
+          target.closest('[data-tag-add-panel]') ||
+          target.closest('[data-note-time-range-panel]')
+        ) {
+          return;
+        }
       }
+      setShowFrameLayerPanel(false);
     };
 
     if (showFrameLayerPanel) {

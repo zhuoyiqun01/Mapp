@@ -143,6 +143,7 @@ export const TagAddPanel: React.FC<TagAddPanelProps> = ({
     return createPortal(
       <div
         ref={rootRef}
+        data-tag-add-panel
         className={`w-[min(100vw-16px,260px)] max-w-[min(100vw-16px,260px)] ${shellClass}`}
         style={{
           ...(panelChromeStyle || {}),
@@ -164,6 +165,7 @@ export const TagAddPanel: React.FC<TagAddPanelProps> = ({
   return (
     <div
       ref={rootRef}
+      data-tag-add-panel
       className={`w-full max-w-[min(100vw-24px,260px)] ${shellClass}`}
       style={panelChromeStyle}
       onClick={(e) => e.stopPropagation()}

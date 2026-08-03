@@ -3,6 +3,7 @@ import {
   EditInspectorPanel,
   type EditInspectorPanelProps
 } from '../map/overlays/MapEditInspectorPanel';
+import { applyWorkspaceRightEdgeForInspector } from '../../utils/ui/chromeMenuPosition';
 
 type EditInspectorContextValue = {
   setPayload: (p: EditInspectorPanelProps | null) => void;
@@ -18,6 +19,17 @@ export function EditInspectorProvider({ children }: { children: React.ReactNode 
   const setPayloadStable = useCallback((p: EditInspectorPanelProps | null) => {
     setPayload(p);
   }, []);
+
+  useEffect(() => {
+    const apply = () => applyWorkspaceRightEdgeForInspector(!!payload);
+    apply();
+    window.addEventListener('resize', apply);
+    return () => {
+      window.removeEventListener('resize', apply);
+      applyWorkspaceRightEdgeForInspector(false);
+    };
+  }, [payload]);
+
   return (
     <EditInspectorContext.Provider value={{ setPayload: setPayloadStable }}>
       {children}

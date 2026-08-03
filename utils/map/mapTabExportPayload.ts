@@ -1,5 +1,5 @@
 import type { Map as LeafletMap } from 'leaflet';
-import { MAP_STYLE_OPTIONS } from '../../constants';
+import { MAP_MAX_ZOOM, MAP_SATELLITE_MAX_NATIVE_ZOOM, MAP_STYLE_OPTIONS } from '../../constants';
 import type { Connection, Note, Project } from '../../types';
 import { parseNoteContent } from '../../utils';
 
@@ -27,6 +27,9 @@ export interface MapTabExportPayload {
   mapStyleId: string;
   tileUrl: string;
   tileAttribution: string;
+  /** 瓦片原生最大级别；卫星图低于 maxZoom，超出后拉伸较低清晰度瓦片 */
+  maxNativeZoom?: number;
+  maxZoom?: number;
   center: [number, number];
   zoom: number;
   pinSize: number;
@@ -124,6 +127,8 @@ export async function buildMapTabExportPayload(
     mapStyleId,
     tileUrl: style.url,
     tileAttribution: style.attribution,
+    maxNativeZoom: mapStyleId === 'satellite' ? MAP_SATELLITE_MAX_NATIVE_ZOOM : MAP_MAX_ZOOM,
+    maxZoom: MAP_MAX_ZOOM,
     center: [c.lat, c.lng],
     zoom: map.getZoom(),
     pinSize: opts.pinSize,
