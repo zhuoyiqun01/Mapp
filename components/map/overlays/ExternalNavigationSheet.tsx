@@ -5,7 +5,7 @@ import {
   listExternalMapApps,
   openExternalMapApp,
   type ExternalMapAppId
-} from '../../utils/map/openExternalNavigation';
+} from '../../../utils/map/openExternalNavigation';
 
 type Props = {
   open: boolean;
