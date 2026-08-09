@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useMap } from 'react-leaflet';
 import { Note } from '../../types';
 import { THEME_COLOR } from '../../constants';
-import { Locate, Loader2, Type, Settings, MapPin } from 'lucide-react';
+import { Locate, Loader2, Settings, MapPin } from 'lucide-react';
 import { ChromeIconButton } from '../ui/ChromeIconButton';
 
 interface MapControlsProps {
@@ -13,8 +13,6 @@ interface MapControlsProps {
   /** 非主题色浮层面板：半透明白底 + backdrop-filter */
   chromeSurfaceStyle?: React.CSSProperties;
   chromeHoverBackground?: string;
-  showTextLabels: boolean;
-  setShowTextLabels: (show: boolean) => void;
   onOpenSettings: () => void;
   /** 设置按钮是否处于打开态（高亮） */
   settingsOpen?: boolean;
@@ -29,8 +27,6 @@ export const MapControls: React.FC<MapControlsProps> = ({
   themeColor = THEME_COLOR,
   chromeSurfaceStyle,
   chromeHoverBackground,
-  showTextLabels,
-  setShowTextLabels,
   onOpenSettings,
   settingsOpen = false,
   settingsButtonRef
@@ -133,18 +129,6 @@ export const MapControls: React.FC<MapControlsProps> = ({
         </ChromeIconButton>
       </div>
 
-      <ChromeIconButton
-        themeColor={themeColor}
-        chromeSurfaceStyle={neutralStyle}
-        chromeHoverBackground={neutralHover}
-        active={showTextLabels}
-        onClick={() => setShowTextLabels(!showTextLabels)}
-        onPointerMove={(e) => e.stopPropagation()}
-        tooltip={showTextLabels ? '隐藏标签' : '标签'}
-      >
-        <Type size={18} className="sm:w-5 sm:h-5" />
-      </ChromeIconButton>
-
       {/* 菜单左缘与顶栏左侧（本控件左缘）对齐，而非与定位按钮齐平 */}
       {showLocateMenu && (
         <div
@@ -193,5 +177,3 @@ export const MapControls: React.FC<MapControlsProps> = ({
     </div>
   );
 };
-
-

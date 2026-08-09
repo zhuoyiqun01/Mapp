@@ -22,7 +22,7 @@ export function defaultViewModeForKind(kind: ProjectKind): ViewMode {
 }
 
 export function isViewModeAllowedForKind(kind: ProjectKind, mode: ViewMode): boolean {
-  if (kind === 'graph') return mode === 'graph' || mode === 'table';
+  if (kind === 'graph') return mode === 'graph' || mode === 'board' || mode === 'table';
   return mode === 'map' || mode === 'board' || mode === 'table';
 }
 

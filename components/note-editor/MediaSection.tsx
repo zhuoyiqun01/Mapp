@@ -125,7 +125,7 @@ export const MediaSection: React.FC<MediaSectionProps> = ({
           </div>
         </div>
       ) : (
-        <div className="px-4 pb-3 pt-1 text-[11px] text-gray-400">暂无附件</div>
+        <div className="px-4 pb-3 pt-1 text-[11px] text-gray-300">暂无附件</div>
       )}
     </section>
   );

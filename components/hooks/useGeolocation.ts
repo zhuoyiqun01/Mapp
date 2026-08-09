@@ -57,6 +57,7 @@ export const useGeolocation = (isMapMode: boolean) => {
   const filteredHeadingRef = useRef<number | null>(null);
   const orientationAttachedRef = useRef(false);
   const orientationCleanupRef = useRef<(() => void) | null>(null);
+  const watchIdRef = useRef<number | null>(null);
 
   // Check location permission
   const checkLocationPermission = useCallback(async (): Promise<string> => {
@@ -282,6 +283,58 @@ export const useGeolocation = (isMapMode: boolean) => {
     return true;
   }, [attachOrientationListeners]);
 
+  const applyPositionUpdate = useCallback((position: GeolocationPosition) => {
+    const loc = {
+      lat: position.coords.latitude,
+      lng: position.coords.longitude
+    };
+    setCurrentLocation(loc);
+    setLocationError(null);
+    setHasLocationPermission(true);
+
+    // Weak GPS heading fallback when orientation has not produced a sample yet
+    const gpsHeading = position.coords.heading;
+    if (
+      filteredHeadingRef.current == null &&
+      typeof gpsHeading === 'number' &&
+      !Number.isNaN(gpsHeading) &&
+      gpsHeading >= 0
+    ) {
+      applyHeadingSample(gpsHeading);
+    }
+  }, [applyHeadingSample]);
+
+  const stopWatching = useCallback(() => {
+    if (watchIdRef.current != null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+  }, []);
+
+  /** Continuous GPS updates for the live location marker. */
+  const startWatching = useCallback(() => {
+    if (!navigator.geolocation || watchIdRef.current != null) return;
+
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      (position) => {
+        applyPositionUpdate(position);
+      },
+      (error) => {
+        console.warn('Location watch error:', error);
+        // Permission denied: stop watching; keep last known position for other transient errors
+        if (error.code === 1) {
+          setHasLocationPermission(false);
+          stopWatching();
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 3000,
+        timeout: 15000
+      }
+    );
+  }, [applyPositionUpdate, stopWatching]);
+
   // Enhanced geolocation function with retry logic and accuracy fallback
   const getCurrentPositionWithRetry = useCallback((
     onSuccess: (position: GeolocationPosition) => void,
@@ -381,24 +434,12 @@ export const useGeolocation = (isMapMode: boolean) => {
       return await new Promise<LocationData | null>((resolve) => {
         getCurrentPositionWithRetry(
           (position) => {
-            const loc = {
+            applyPositionUpdate(position);
+            startWatching();
+            resolve({
               lat: position.coords.latitude,
               lng: position.coords.longitude
-            };
-            setCurrentLocation(loc);
-            setLocationError(null);
-            setHasLocationPermission(true);
-            // Weak GPS heading fallback when orientation has not produced a sample yet
-            const gpsHeading = position.coords.heading;
-            if (
-              filteredHeadingRef.current == null &&
-              typeof gpsHeading === 'number' &&
-              !Number.isNaN(gpsHeading) &&
-              gpsHeading >= 0
-            ) {
-              applyHeadingSample(gpsHeading);
-            }
-            resolve(loc);
+            });
           },
           (error) => {
             console.warn('Location request failed:', error);
@@ -418,12 +459,14 @@ export const useGeolocation = (isMapMode: boolean) => {
     checkLocationPermission,
     formatLocationError,
     requestOrientationPermission,
-    applyHeadingSample
+    applyPositionUpdate,
+    startWatching
   ]);
 
   // Initialize permission check; attach orientation when no iOS gate (non-gesture OK)
   useEffect(() => {
     if (!isMapMode) {
+      stopWatching();
       detachOrientationListeners();
       return;
     }
@@ -433,6 +476,11 @@ export const useGeolocation = (isMapMode: boolean) => {
 
     checkLocationPermission().then(permission => {
       setHasLocationPermission(permission === 'granted');
+
+      if (permission === 'granted') {
+        // Already authorized: start continuous tracking without waiting for a button tap
+        startWatching();
+      }
 
       if ((isWeChat || isMobile) && permission === 'unknown') {
         console.log('Mobile browser detected, location permission status unclear');
@@ -453,9 +501,17 @@ export const useGeolocation = (isMapMode: boolean) => {
     }
 
     return () => {
+      stopWatching();
       detachOrientationListeners();
     };
-  }, [isMapMode, checkLocationPermission, attachOrientationListeners, detachOrientationListeners]);
+  }, [
+    isMapMode,
+    checkLocationPermission,
+    attachOrientationListeners,
+    detachOrientationListeners,
+    startWatching,
+    stopWatching
+  ]);
 
   return {
     currentLocation,
@@ -466,6 +522,8 @@ export const useGeolocation = (isMapMode: boolean) => {
     requestLocation,
     requestOrientationPermission,
     getCurrentBrowserLocation,
-    checkLocationPermission
+    checkLocationPermission,
+    startWatching,
+    stopWatching
   };
 };

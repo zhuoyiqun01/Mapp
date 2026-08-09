@@ -148,7 +148,7 @@ export interface EditInspectorPanelProps {
   onFocusPeerInView?: (noteId: string) => void;
   /** 各视图：侧栏标题栏铅笔按钮，打开完整便签编辑器（NoteEditor） */
   onOpenFullNoteEditor?: (noteId: string) => void;
-  /** Graph：侧栏创建 Frame（无看板时） */
+  /** Graph：侧栏创建 Frame */
   onUpdateFrames?: (frames: Frame[]) => void;
 }
 

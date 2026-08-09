@@ -1,6 +1,13 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, X } from 'lucide-react';
+import { Calendar, Check, X } from 'lucide-react';
+import { computeAnchoredPanelPlacement } from '../ui/anchoredPanelPlacement';
+import {
+  NOTE_EDITOR_ADD_PILL_ACTIVE,
+  NOTE_EDITOR_ADD_PILL_CLASS,
+  NOTE_EDITOR_ADD_PILL_IDLE,
+  NoteEditorAddPillLabel
+} from './addPillStyles';
 
 export interface NoteTimeRangeChange {
   startYear?: number;
@@ -17,12 +24,15 @@ interface NoteTimeRangeControlProps {
   active?: boolean;
   /** 父级在「关闭其它浮层」时调用，用于收起时间面板 */
   onProvideDismiss?: (dismiss: () => void) => void;
+  /** 打开时间面板前关闭其它浮层 */
+  onBeforeOpen?: () => void;
 }
 
 const TIME_PANEL_EST_W = 268;
+const TIME_PANEL_EST_H = 52;
 
 /**
- * 便签起止年编辑：与 NoteEditor 中相同的胶囊按钮 + 固定定位浮动面板。
+ * 便签起止年编辑：与 NoteEditor 其它浮层共用锚定定位。
  */
 export const NoteTimeRangeControl: React.FC<NoteTimeRangeControlProps> = ({
   startYear,
@@ -31,13 +41,14 @@ export const NoteTimeRangeControl: React.FC<NoteTimeRangeControlProps> = ({
   themeColor = '#6366f1',
   panelChromeStyle,
   active = true,
-  onProvideDismiss
+  onProvideDismiss,
+  onBeforeOpen
 }) => {
   const [isEditingTime, setIsEditingTime] = useState(false);
   const [editingStartYear, setEditingStartYear] = useState('');
   const [editingEndYear, setEditingEndYear] = useState('');
 
-  const timeAnchorRef = useRef<HTMLDivElement | null>(null);
+  const timeAnchorRef = useRef<HTMLButtonElement | null>(null);
   const timePanelPortalRef = useRef<HTMLDivElement | null>(null);
   const [timePanelPlacement, setTimePanelPlacement] = useState<{ top: number; left: number } | null>(null);
 
@@ -49,11 +60,13 @@ export const NoteTimeRangeControl: React.FC<NoteTimeRangeControlProps> = ({
   const updateTimePanelPlacement = useCallback(() => {
     const el = timeAnchorRef.current;
     if (!el) return;
-    const r = el.getBoundingClientRect();
-    const gap = 8;
-    let left = r.left + r.width / 2 - TIME_PANEL_EST_W / 2;
-    left = Math.max(8, Math.min(left, window.innerWidth - TIME_PANEL_EST_W - 8));
-    setTimePanelPlacement({ top: r.bottom + gap, left });
+    setTimePanelPlacement(
+      computeAnchoredPanelPlacement(el.getBoundingClientRect(), {
+        panelWidth: TIME_PANEL_EST_W,
+        panelHeight: TIME_PANEL_EST_H,
+        align: 'end'
+      })
+    );
   }, []);
 
   useLayoutEffect(() => {
@@ -95,7 +108,7 @@ export const NoteTimeRangeControl: React.FC<NoteTimeRangeControlProps> = ({
   }, [onProvideDismiss, closeTimeEdit]);
 
   const timeDisplay = useMemo(() => {
-    if (startYear == null) return '-';
+    if (startYear == null) return '时间';
     if (endYear != null && endYear !== startYear) return `${startYear}–${endYear}`;
     return String(startYear);
   }, [startYear, endYear]);
@@ -103,7 +116,7 @@ export const NoteTimeRangeControl: React.FC<NoteTimeRangeControlProps> = ({
   const editingTimePreview = useMemo(() => {
     const s = editingStartYear.trim();
     const e = editingEndYear.trim();
-    if (!s) return '-';
+    if (!s) return '时间';
     const ps = parseInt(s, 10);
     if (Number.isNaN(ps)) return s;
     if (!e) return String(ps);
@@ -114,6 +127,7 @@ export const NoteTimeRangeControl: React.FC<NoteTimeRangeControlProps> = ({
   }, [editingStartYear, editingEndYear]);
 
   const openTimeEdit = () => {
+    onBeforeOpen?.();
     setEditingStartYear(startYear != null ? String(startYear) : '');
     setEditingEndYear(endYear != null ? String(endYear) : '');
     setIsEditingTime(true);
@@ -137,35 +151,34 @@ export const NoteTimeRangeControl: React.FC<NoteTimeRangeControlProps> = ({
     closeTimeEdit();
   };
 
+  const hasTime = startYear != null;
+
   return (
     <>
-      <div ref={timeAnchorRef} className="inline-flex justify-center max-w-full min-w-0">
-        {!isEditingTime ? (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              openTimeEdit();
-            }}
-            className={`text-xs px-3 py-1.5 rounded-full border transition-colors max-w-full truncate ${
-              startYear == null
-                ? 'border-transparent text-gray-400 hover:bg-gray-50'
-                : 'border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100'
-            }`}
-            title="点击修改起止时间"
-          >
-            {timeDisplay}
-          </button>
+      <button
+        ref={timeAnchorRef}
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          if (isEditingTime) {
+            closeTimeEdit();
+            return;
+          }
+          openTimeEdit();
+        }}
+        className={`${NOTE_EDITOR_ADD_PILL_CLASS} max-w-full ${
+          isEditingTime || hasTime ? NOTE_EDITOR_ADD_PILL_ACTIVE : NOTE_EDITOR_ADD_PILL_IDLE
+        }`}
+        title="点击修改起止时间"
+        aria-expanded={isEditingTime}
+      >
+        {hasTime || isEditingTime ? (
+          <span className="truncate pr-1.5">{isEditingTime ? editingTimePreview : timeDisplay}</span>
         ) : (
-          <span
-            className="text-xs px-3 py-1.5 rounded-full border border-gray-200 bg-gray-50 text-gray-700 max-w-full truncate whitespace-nowrap select-none cursor-default"
-            aria-live="polite"
-            title="正在修改起止时间"
-          >
-            {editingTimePreview}
-          </span>
+          <NoteEditorAddPillLabel>+ 时间</NoteEditorAddPillLabel>
         )}
-      </div>
+        <Calendar size={14} strokeWidth={2} className="shrink-0" aria-hidden />
+      </button>
 
       {isEditingTime &&
         timePanelPlacement &&

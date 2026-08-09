@@ -192,7 +192,7 @@ export interface Project {
   graphNewConnectionToArrow?: 'arrow' | 'none';
 }
 
-/** 项目工作流：mapping=地图+看板；graph=关系图谱（无看板） */
+/** 项目工作流：mapping=地图+看板；graph=关系图谱+看板 */
 export type ProjectKind = 'mapping' | 'graph';
 
 export type ViewMode = 'map' | 'board' | 'table' | 'graph';

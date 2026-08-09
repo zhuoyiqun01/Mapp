@@ -3,11 +3,9 @@ import type { Core } from 'cytoscape';
 import { Check, Minus, Pencil, Search, X } from 'lucide-react';
 import type { Note } from '../../types';
 import { graphNoteSearchLabel } from '../../utils/graph/graphData';
-import type { GraphViewPreset } from '../../utils/graph/graphPresets';
 import { ChromeDownloadMenu } from '../ui/ChromeDownloadMenu';
 import { ChromeIconButton } from '../ui/ChromeIconButton';
 import { PortalTooltip } from '../ui/PortalTooltip';
-import { GraphPresetsMenu } from './GraphPresetsMenu';
 
 type DownloadItem = { id: string; label: string; onSelect: () => void };
 
@@ -41,14 +39,6 @@ type Props = {
   graphCyKey: string;
   /** 与右侧属性面板错开 */
   reserveRightForInspector?: boolean;
-  /** 图谱临时预设（导出与编辑之间） */
-  graphPresets?: GraphViewPreset[];
-  activeGraphPresetId?: string | null;
-  onSaveGraphPreset?: (name: string) => void;
-  onUpdateGraphPreset?: (id: string) => void;
-  onApplyGraphPreset?: (id: string) => void;
-  onRenameGraphPreset?: (id: string, name: string) => void;
-  onDeleteGraphPreset?: (id: string) => void;
 };
 
 export const GraphTopRightToolbar: React.FC<Props> = ({
@@ -63,14 +53,7 @@ export const GraphTopRightToolbar: React.FC<Props> = ({
   cyRef,
   onLocateNote,
   graphCyKey,
-  reserveRightForInspector = false,
-  graphPresets = [],
-  activeGraphPresetId = null,
-  onSaveGraphPreset,
-  onUpdateGraphPreset,
-  onApplyGraphPreset,
-  onRenameGraphPreset,
-  onDeleteGraphPreset
+  reserveRightForInspector = false
 }) => {
   const [searchOpen, setSearchOpen] = useState(false);
   const [q, setQ] = useState('');
@@ -257,26 +240,6 @@ export const GraphTopRightToolbar: React.FC<Props> = ({
     </div>
   );
 
-  const presetsMenu =
-    onSaveGraphPreset &&
-    onUpdateGraphPreset &&
-    onApplyGraphPreset &&
-    onRenameGraphPreset &&
-    onDeleteGraphPreset ? (
-      <GraphPresetsMenu
-        themeColor={themeColor}
-        chromeSurfaceStyle={ch}
-        chromeHoverBackground={chromeHoverBackground}
-        presets={graphPresets}
-        activePresetId={activeGraphPresetId}
-        onSaveCurrent={onSaveGraphPreset}
-        onUpdatePreset={onUpdateGraphPreset}
-        onApply={onApplyGraphPreset}
-        onRename={onRenameGraphPreset}
-        onDelete={onDeleteGraphPreset}
-      />
-    ) : null;
-
   if (isUIVisible) {
     return (
       <div
@@ -311,7 +274,6 @@ export const GraphTopRightToolbar: React.FC<Props> = ({
             title="导出"
             items={graphDownloadItems}
           />
-          {presetsMenu}
           {!isGraphToolbarEditMode ? (
             <ChromeIconButton
               chromeSurfaceStyle={ch}
@@ -375,7 +337,6 @@ export const GraphTopRightToolbar: React.FC<Props> = ({
         title="导出"
         items={graphDownloadItems}
       />
-      {presetsMenu}
     </div>
   );
 };

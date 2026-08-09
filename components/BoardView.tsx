@@ -4717,6 +4717,18 @@ const createNoteAtCenter = () => {
                                                 <Locate size={14} className="text-gray-700" />
                                             </button>
                                         )}
+                                        {onSwitchToGraphView && (
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onSwitchToGraphView(note.id);
+                                                }}
+                                                className="p-1.5 rounded-full bg-white/80 hover:bg-white shadow-sm transition-colors opacity-0 group-hover:opacity-100 pointer-events-auto"
+                                                title="定位到图谱"
+                                            >
+                                                <Locate size={14} className="text-gray-700" />
+                                            </button>
+                                        )}
                                     </div>
                               </div>
                           </div>

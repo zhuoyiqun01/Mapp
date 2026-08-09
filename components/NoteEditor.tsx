@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Note, Tag } from '../types';
 import { THEME_COLOR } from '../constants';
 import { generateId, parseNoteContent } from '../utils';
@@ -15,8 +14,14 @@ import { ContentSection } from './note-editor/ContentSection';
 import { PropertySection } from './note-editor/PropertySection';
 import { MediaSection } from './note-editor/MediaSection';
 import { MetadataSection } from './note-editor/MetadataSection';
-import { Plus, Smile, Camera, PenTool, Minus } from 'lucide-react';
+import { Camera, PenTool, Minus, Smile } from 'lucide-react';
 import { EmojiPicker } from './note-editor/EmojiPicker';
+import {
+  NOTE_EDITOR_ADD_PILL_ACTIVE,
+  NOTE_EDITOR_ADD_PILL_CLASS,
+  NOTE_EDITOR_ADD_PILL_IDLE,
+  NoteEditorAddPillLabel
+} from './note-editor/addPillStyles';
 import { DeleteConfirmDialog } from './ui/DeleteConfirmDialog';
 import { MODAL_BACKDROP_MASK_STYLE } from '../utils/map/mapChromeStyle';
 import {
@@ -125,78 +130,32 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     if (!textareaRef.current) return;
   }, []);
 
-  const emojiAnchorRef = useRef<HTMLDivElement | null>(null);
-  const moreMenuButtonRef = useRef<HTMLDivElement | null>(null);
+  const emojiAnchorRef = useRef<HTMLButtonElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const moreMenuPortalRef = useRef<HTMLDivElement>(null);
-  const [emojiPickerPosition, setEmojiPickerPosition] = useState<{ left: number; top: number } | null>(null);
-  const [showMoreMenu, setShowMoreMenu] = useState(false);
-  const [moreMenuPlacement, setMoreMenuPlacement] = useState<{
-    right: number;
-    top: number;
-  } | null>(null);
 
   const dismissOverlays = useCallback(() => {
     setShowEmojiPicker(false);
-    setShowMoreMenu(false);
-    setMoreMenuPlacement(null);
     dismissTimeRangePanelRef.current();
   }, []);
+
+  const dismissOverlaysExceptTime = useCallback(() => {
+    setShowEmojiPicker(false);
+    setIsAddingTag(false);
+    setEditingTagId(null);
+    setNewTagLabel('');
+  }, [setIsAddingTag, setEditingTagId, setNewTagLabel]);
 
   const registerTimeRangeDismiss = useCallback((fn: () => void) => {
     dismissTimeRangePanelRef.current = fn;
   }, []);
 
-  const updateMoreMenuPlacement = useCallback(() => {
-    const el = moreMenuButtonRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    setMoreMenuPlacement({
-      right: window.innerWidth - r.right,
-      top: r.bottom + 8
-    });
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!showMoreMenu) return;
-    updateMoreMenuPlacement();
-  }, [showMoreMenu, updateMoreMenuPlacement]);
-
-  useEffect(() => {
-    if (!showMoreMenu) return;
-    const onPointerDown = (e: PointerEvent) => {
-      const t = e.target as Node;
-      if (moreMenuButtonRef.current?.contains(t)) return;
-      if (moreMenuPortalRef.current?.contains(t)) return;
-      setShowMoreMenu(false);
-      setMoreMenuPlacement(null);
-    };
-    const onReposition = () => updateMoreMenuPlacement();
-    document.addEventListener('pointerdown', onPointerDown, true);
-    window.addEventListener('resize', onReposition);
-    window.addEventListener('scroll', onReposition, true);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown, true);
-      window.removeEventListener('resize', onReposition);
-      window.removeEventListener('scroll', onReposition, true);
-    };
-  }, [showMoreMenu, updateMoreMenuPlacement]);
-
   const openEmojiPicker = useCallback(() => {
-    if (emojiAnchorRef.current) {
-      const rect = emojiAnchorRef.current.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - rect.bottom;
-      const spaceAbove = rect.top;
-      if (spaceBelow < 400 && spaceAbove > spaceBelow) {
-        setEmojiPickerPosition({ left: rect.left, top: rect.top - 200 - 8 });
-      } else {
-        setEmojiPickerPosition({ left: rect.left, top: rect.bottom + 8 });
-      }
-    }
-    setShowMoreMenu(false);
-    setMoreMenuPlacement(null);
-    setShowEmojiPicker(true);
-  }, []);
+    setIsAddingTag(false);
+    setEditingTagId(null);
+    setNewTagLabel('');
+    dismissTimeRangePanelRef.current();
+    setShowEmojiPicker((open) => !open);
+  }, [setIsAddingTag, setEditingTagId, setNewTagLabel]);
 
   const handleSaveTag = () => {
     if (newTagLabel.trim()) {
@@ -337,32 +296,30 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
 
   if (!isOpen) return null;
 
-  const moreMenuItemCls =
-    'w-full px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2.5 border-0 bg-transparent cursor-pointer rounded-lg mx-0.5';
-
   const emojiTrailingSlot = !isCompactMode ? (
-    <div ref={emojiAnchorRef} className="relative group">
+    <div className="relative group">
       <button
+        ref={emojiAnchorRef}
         type="button"
         onClick={(e) => {
           e.stopPropagation();
-          setShowMoreMenu(false);
-          setMoreMenuPlacement(null);
           openEmojiPicker();
         }}
-        className={`rounded-full p-2 min-h-9 min-w-9 box-border inline-flex items-center justify-center transition-colors active:scale-95 ${
-          showEmojiPicker
-            ? 'text-gray-700 bg-black/[0.08]'
-            : 'text-gray-400 hover:text-gray-600 hover:bg-black/5'
+        className={`${NOTE_EDITOR_ADD_PILL_CLASS} ${
+          showEmojiPicker || emoji ? NOTE_EDITOR_ADD_PILL_ACTIVE : NOTE_EDITOR_ADD_PILL_IDLE
         }`}
-        title="表情"
+        title={emoji ? '更换表情' : '添加表情'}
+        aria-expanded={showEmojiPicker}
       >
         {emoji ? (
-          <span className="text-[1.2rem] leading-none select-none" role="img" aria-label="当前表情">
+          <span className="text-[1.05rem] leading-none select-none" role="img" aria-label="当前表情">
             {emoji}
           </span>
         ) : (
-          <Smile size={20} strokeWidth={2} className="text-gray-400 group-hover:text-gray-600" />
+          <>
+            <NoteEditorAddPillLabel expanded={showEmojiPicker}>+ Emoji</NoteEditorAddPillLabel>
+            <Smile size={14} strokeWidth={2} className="shrink-0" aria-hidden />
+          </>
         )}
       </button>
       {emoji ? (
@@ -381,15 +338,16 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       ) : null}
       <EmojiPicker
         isOpen={showEmojiPicker}
-        position={emojiPickerPosition}
+        anchorRef={emojiAnchorRef}
         onClose={() => setShowEmojiPicker(false)}
         onSelectEmoji={(e) => setEmoji(e)}
+        panelChromeStyle={panelChromeStyle}
       />
     </div>
   ) : null;
 
-  const mediaMoreSlot = !isCompactMode ? (
-    <div ref={moreMenuButtonRef} className="relative">
+  const mediaActionsSlot = !isCompactMode ? (
+    <div className="flex items-center gap-1 shrink-0">
       <input
         ref={fileInputRef}
         type="file"
@@ -405,30 +363,33 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       <button
         type="button"
         onClick={() => {
-          if (showMoreMenu) {
-            setShowMoreMenu(false);
-            setMoreMenuPlacement(null);
-          } else {
-            setShowEmojiPicker(false);
-            updateMoreMenuPlacement();
-            setShowMoreMenu(true);
-          }
+          dismissOverlays();
+          fileInputRef.current?.click();
         }}
-        className={`relative rounded-full p-2 min-h-9 min-w-9 box-border inline-flex items-center justify-center transition-colors active:scale-95 ${
-          showMoreMenu
-            ? 'text-gray-700 bg-black/[0.08]'
-            : 'text-gray-400 hover:text-gray-600 hover:bg-black/5'
-        }`}
-        title="添加图片或涂鸦"
+        className={`${NOTE_EDITOR_ADD_PILL_CLASS} ${NOTE_EDITOR_ADD_PILL_IDLE}`}
+        title="添加图片"
       >
-        <Plus size={20} strokeWidth={2} />
+        <NoteEditorAddPillLabel>+ 图片</NoteEditorAddPillLabel>
+        <Camera size={14} strokeWidth={2} className="shrink-0" aria-hidden />
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          dismissOverlays();
+          setIsSketching(true);
+        }}
+        className={`${NOTE_EDITOR_ADD_PILL_CLASS} ${NOTE_EDITOR_ADD_PILL_IDLE}`}
+        title="添加涂鸦"
+      >
+        <NoteEditorAddPillLabel>+ 涂鸦</NoteEditorAddPillLabel>
+        <PenTool size={14} strokeWidth={2} className="shrink-0" aria-hidden />
       </button>
     </div>
   ) : null;
 
   return (
     <div
-      className="fixed left-0 top-0 w-full h-[100dvh] max-h-dvh z-[1000] flex items-center justify-center p-4 touch-none cursor-auto"
+      className="fixed top-0 ui-workspace-overlay h-[100dvh] max-h-dvh z-[1000] flex items-center justify-center p-4 touch-none cursor-auto"
       onPointerDown={(e) => e.stopPropagation()}
       onPointerMove={(e) => e.stopPropagation()}
       onPointerUp={(e) => e.stopPropagation()}
@@ -441,7 +402,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       <div className="absolute inset-0" onClick={handleSave} style={{ zIndex: 1 }}></div>
 
       <div
-        className="fixed inset-0 pointer-events-none"
+        className="absolute inset-0 pointer-events-none"
         style={{ ...MODAL_BACKDROP_MASK_STYLE, zIndex: 5 }}
       />
 
@@ -450,7 +411,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0.9, opacity: 0 }}
-          className={`w-[500px] max-w-[95vw] flex flex-col relative transition-colors duration-300 max-h-[90vh] max-h-[90dvh] min-h-[300px] rounded-2xl border border-gray-100/80 ${panelChromeStyle ? '' : 'bg-white'} ${isSketching ? 'min-h-[500px]' : ''}`}
+          className={`w-[500px] max-w-[min(95%,calc(100%-2rem))] flex flex-col relative transition-colors duration-300 max-h-[90vh] max-h-[90dvh] min-h-[300px] rounded-2xl border border-gray-100/80 ${panelChromeStyle ? '' : 'bg-white'} ${isSketching ? 'min-h-[500px]' : ''}`}
           style={{
             ...(panelChromeStyle || {}),
             boxShadow: '0 25px 50px 12px rgba(0, 0, 0, 0.15)',
@@ -579,16 +540,8 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                 onCancelTagEdit={handleCancelTagEdit}
                 onStartAddTag={() => setIsAddingTag(true)}
                 onDismissOverlays={dismissOverlays}
+                onBeforeOpenTime={dismissOverlaysExceptTime}
                 trailingSlot={emojiTrailingSlot}
-                showDelete={!!(initialNote?.id && onDelete)}
-                onDeleteNote={
-                  initialNote?.id && onDelete
-                    ? () => {
-                        dismissOverlays();
-                        openDeleteConfirm();
-                      }
-                    : undefined
-                }
               />
             )}
 
@@ -614,53 +567,24 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                   removeSketch();
                 }}
                 onDismissOverlays={dismissOverlays}
-                moreActionsSlot={mediaMoreSlot}
+                moreActionsSlot={mediaActionsSlot}
               />
             )}
 
-            <MetadataSection id={initialNote?.id} createdAt={initialNote?.createdAt} />
-
-            {showMoreMenu &&
-              moreMenuPlacement &&
-              createPortal(
-                <div
-                  ref={moreMenuPortalRef}
-                  className={`min-w-[11rem] rounded-xl border border-gray-100/80 py-1.5 shadow-xl ${panelChromeStyle ? '' : 'bg-white'}`}
-                  style={{
-                    ...(panelChromeStyle || {}),
-                    position: 'fixed',
-                    right: moreMenuPlacement.right,
-                    top: moreMenuPlacement.top,
-                    bottom: 'auto',
-                    zIndex: 10002
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
+            <MetadataSection
+              id={initialNote?.id}
+              createdAt={initialNote?.createdAt}
+              showDelete={!!(initialNote?.id && onDelete)}
+              onDeleteNote={
+                initialNote?.id && onDelete
+                  ? () => {
                       dismissOverlays();
-                      fileInputRef.current?.click();
-                    }}
-                    className={moreMenuItemCls}
-                  >
-                    <Camera size={18} className="text-gray-500 shrink-0" />
-                    添加图片
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      dismissOverlays();
-                      setIsSketching(true);
-                    }}
-                    className={moreMenuItemCls}
-                  >
-                    <PenTool size={18} className="text-gray-500 shrink-0" />
-                    涂鸦
-                  </button>
-                </div>,
-                document.body
-              )}
+                      openDeleteConfirm();
+                    }
+                  : undefined
+              }
+              onDismissOverlays={dismissOverlays}
+            />
           </div>
         </MotionDiv>
       </div>

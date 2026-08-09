@@ -249,10 +249,22 @@ export function wireStandaloneGraphChrome(
             ${slider('st-label', '节点标签字号', sizing.labelFontPx, 4, 16, 1, (v) => `${Math.round(v)}px`)}
             ${slider('st-legend', '图例字号', legendFontPx, 6, 24, 1, (v) => `${Math.round(v)}px`)}
             ${slider('st-edge-label', '边标签字号', sizing.edgeLabelFontPx, 3, 16, 1, (v) => `${Math.round(v)}px`)}
-            <label class="flex min-w-0 cursor-pointer items-center justify-between gap-3 sm:col-span-2">
-              <span class="text-xs font-medium text-gray-600">连线曲线</span>
-              <input id="st-curve" type="checkbox" class="h-4 w-4 rounded border-gray-200" ${edgeCurve ? 'checked' : ''} style="accent-color:${escapeHtml(themeColor)}" />
-            </label>
+            <div class="flex min-w-0 items-center justify-between gap-3 sm:col-span-2">
+              <span class="text-xs font-medium text-gray-800">曲线相连</span>
+              <button
+                type="button"
+                id="st-curve"
+                role="switch"
+                aria-checked="${edgeCurve ? 'true' : 'false'}"
+                aria-label="曲线相连"
+                class="relative h-5 w-9 shrink-0 rounded-full border-0 cursor-pointer transition-colors ${edgeCurve ? '' : 'bg-gray-200'}"
+                style="${edgeCurve ? `background-color:${escapeHtml(themeColor)}` : ''}"
+              >
+                <span
+                  class="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${edgeCurve ? 'translate-x-4' : 'translate-x-0'}"
+                ></span>
+              </button>
+            </div>
           </div>
         </div>
       </div>`;
@@ -301,9 +313,11 @@ export function wireStandaloneGraphChrome(
     bindRange('st-chrome-blur', (v) => {
       chrome = { ...chrome, blurPx: Math.round(Math.max(0, Math.min(24, v))) };
     });
-    panelSettings.querySelector<HTMLInputElement>('#st-curve')?.addEventListener('change', (e) => {
-      edgeCurve = (e.target as HTMLInputElement).checked;
+    panelSettings.querySelector<HTMLButtonElement>('#st-curve')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      edgeCurve = !edgeCurve;
       applyStyles();
+      renderSettings();
     });
   }
 

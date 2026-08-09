@@ -26,7 +26,8 @@ interface UseProjectStateReturn {
   // Actions
   loadProjects: () => Promise<void>;
   createProject: (projectData: { name: string; projectKind?: ProjectKind }) => Promise<string>;
-  selectProject: (projectId: string) => Promise<void>;
+  selectProject: (projectId: string) => Promise<Project | null>;
+
   updateProject: (project: Project) => Promise<void>;
   deleteProject: (projectId: string) => Promise<void>;
   duplicateProject: (project: Project) => Promise<void>;
@@ -173,16 +174,17 @@ export const useProjectState = (): UseProjectStateReturn => {
   }, []);
 
   const selectProject = useCallback(
-    async (projectId: string) => {
+    async (projectId: string): Promise<Project | null> => {
       setCurrentProjectId(projectId);
       setIsLoadingProject(true);
       setLoadingProgress(0);
       try {
         const project = await loadCompleteProject(projectId);
-        if (!project) return;
+        if (!project) return null;
         setActiveProject(project);
+        return project;
       } catch {
-        // noop
+        return null;
       } finally {
         setIsLoadingProject(false);
         setLoadingProgress(0);

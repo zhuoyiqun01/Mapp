@@ -41,7 +41,7 @@ export const ProjectKindPromptDialog: React.FC<Props> = ({
           「{projectName}」是旧版项目，尚未区分工作流类型。
         </p>
         <p className="text-sm text-gray-500 mb-6">
-          Mapping：地图与看板；Graph：关系图谱。选定后可在对应视图间切换。
+          Mapping：地图与看板；Graph：关系图谱与看板。选定后可在对应视图间切换。
         </p>
 
         <div className="flex flex-col gap-2">
@@ -60,7 +60,7 @@ export const ProjectKindPromptDialog: React.FC<Props> = ({
             onClick={() => onConfirm('graph')}
           >
             <div className="text-sm">作为 Graph 项目</div>
-            <div className="mt-0.5 text-xs font-medium text-gray-500">图谱 · 表格</div>
+            <div className="mt-0.5 text-xs font-medium text-gray-500">图谱 · 看板 · 表格</div>
           </button>
         </div>
 

@@ -1459,8 +1459,6 @@ export const MapView: React.FC<MapViewProps> = ({
                     themeColor={themeColor}
                     chromeSurfaceStyle={mapChromeSurface}
                     chromeHoverBackground={mapChromeHoverBg}
-                    showTextLabels={showTextLabels}
-                    setShowTextLabels={setShowTextLabels}
                     settingsOpen={showSettingsPanel}
                     settingsButtonRef={settingsButtonRef}
                     onOpenSettings={() => {
@@ -1708,6 +1706,8 @@ export const MapView: React.FC<MapViewProps> = ({
         onClusterThresholdChange={setClusterThreshold}
         labelSize={labelSize}
         onLabelSizeChange={setLabelSize}
+        showTextLabels={showTextLabels}
+        onShowTextLabelsChange={setShowTextLabels}
         graphProject={project}
         onGraphProjectPatch={
           onUpdateProject ? (patch) => void onUpdateProject({ ...project, ...patch }) : undefined

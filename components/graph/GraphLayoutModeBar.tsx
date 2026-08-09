@@ -1,27 +1,49 @@
 import React from 'react';
 import { Clock, Network } from 'lucide-react';
 import type { GraphLayoutMode } from '../../utils/graph/graphRuntimeCore';
+import type { GraphViewPreset } from '../../utils/graph/graphPresets';
 import { PortalTooltip } from '../ui/PortalTooltip';
+import { GraphPresetsMenu } from './GraphPresetsMenu';
 
 type Props = {
   panelChromeStyle?: React.CSSProperties;
   themeColor: string;
   activeGraphLayout: GraphLayoutMode;
+  /** 有值时表示预设态：时间线/力导不高亮，预设页签高亮 */
+  activeGraphPresetId?: string | null;
   onApplyTimeLayout: () => void;
   onApplyCoseLayout: () => void;
+  graphPresets: GraphViewPreset[];
+  onSaveGraphPreset: (name: string) => void;
+  onUpdateGraphPreset: (id: string) => void;
+  onApplyGraphPreset: (id: string) => void;
+  onRenameGraphPreset: (id: string, name: string) => void;
+  onDeleteGraphPreset: (id: string) => void;
 };
 
 export const GraphLayoutModeBar: React.FC<Props> = ({
   panelChromeStyle,
   themeColor,
   activeGraphLayout,
+  activeGraphPresetId = null,
   onApplyTimeLayout,
-  onApplyCoseLayout
+  onApplyCoseLayout,
+  graphPresets,
+  onSaveGraphPreset,
+  onUpdateGraphPreset,
+  onApplyGraphPreset,
+  onRenameGraphPreset,
+  onDeleteGraphPreset
 }) => {
-  const graphLayoutBtnClass = (mode: GraphLayoutMode) =>
-    `flex items-center justify-center px-3 py-2 rounded-xl transition-all font-bold text-sm ${
-      activeGraphLayout === mode ? 'text-theme-chrome-fg shadow-md scale-105' : 'text-gray-500 hover:bg-gray-100'
+  const inPreset = Boolean(activeGraphPresetId);
+
+  const graphLayoutBtnClass = (mode: GraphLayoutMode | 'preset') => {
+    const selected =
+      mode === 'preset' ? inPreset : !inPreset && activeGraphLayout === mode;
+    return `flex items-center justify-center px-3 py-2 rounded-xl transition-all font-bold text-sm ${
+      selected ? 'text-theme-chrome-fg shadow-md scale-105' : 'text-gray-500 hover:bg-gray-100'
     }`;
+  };
 
   const items: Array<{
     mode: GraphLayoutMode;
@@ -41,19 +63,35 @@ export const GraphLayoutModeBar: React.FC<Props> = ({
       }`}
       style={panelChromeStyle}
     >
-      {items.map((item) => (
-        <PortalTooltip key={item.mode} content={item.label} compact>
-          <button
-            type="button"
-            aria-label={item.label}
-            onClick={item.onClick}
-            className={graphLayoutBtnClass(item.mode)}
-            style={activeGraphLayout === item.mode ? { backgroundColor: themeColor } : undefined}
-          >
-            {item.icon}
-          </button>
-        </PortalTooltip>
-      ))}
+      {items.map((item) => {
+        const selected = !inPreset && activeGraphLayout === item.mode;
+        return (
+          <PortalTooltip key={item.mode} content={item.label} compact>
+            <button
+              type="button"
+              aria-label={item.label}
+              onClick={item.onClick}
+              className={graphLayoutBtnClass(item.mode)}
+              style={selected ? { backgroundColor: themeColor } : undefined}
+            >
+              {item.icon}
+            </button>
+          </PortalTooltip>
+        );
+      })}
+      <GraphPresetsMenu
+        themeColor={themeColor}
+        panelChromeStyle={panelChromeStyle}
+        presets={graphPresets}
+        activePresetId={activeGraphPresetId}
+        onSaveCurrent={onSaveGraphPreset}
+        onUpdatePreset={onUpdateGraphPreset}
+        onApply={onApplyGraphPreset}
+        onRename={onRenameGraphPreset}
+        onDelete={onDeleteGraphPreset}
+        tabButtonClassName={graphLayoutBtnClass('preset')}
+        tabActive={inPreset}
+      />
     </div>
   );
 };

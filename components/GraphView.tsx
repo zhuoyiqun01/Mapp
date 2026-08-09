@@ -1373,7 +1373,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
 
   /** 时间线布局下：图层面板权重或牵引强度变更时重跑时间线 preset */
   useEffect(() => {
-    if (activeGraphLayout !== 'time') return;
+    if (activeGraphLayout !== 'time' || graphPresetsStore.activePresetId) return;
     const cy = cyRef.current;
     if (!cy) return;
     const valid = cy.nodes().filter((n) => n.data('timeSort') != null);
@@ -1385,7 +1385,16 @@ export const GraphView: React.FC<GraphViewProps> = ({
       timeClusterLayers,
       isFrameClusterBasis(clusterBasis) ? 'frame' : 'tag'
     );
-  }, [activeGraphLayout, timeLayoutOpts, graphLayersOrderKey, graphLayersHiddenKey, timeClusterLayers, clusterBasis, notesClusterKeySig]);
+  }, [
+    activeGraphLayout,
+    graphPresetsStore.activePresetId,
+    timeLayoutOpts,
+    graphLayersOrderKey,
+    graphLayersHiddenKey,
+    timeClusterLayers,
+    clusterBasis,
+    notesClusterKeySig
+  ]);
 
   /** 力导布局下：同步 X 轴时间分布权重；用户改百分比时重跑 fcose */
   const coseTimeXBiasRef = useRef(coseTimeXBias);
@@ -1395,9 +1404,9 @@ export const GraphView: React.FC<GraphViewProps> = ({
     setGraphCoseTimeXBias(cy, coseTimeXBias);
     if (coseTimeXBiasRef.current === coseTimeXBias) return;
     coseTimeXBiasRef.current = coseTimeXBias;
-    if (activeGraphLayout !== 'cose') return;
+    if (activeGraphLayout !== 'cose' || graphPresetsStore.activePresetId) return;
     applyGraphLayout(cy, 'fcose');
-  }, [activeGraphLayout, coseTimeXBias]);
+  }, [activeGraphLayout, graphPresetsStore.activePresetId, coseTimeXBias]);
 
   /** 力导布局下：同步边弹性；用户改滑块时重跑 fcose */
   const edgeElasticityRef = useRef(edgeElasticity);
@@ -1407,9 +1416,9 @@ export const GraphView: React.FC<GraphViewProps> = ({
     setGraphEdgeElasticity(cy, edgeElasticity);
     if (edgeElasticityRef.current === edgeElasticity) return;
     edgeElasticityRef.current = edgeElasticity;
-    if (activeGraphLayout !== 'cose') return;
+    if (activeGraphLayout !== 'cose' || graphPresetsStore.activePresetId) return;
     applyGraphLayout(cy, 'fcose');
-  }, [activeGraphLayout, edgeElasticity]);
+  }, [activeGraphLayout, graphPresetsStore.activePresetId, edgeElasticity]);
 
   useEffect(() => {
     const cy = cyRef.current;
@@ -1448,7 +1457,14 @@ export const GraphView: React.FC<GraphViewProps> = ({
     applyGraphLayout(cy, 'fcose');
     setActiveGraphLayout('cose');
     persistGraphLayout('cose');
-  }, [persistGraphLayout]);
+    // 离开预设态（与时间线/力导互斥）
+    setGraphPresetsStore((prev) => {
+      if (!prev.activePresetId) return prev;
+      const next = { ...prev, activePresetId: null };
+      void saveGraphPresetsStore(projectId, next);
+      return next;
+    });
+  }, [persistGraphLayout, projectId]);
 
   const applyTimeLayout = useCallback(() => {
     const cy = cyRef.current;
@@ -1464,8 +1480,14 @@ export const GraphView: React.FC<GraphViewProps> = ({
     if (valid.length > 0) {
       setActiveGraphLayout('time');
       persistGraphLayout('time');
+      setGraphPresetsStore((prev) => {
+        if (!prev.activePresetId) return prev;
+        const next = { ...prev, activePresetId: null };
+        void saveGraphPresetsStore(projectId, next);
+        return next;
+      });
     }
-  }, [persistGraphLayout, timeLayoutOpts, timeClusterLayers, clusterBasis]);
+  }, [persistGraphLayout, timeLayoutOpts, timeClusterLayers, clusterBasis, projectId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1526,7 +1548,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
       if (!cy) return;
       const preset = captureGraphViewPreset(cy, capturePresetOpts(name));
       const next = upsertPresetInStore(graphPresetsStore, preset);
-      persistPresetsStore(next);
+      persistPresetsStore({ ...next, activePresetId: preset.id });
       setPresetLegendOverride(preset.legendItems);
     },
     [capturePresetOpts, graphPresetsStore, persistPresetsStore]
@@ -1890,21 +1912,21 @@ export const GraphView: React.FC<GraphViewProps> = ({
         onLocateNote={focusNoteOnGraphFromPanel}
         graphCyKey={nodeStructureKey}
         reserveRightForInspector={isGraphToolbarEditMode}
-        graphPresets={graphPresetsStore.presets}
-        activeGraphPresetId={graphPresetsStore.activePresetId}
-        onSaveGraphPreset={handleSaveGraphPreset}
-        onUpdateGraphPreset={handleUpdateGraphPreset}
-        onApplyGraphPreset={handleApplyGraphPreset}
-        onRenameGraphPreset={handleRenameGraphPreset}
-        onDeleteGraphPreset={handleDeleteGraphPreset}
       />
 
       <GraphLayoutModeBar
         panelChromeStyle={panelChromeStyle}
         themeColor={themeColor}
         activeGraphLayout={activeGraphLayout}
+        activeGraphPresetId={graphPresetsStore.activePresetId}
         onApplyTimeLayout={applyTimeLayout}
         onApplyCoseLayout={applyCoseLayout}
+        graphPresets={graphPresetsStore.presets}
+        onSaveGraphPreset={handleSaveGraphPreset}
+        onUpdateGraphPreset={handleUpdateGraphPreset}
+        onApplyGraphPreset={handleApplyGraphPreset}
+        onRenameGraphPreset={handleRenameGraphPreset}
+        onDeleteGraphPreset={handleDeleteGraphPreset}
       />
 
       {previewNote && !selectedConn && !isGraphToolbarEditMode && !graphEditorOpen && (

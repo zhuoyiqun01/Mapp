@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Reorder } from 'framer-motion';
-import { Trash2 } from 'lucide-react';
 import type { Tag } from '../../types';
 import { THEME_COLOR } from '../../constants';
 import { TagChip } from '../ui/TagChip';
 import { TagAddPanel } from '../ui/TagAddPanel';
+import { computeAnchoredPanelPlacement } from '../ui/anchoredPanelPlacement';
 
 interface TagPropertyEditorProps {
   tags: Tag[];
@@ -19,14 +19,15 @@ interface TagPropertyEditorProps {
   onReorderTags: (next: Tag[]) => void;
   onSaveTag: () => void;
   onCancelTagEdit: () => void;
-  onStartAddTag: () => void;
   onDismissOverlays?: () => void;
-  trailingSlot?: React.ReactNode;
-  showDelete?: boolean;
-  onDeleteNote?: () => void;
+  /** 与「属性」行 + Tag 按钮共用，用于添加面板锚定 */
+  addTagAnchorRef?: React.RefObject<HTMLButtonElement | null>;
   themeColor?: string;
   panelChromeStyle?: React.CSSProperties;
 }
+
+const TAG_PANEL_EST_W = 260;
+const TAG_PANEL_EST_H = 220;
 
 /** tags Property 的编辑 UI（Registry component: TagEditor） */
 export const TagPropertyEditor: React.FC<TagPropertyEditorProps> = ({
@@ -42,45 +43,40 @@ export const TagPropertyEditor: React.FC<TagPropertyEditorProps> = ({
   onReorderTags,
   onSaveTag,
   onCancelTagEdit,
-  onStartAddTag,
   onDismissOverlays,
-  trailingSlot,
-  showDelete,
-  onDeleteNote,
+  addTagAnchorRef,
   themeColor = THEME_COLOR,
   panelChromeStyle
 }) => {
   const dismiss = onDismissOverlays ?? (() => {});
-  const tagPanelAnchorRef = useRef<HTMLDivElement>(null);
+  const tagsRowRef = useRef<HTMLDivElement>(null);
   const [tagPanelPos, setTagPanelPos] = useState<{ top: number; left: number } | null>(null);
 
-  const TAG_PANEL_EST_W = 260;
-  const TAG_PANEL_EST_H = 220;
+  const tagPanelOpen = isAddingTag || !!editingTagId;
+
   const updateTagPanelPlacement = useCallback(() => {
-    const el = tagPanelAnchorRef.current;
+    // 添加：锚到属性行 + Tag；编辑：锚到标签行
+    const el = (isAddingTag ? addTagAnchorRef?.current : null) ?? tagsRowRef.current;
     if (!el) return;
-    const r = el.getBoundingClientRect();
-    const gap = 8;
-    let top = r.bottom + gap;
-    const spaceBelow = window.innerHeight - r.bottom;
-    if (spaceBelow < TAG_PANEL_EST_H && r.top > TAG_PANEL_EST_H + gap) {
-      top = r.top - TAG_PANEL_EST_H - gap;
-    }
-    let left = r.left;
-    left = Math.max(8, Math.min(left, window.innerWidth - TAG_PANEL_EST_W - 8));
-    setTagPanelPos({ top, left });
-  }, []);
+    setTagPanelPos(
+      computeAnchoredPanelPlacement(el.getBoundingClientRect(), {
+        panelWidth: TAG_PANEL_EST_W,
+        panelHeight: TAG_PANEL_EST_H,
+        align: isAddingTag ? 'end' : 'start'
+      })
+    );
+  }, [addTagAnchorRef, isAddingTag]);
 
   useLayoutEffect(() => {
-    if (!isAddingTag && !editingTagId) {
+    if (!tagPanelOpen) {
       setTagPanelPos(null);
       return;
     }
     updateTagPanelPlacement();
-  }, [isAddingTag, editingTagId, tags.length, updateTagPanelPlacement]);
+  }, [tagPanelOpen, tags.length, updateTagPanelPlacement]);
 
   useEffect(() => {
-    if (!isAddingTag && !editingTagId) return;
+    if (!tagPanelOpen) return;
     const onReposition = () => updateTagPanelPlacement();
     window.addEventListener('resize', onReposition);
     window.addEventListener('scroll', onReposition, true);
@@ -88,29 +84,42 @@ export const TagPropertyEditor: React.FC<TagPropertyEditorProps> = ({
       window.removeEventListener('resize', onReposition);
       window.removeEventListener('scroll', onReposition, true);
     };
-  }, [isAddingTag, editingTagId, updateTagPanelPlacement]);
+  }, [tagPanelOpen, updateTagPanelPlacement]);
+
+  const renderTagChip = (tag: Tag, opts?: { className?: string }) => (
+    <TagChip
+      label={tag.label}
+      color={tag.color}
+      className={opts?.className}
+      onClick={() => {
+        dismiss();
+        onEditTag(tag);
+      }}
+      onRemove={() => {
+        dismiss();
+        onRemoveTag(tag.id);
+      }}
+    />
+  );
 
   return (
-    <div className="px-4 pt-0 pb-2 flex flex-col gap-2 min-h-[52px]">
-      <div ref={tagPanelAnchorRef} className="flex gap-2 items-center">
-        <div className="flex flex-1 min-w-0 gap-2 overflow-x-auto scrollbar-hide items-center touch-none">
+    <div className="px-4 pt-0 pb-3 flex flex-col gap-2">
+      {tags.length === 0 && !editingTagId ? (
+        <div ref={tagsRowRef} className="pt-1 text-[11px] text-gray-300">
+          暂无标签
+        </div>
+      ) : (
+        <div
+          ref={tagsRowRef}
+          className="flex min-w-0 gap-2 overflow-x-auto scrollbar-hide items-center touch-pan-x"
+        >
           {editingTagId ? (
             tags
               .filter((t) => t.id !== editingTagId)
               .map((tag) => (
-                <TagChip
-                  key={tag.id}
-                  label={tag.label}
-                  color={tag.color}
-                  onClick={() => {
-                    dismiss();
-                    onEditTag(tag);
-                  }}
-                  onRemove={() => {
-                    dismiss();
-                    onRemoveTag(tag.id);
-                  }}
-                />
+                <div key={tag.id} className="shrink-0">
+                  {renderTagChip(tag)}
+                </div>
               ))
           ) : tags.length > 1 ? (
             <Reorder.Group
@@ -141,74 +150,21 @@ export const TagPropertyEditor: React.FC<TagPropertyEditorProps> = ({
                   }}
                   style={{ cursor: 'grab' }}
                 >
-                  <TagChip
-                    label={tag.label}
-                    color={tag.color}
-                    className="cursor-grab active:cursor-grabbing"
-                    onClick={() => {
-                      dismiss();
-                      onEditTag(tag);
-                    }}
-                    onRemove={() => {
-                      dismiss();
-                      onRemoveTag(tag.id);
-                    }}
-                  />
+                  {renderTagChip(tag, { className: 'cursor-grab active:cursor-grabbing' })}
                 </Reorder.Item>
               ))}
             </Reorder.Group>
           ) : (
             tags.map((tag) => (
-              <TagChip
-                key={tag.id}
-                label={tag.label}
-                color={tag.color}
-                onClick={() => {
-                  dismiss();
-                  onEditTag(tag);
-                }}
-                onRemove={() => {
-                  dismiss();
-                  onRemoveTag(tag.id);
-                }}
-              />
+              <div key={tag.id} className="shrink-0">
+                {renderTagChip(tag)}
+              </div>
             ))
           )}
-
-          {isAddingTag || editingTagId ? null : (
-            <button
-              type="button"
-              onClick={() => {
-                dismiss();
-                onStartAddTag();
-              }}
-              className="flex-shrink-0 h-9 min-h-9 px-3.5 rounded-full text-xs font-semibold text-gray-400 hover:text-gray-600 hover:bg-black/5 active:scale-95 transition-colors inline-flex items-center justify-center cursor-pointer"
-            >
-              + Tag
-            </button>
-          )}
         </div>
+      )}
 
-        <div className="flex items-center gap-1 shrink-0">
-          {trailingSlot}
-          {showDelete && onDeleteNote ? (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                dismiss();
-                onDeleteNote();
-              }}
-              className="shrink-0 rounded-full p-2 min-h-9 min-w-9 inline-flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 active:scale-95 transition-colors border-0 cursor-pointer"
-              title="删除便签"
-            >
-              <Trash2 size={20} strokeWidth={2} />
-            </button>
-          ) : null}
-        </div>
-      </div>
-
-      {(isAddingTag || editingTagId) && tagPanelPos != null && (
+      {tagPanelOpen && tagPanelPos != null && (
         <TagAddPanel
           themeColor={themeColor}
           panelChromeStyle={panelChromeStyle}

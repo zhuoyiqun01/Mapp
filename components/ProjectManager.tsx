@@ -1305,17 +1305,23 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     !!transitionListOnly &&
     !finishingReturnToHomeLayout &&
     !showHomeHeroInTransition &&
-    !homeHeroShellAffectsLayout;
+    !homeHeroShellAffectsLayout &&
+    // 进入项目中间态若要求全屏壳（expandToHomeLayout），不要退回紧凑 transition shell
+    !expandToHomeLayout;
 
   const homeLikeList =
     (!isSidebar || expandToHomeLayout || homeHeroShellAffectsLayout) &&
     (!transitionListOnly || finishingReturnToHomeLayout);
   const compactProjectList =
     (isSidebar && !expandToHomeLayout) ||
-    (transitionListOnly && !finishingReturnToHomeLayout);
+    (transitionListOnly && !finishingReturnToHomeLayout && !expandToHomeLayout);
 
-  /** 主页 Hero / CTA：过渡态不卸载，靠平移动画出入场，避免瞬移 */
-  const showHomeHeroShell = !isSidebar || expandToHomeLayout || showHomeHeroInTransition;
+  /** 主页 Hero / CTA：稳定主页、主页进入、回主页显示；项目间切换全屏中间态不闪 Hero */
+  const showHomeHeroShell =
+    !isSidebar ||
+    showHomeHeroInTransition ||
+    !!sidebarExpandingToHome ||
+    (expandToHomeLayout && !activeProject && !transitionListOnly);
   const homeHeroAnimateOut = !!transitionListOnly && !finishingReturnToHomeLayout;
   /** 视觉层面的“主页壳”：当占位壳还在收缩/展开时，继续使用主页的 padding 与布局，避免顶部间距瞬间归零 */
   const expandToHomeLayoutVisual =
@@ -1374,9 +1380,8 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     ? 'h-full w-full min-h-0 overflow-hidden flex flex-col relative'
     : expandToHomeLayoutVisual
       ? isSidebar
-        ? activeProject
-          ? 'h-full w-full min-h-0 flex flex-col items-center justify-start pt-24 pb-0 relative shadow-2xl border-r'
-          : 'h-full w-full min-h-0 flex flex-col items-center justify-start pt-24 pb-0 relative'
+        ? // 全宽中间态：不要 border-r / shadow-2xl，否则会闪默认黑边
+          'h-full w-full min-h-0 flex flex-col items-center justify-start pt-24 pb-0 relative'
         : 'h-full w-full min-h-0 flex flex-col items-center justify-start pt-24 pb-0 p-4 relative'
       : isSidebar
         ? 'h-full w-full shadow-2xl flex flex-col border-r overflow-hidden'
@@ -2079,7 +2084,9 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       className={`${containerClass} ${isDragging ? 'ring-4 ring-offset-2' : ''}`}
       style={{
         backgroundColor: themeColor,
-        borderColor: isSidebar && !expandToHomeLayout ? themeColor : undefined,
+        // 侧栏常态右缘与主题同色；全宽中间态不画边，避免 expand 时 borderColor 被清掉闪出默认黑边
+        borderColor:
+          isSidebar && !useTransitionShell && !expandToHomeLayoutVisual ? themeColor : undefined,
         boxShadow: isDragging ? `0 0 0 4px ${themeColor}` : undefined
       }}
       onDragEnter={handleDragEnter}

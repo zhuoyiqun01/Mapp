@@ -8,6 +8,7 @@ import { GraphStyleSettingsBlock } from './GraphStyleSettingsBlock';
 import { ThemeColorPicker } from './ThemeColorPicker';
 import { HelpHint } from './ui/HelpHint';
 import { SettingsCompactSlider } from './ui/SettingsCompactSlider';
+import { SettingsToggleSwitch } from './ui/SettingsToggleSwitch';
 import { mapChromeSurfaceStyle } from '../utils/map/mapChromeStyle';
 import { PORTAL_TOOLTIP_Z } from './ui/PortalTooltip';
 
@@ -39,6 +40,9 @@ interface SettingsPanelProps {
   onClusterThresholdChange?: (threshold: number) => void;
   labelSize?: number;
   onLabelSizeChange?: (size: number) => void;
+  /** 地图：是否显示便签文字标签 */
+  showTextLabels?: boolean;
+  onShowTextLabelsChange?: (show: boolean) => void;
   /** 有则展示 Graph Style，并写入项目 */
   graphProject?: Project;
   onGraphProjectPatch?: (patch: Partial<Project>) => void | Promise<void>;
@@ -66,6 +70,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onClusterThresholdChange,
   labelSize,
   onLabelSizeChange,
+  showTextLabels,
+  onShowTextLabelsChange,
   graphProject,
   onGraphProjectPatch,
   boardVariantToggles
@@ -269,6 +275,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   底图请在上方「底图背景」中选择；此处为地图上的图钉与文字标签大小，以及标记聚合距离。
                 </HelpHint>
               </div>
+              {showTextLabels !== undefined && onShowTextLabelsChange ? (
+                <SettingsToggleSwitch
+                  label="显示标签"
+                  checked={showTextLabels}
+                  onChange={onShowTextLabelsChange}
+                  themeColor={themeColor}
+                />
+              ) : null}
               {pinSize !== undefined &&
               onPinSizeChange &&
               clusterThreshold !== undefined &&

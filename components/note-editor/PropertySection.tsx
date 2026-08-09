@@ -1,7 +1,14 @@
-import React from 'react';
+import React, { useRef } from 'react';
+import { Tag as TagIcon } from 'lucide-react';
 import type { Tag } from '../../types';
 import { NoteTimeRangeControl } from './NoteTimeRangeControl';
 import { TagPropertyEditor } from './TagPropertyEditor';
+import {
+  NOTE_EDITOR_ADD_PILL_ACTIVE,
+  NOTE_EDITOR_ADD_PILL_CLASS,
+  NOTE_EDITOR_ADD_PILL_IDLE,
+  NoteEditorAddPillLabel
+} from './addPillStyles';
 
 interface PropertySectionProps {
   startYear?: number;
@@ -26,11 +33,11 @@ interface PropertySectionProps {
   onCancelTagEdit: () => void;
   onStartAddTag: () => void;
   onDismissOverlays?: () => void;
+  /** 打开时间面板前关闭其它浮层 */
+  onBeforeOpenTime?: () => void;
 
-  /** emoji 等附加操作 */
+  /** emoji 等附加操作（与 Tag / 时间同一行） */
   trailingSlot?: React.ReactNode;
-  showDelete?: boolean;
-  onDeleteNote?: () => void;
 }
 
 /** Properties：emoji / tags / time（经 Registry 语义；组件复用现有控件） */
@@ -56,43 +63,72 @@ export const PropertySection: React.FC<PropertySectionProps> = ({
   onCancelTagEdit,
   onStartAddTag,
   onDismissOverlays,
-  trailingSlot,
-  showDelete,
-  onDeleteNote
-}) => (
-  <section className="flex flex-col shrink-0 border-t border-gray-100/80" aria-label="属性">
-    <div className="px-4 pt-2 pb-1 flex items-center justify-between gap-2">
-      <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">属性</span>
-      <NoteTimeRangeControl
-        startYear={startYear}
-        endYear={endYear}
-        onChange={onTimeChange}
+  onBeforeOpenTime,
+  trailingSlot
+}) => {
+  const addTagBtnRef = useRef<HTMLButtonElement>(null);
+  const dismiss = onDismissOverlays ?? (() => {});
+
+  return (
+    <section className="flex flex-col shrink-0 border-t border-gray-100/80" aria-label="属性">
+      <div className="px-4 pt-2 pb-1 flex items-center justify-between gap-2">
+        <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wide shrink-0">
+          属性
+        </span>
+        <div className="flex items-center gap-1 shrink-0 min-w-0">
+          {editingTagId ? null : (
+            <button
+              ref={addTagBtnRef}
+              type="button"
+              onClick={() => {
+                if (isAddingTag) {
+                  onCancelTagEdit();
+                  return;
+                }
+                dismiss();
+                onStartAddTag();
+              }}
+              className={`${NOTE_EDITOR_ADD_PILL_CLASS} ${
+                isAddingTag ? NOTE_EDITOR_ADD_PILL_ACTIVE : NOTE_EDITOR_ADD_PILL_IDLE
+              }`}
+              title="添加标签"
+              aria-expanded={isAddingTag}
+            >
+              <NoteEditorAddPillLabel expanded={isAddingTag}>+ Tag</NoteEditorAddPillLabel>
+              <TagIcon size={14} strokeWidth={2} className="shrink-0" aria-hidden />
+            </button>
+          )}
+          {trailingSlot}
+          <NoteTimeRangeControl
+            startYear={startYear}
+            endYear={endYear}
+            onChange={onTimeChange}
+            themeColor={themeColor}
+            panelChromeStyle={panelChromeStyle}
+            active={active}
+            onProvideDismiss={onProvideTimeDismiss}
+            onBeforeOpen={onBeforeOpenTime}
+          />
+        </div>
+      </div>
+      <TagPropertyEditor
+        tags={tags}
+        editingTagId={editingTagId}
+        isAddingTag={isAddingTag}
+        newTagLabel={newTagLabel}
+        newTagColor={newTagColor}
+        setNewTagLabel={setNewTagLabel}
+        setNewTagColor={setNewTagColor}
+        onEditTag={onEditTag}
+        onRemoveTag={onRemoveTag}
+        onReorderTags={onReorderTags}
+        onSaveTag={onSaveTag}
+        onCancelTagEdit={onCancelTagEdit}
+        onDismissOverlays={onDismissOverlays}
+        addTagAnchorRef={addTagBtnRef}
         themeColor={themeColor}
         panelChromeStyle={panelChromeStyle}
-        active={active}
-        onProvideDismiss={onProvideTimeDismiss}
       />
-    </div>
-    <TagPropertyEditor
-      tags={tags}
-      editingTagId={editingTagId}
-      isAddingTag={isAddingTag}
-      newTagLabel={newTagLabel}
-      newTagColor={newTagColor}
-      setNewTagLabel={setNewTagLabel}
-      setNewTagColor={setNewTagColor}
-      onEditTag={onEditTag}
-      onRemoveTag={onRemoveTag}
-      onReorderTags={onReorderTags}
-      onSaveTag={onSaveTag}
-      onCancelTagEdit={onCancelTagEdit}
-      onStartAddTag={onStartAddTag}
-      onDismissOverlays={onDismissOverlays}
-      themeColor={themeColor}
-      panelChromeStyle={panelChromeStyle}
-      trailingSlot={trailingSlot}
-      showDelete={showDelete}
-      onDeleteNote={onDeleteNote}
-    />
-  </section>
-);
+    </section>
+  );
+};

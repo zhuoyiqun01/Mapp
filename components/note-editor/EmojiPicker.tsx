@@ -1,21 +1,65 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { EMOJI_CATEGORIES, THEME_COLOR } from '../../constants';
+import { computeAnchoredPanelPlacement } from '../ui/anchoredPanelPlacement';
+
+export const EMOJI_PICKER_EST_W = 320;
+export const EMOJI_PICKER_EST_H = 400;
 
 interface EmojiPickerProps {
   isOpen: boolean;
-  position: { left: number; top: number } | null;
+  /** 锚点元素；打开时按其位置计算面板 placement（含视口钳制） */
+  anchorRef: React.RefObject<HTMLElement | null>;
   onClose: () => void;
   onSelectEmoji: (emoji: string) => void;
+  panelChromeStyle?: React.CSSProperties;
 }
 
-export const EmojiPicker: React.FC<EmojiPickerProps> = ({ isOpen, position, onClose, onSelectEmoji }) => {
+export const EmojiPicker: React.FC<EmojiPickerProps> = ({
+  isOpen,
+  anchorRef,
+  onClose,
+  onSelectEmoji,
+  panelChromeStyle
+}) => {
   const [selectedCategory, setSelectedCategory] =
     useState<keyof typeof EMOJI_CATEGORIES>('Recent');
   const categoryTabsRef = useRef<HTMLDivElement | null>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+
+  const updatePlacement = useCallback(() => {
+    const el = anchorRef.current;
+    if (!el) return;
+    setPosition(
+      computeAnchoredPanelPlacement(el.getBoundingClientRect(), {
+        panelWidth: EMOJI_PICKER_EST_W,
+        panelHeight: EMOJI_PICKER_EST_H,
+        align: 'end'
+      })
+    );
+  }, [anchorRef]);
+
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      setPosition(null);
+      return;
+    }
+    updatePlacement();
+  }, [isOpen, updatePlacement]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onReposition = () => updatePlacement();
+    window.addEventListener('resize', onReposition);
+    window.addEventListener('scroll', onReposition, true);
+    return () => {
+      window.removeEventListener('resize', onReposition);
+      window.removeEventListener('scroll', onReposition, true);
+    };
+  }, [isOpen, updatePlacement]);
 
   const checkScrollPosition = () => {
     if (!categoryTabsRef.current) return;
@@ -62,30 +106,33 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = ({ isOpen, position, onCl
     <>
       <div className="fixed inset-0" style={{ zIndex: 9999 }} onClick={onClose} />
       <div
-        className="fixed bg-white rounded-xl shadow-2xl overflow-hidden"
+        className={`fixed rounded-xl border border-gray-100/80 shadow-lg overflow-hidden ${
+          panelChromeStyle ? '' : 'bg-white'
+        }`}
         style={{
-          border: 'none',
-          width: '320px',
-          maxHeight: '400px',
+          ...(panelChromeStyle || {}),
+          width: EMOJI_PICKER_EST_W,
+          maxWidth: 'min(100vw - 16px, 320px)',
+          maxHeight: EMOJI_PICKER_EST_H,
           display: 'flex',
           flexDirection: 'column',
-          left: `${position.left}px`,
-          top: `${position.top}px`,
+          left: position.left,
+          top: position.top,
           zIndex: 10000,
-          position: 'fixed',
           pointerEvents: 'auto'
         }}
         onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
       >
-        {/* Category Tabs */}
         <div className="relative border-b border-gray-100">
           {canScrollLeft && (
             <button
+              type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 scrollCategoryTabs('left');
               }}
-              className="absolute left-0 top-0 bottom-0 z-10 px-2 bg-white/80 hover:bg-white flex items-center transition-colors"
+              className="absolute left-0 top-0 bottom-0 z-10 px-2 bg-white/80 hover:bg-white flex items-center transition-colors border-0 cursor-pointer"
               style={{ backdropFilter: 'blur(4px)' }}
             >
               <ArrowLeft size={16} className="text-gray-600" />
@@ -93,11 +140,12 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = ({ isOpen, position, onCl
           )}
           {canScrollRight && (
             <button
+              type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 scrollCategoryTabs('right');
               }}
-              className="absolute right-0 top-0 bottom-0 z-10 px-2 bg-white/80 hover:bg-white flex items-center transition-colors"
+              className="absolute right-0 top-0 bottom-0 z-10 px-2 bg-white/80 hover:bg-white flex items-center transition-colors border-0 cursor-pointer"
               style={{ backdropFilter: 'blur(4px)' }}
             >
               <ArrowRight size={16} className="text-gray-600" />
@@ -116,11 +164,12 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = ({ isOpen, position, onCl
             {Object.keys(EMOJI_CATEGORIES).map((category) => (
               <button
                 key={category}
+                type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   setSelectedCategory(category as keyof typeof EMOJI_CATEGORIES);
                 }}
-                className={`px-2 py-1 text-xs font-medium rounded-lg whitespace-nowrap transition-colors flex-shrink-0 ${
+                className={`px-2 py-1 text-xs font-medium rounded-lg whitespace-nowrap transition-colors flex-shrink-0 border-0 cursor-pointer ${
                   selectedCategory === category
                     ? 'text-gray-900'
                     : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -132,12 +181,12 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = ({ isOpen, position, onCl
           </div>
         </div>
 
-        {/* Emoji Grid */}
-        <div className="p-3 overflow-y-auto" style={{ maxHeight: '320px' }}>
+        <div className="p-3 overflow-y-auto" style={{ maxHeight: 320 }}>
           <div className="grid grid-cols-8 gap-1" key={selectedCategory}>
             {emojis.map((e, index) => (
               <button
                 key={`${selectedCategory}-${index}-${e}`}
+                type="button"
                 onClick={() => {
                   onSelectEmoji(e);
                   onClose();
@@ -148,7 +197,7 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = ({ isOpen, position, onCl
                     }
                   }
                 }}
-                className="text-2xl p-2 rounded-lg transition-colors flex items-center justify-center"
+                className="text-2xl p-2 rounded-lg transition-colors flex items-center justify-center border-0 cursor-pointer"
                 style={{ backgroundColor: 'transparent' }}
                 onMouseEnter={(ev) => (ev.currentTarget.style.backgroundColor = `${THEME_COLOR}1A`)}
                 onMouseLeave={(ev) => (ev.currentTarget.style.backgroundColor = 'transparent')}
@@ -163,4 +212,3 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = ({ isOpen, position, onCl
     document.body
   );
 };
-
