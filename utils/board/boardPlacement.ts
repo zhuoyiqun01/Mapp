@@ -9,6 +9,7 @@
  */
 
 import type { Note } from '../../types';
+import { noteRendersAsBoardSticker } from '../persistence/mediaDisplay';
 
 // ── 常量 ──────────────────────────────────────────────────────────────────────
 
@@ -42,9 +43,9 @@ export interface GridAllocator {
 
 // ── 工具函数 ──────────────────────────────────────────────────────────────────
 
-/** 便签未缩放前的实际宽高（image 类型取 imageWidth/imageHeight，其余 256×256）。 */
+/** 便签未缩放前的实际宽高（贴纸/image 取 imageWidth/imageHeight，其余 256×256）。 */
 export function boardNoteDimensions(note: Note): { width: number; height: number } {
-  if (note.variant === 'image') {
+  if (noteRendersAsBoardSticker(note)) {
     return { width: note.imageWidth || 256, height: note.imageHeight || 256 };
   }
   return { width: 256, height: 256 };

@@ -3,8 +3,9 @@
  * 存储仍为 Note 平铺字段；本层只服务 NoteEditor。
  */
 
-import type { Note, Tag } from '../../types';
+import type { Note, NoteImageRef, Tag } from '../../types';
 import { parseNoteContent } from '../../utils';
+import { isMediaRefId } from '../persistence/imageAssetStore';
 
 export type AttachmentKind = 'image' | 'sketch';
 
@@ -56,6 +57,14 @@ function imagesFromAttachments(attachments: AttachmentRef[]): string[] {
 function sketchFromAttachments(attachments: AttachmentRef[]): string | undefined {
   const s = attachments.find((a) => a.type === 'sketch');
   return s?.id && s.id !== '' ? s.id : undefined;
+}
+
+function imageRefsFromNote(note: Partial<Note>, imageIds: string[]): NoteImageRef[] | undefined {
+  if (note.imageRefs && note.imageRefs.length > 0) {
+    return note.imageRefs;
+  }
+  const refs = imageIds.filter(isMediaRefId).map((assetId) => ({ assetId }));
+  return refs.length > 0 ? refs : undefined;
 }
 
 function getEmoji(properties: PropertyValue[]): string {
@@ -132,7 +141,9 @@ export function fromEditorModel(model: EditorModel, base: Partial<Note> = {}): P
     startYear: time.startYear,
     endYear: time.endYear,
     images: imagesFromAttachments(model.media.attachments),
-    sketch: sketchFromAttachments(model.media.attachments),
+    imageRefs: base.imageRefs ?? imageRefsFromNote(base, imagesFromAttachments(model.media.attachments)),
+    sketch: base.sketch !== undefined ? base.sketch : sketchFromAttachments(model.media.attachments),
+    media: base.media,
     fontSize: base.fontSize ?? 3,
     isBold: base.isBold ?? false,
     color: base.color ?? '#FFFFFF'
@@ -147,6 +158,7 @@ export function buildEditorModel(input: {
   startYear?: number;
   endYear?: number;
   images: string[];
+  imageRefs?: NoteImageRef[];
   sketch?: string;
   id?: string;
   createdAt?: number;
@@ -160,6 +172,7 @@ export function buildEditorModel(input: {
     startYear: input.startYear,
     endYear: input.endYear,
     images: input.images,
+    imageRefs: input.imageRefs,
     sketch: input.sketch
   });
 }

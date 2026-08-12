@@ -8,10 +8,10 @@ export function normalizeTagVisibilityLogic(raw?: string | null): TagVisibilityL
 }
 
 /**
- * 地图可绘制的地理坐标：有效数字且非占位 0,0（无坐标/仅白板数据的导入使用 0,0）。
+ * 地图可绘制的地理坐标：standard / image 且有效数字、非占位 0,0（无坐标/仅白板数据的导入使用 0,0）。
  */
 export function noteHasRenderableMapPosition(note: Note): boolean {
-  if (note.variant !== 'standard') return false;
+  if (note.variant !== 'standard' && note.variant !== 'image') return false;
   const c = note.coords;
   if (!c || typeof c.lat !== 'number' || typeof c.lng !== 'number' || isNaN(c.lat) || isNaN(c.lng)) {
     return false;

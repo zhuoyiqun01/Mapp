@@ -12,7 +12,11 @@ import { DEFAULT_THEME_COLOR, TAG_COLORS } from '../constants';
 import { mapChromeSurfaceStyle } from '../utils/map/mapChromeStyle';
 import { parseHexToRgb } from '../utils/theme/themeChrome';
 import { saveImage, saveSketch, loadImage, loadNoteImages, getViewPositionCache } from '../utils/persistence/storage';
+import { useNotesWithResolvedMedia } from '../utils/persistence/useNotesWithResolvedMedia';
+import { noteRendersAsBoardSticker } from '../utils/persistence/mediaDisplay';
 import { compressImageToBase64 } from '../utils/board/board-utils';
+import { useBoardNoteDrag } from './hooks/useBoardNoteDrag';
+import { useBoardNoteInteraction } from './hooks/useBoardNoteInteraction';
 import {
   PLACEMENT_PADDING,
   PLACEMENT_GAP,
@@ -276,6 +280,8 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
   mapStyleId = 'carto-light-nolabels',
   onMapStyleChange,
 }) => {
+  /** 渲染用：资产 ID → data URL；写回仍用 props.notes */
+  const displayNotes = useNotesWithResolvedMedia(notes);
   const ch = panelChromeStyle;
   const chHover = chromeHoverBackground;
   const frameChromeStyle = useMemo(
@@ -478,19 +484,15 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
   
   // Layout state: global standard size scale is stored in project.standardSizeScale
   
-  // Dragging State
-  const [draggingNoteId, setDraggingNoteId] = useState<string | null>(null);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 }); 
+  // Dragging / pan pointer（pan 仍用 lastMousePos；便签拖动见 useBoardNoteDrag）
   const lastMousePos = useRef<{ x: number, y: number } | null>(null);
   const panStartPos = useRef<{ x: number, y: number } | null>(null);
+  const isZoomingRef = useRef(false);
+  const dragRectRef = useRef<DOMRect | null>(null);
   
-  // Long press state for notes
+  // Long press leftovers（背景手势仍会清）
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressNoteIdRef = useRef<string | null>(null);
-  const notePressStartPosRef = useRef<{ x: number, y: number } | null>(null);
-  // 专门用于跟踪当前按下的 note ID，不会被移动逻辑清空，只在 pointerUp 时清空
-  const currentNotePressIdRef = useRef<string | null>(null);
-  // 保存长按时的 pointerId 和元素引用，用于长按触发后捕获指针
   const longPressPointerIdRef = useRef<number | null>(null);
   const longPressElementRef = useRef<HTMLElement | null>(null);
   
@@ -519,8 +521,6 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
 
   // Multi-select state
   const [isShiftPressed, setIsShiftPressed] = useState(false);
-  const [isMultiSelectDragging, setIsMultiSelectDragging] = useState(false);
-  const [multiSelectDragOffset, setMultiSelectDragOffset] = useState({ x: 0, y: 0 });
   
   // Box selection state
   const [isBoxSelecting, setIsBoxSelecting] = useState(false);
@@ -722,6 +722,81 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
       blankClickResetTimerRef.current = null;
     }
   };
+
+  const openBoardNoteEditor = useCallback(
+    (note: Note) => {
+      void (async () => {
+        let loaded = note;
+        const hasLoadedImages =
+          !!note.images?.length && note.images.some((img) => img.startsWith('data:'));
+        if (!hasLoadedImages) {
+          try {
+            loaded = await loadNoteImages(note);
+          } catch (error) {
+            console.error('Failed to load note images:', error);
+          }
+        }
+        setEditingNote(loaded);
+        onToggleEditor(true);
+      })();
+    },
+    [onToggleEditor]
+  );
+
+  const commitProjectNotes = useCallback(
+    (nextNotes: Note[]) => {
+      if (!project || !onUpdateProject) return;
+      void onUpdateProject({ ...project, notes: nextNotes });
+    },
+    [project, onUpdateProject]
+  );
+
+  const cacheDragRect = useCallback(() => {
+    dragRectRef.current = containerRef.current?.getBoundingClientRect() || null;
+  }, []);
+
+  const {
+    draggingNoteId,
+    dragOffset,
+    isMultiSelectDragging,
+    multiSelectDragOffset,
+    handleNotePointerDown,
+    handleNotePointerMove,
+    handleNotePointerUp,
+    clearNotePressTracking,
+    currentNotePressIdRef
+  } = useBoardNoteDrag({
+    workspaceEditMode,
+    isZoomingRef,
+    transformScale: transform.scale,
+    notes,
+    frames,
+    selectedNoteIds,
+    isSelectingNotePosition,
+    isShiftPressed,
+    setIsSelectingNotePosition,
+    onUpdateNote,
+    commitProjectNotes,
+    stopAnimations,
+    cacheDragRect,
+    onBrowseOpenEditor: openBoardNoteEditor
+  });
+
+  const { handleNoteClick, handleNoteDoubleClick, clearDeferredClick } = useBoardNoteInteraction({
+    workspaceEditMode,
+    isZoomingRef,
+    isShiftPressed,
+    notes,
+    setSelectedNoteId,
+    setSelectedNoteIds,
+    setSelectedConnectionId,
+    setSelectedFrameId,
+    setConnectingFrom: setConnectingFrom as (v: null) => void,
+    setConnectingTo: setConnectingTo as (v: null) => void,
+    setHoveringConnectionPoint: setHoveringConnectionPoint as (v: null) => void,
+    resetBlankClickCount,
+    onOpenNoteEditor: openBoardNoteEditor
+  });
 
   const browseTagLabelsInSelection = useMemo(
     () => collectSortedUniqueTagLabelsFromSelection(selectedNoteIds, notes),
@@ -996,10 +1071,10 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
         longPressTimerRef.current = null;
       }
       longPressNoteIdRef.current = null;
-      currentNotePressIdRef.current = null;
-      notePressStartPosRef.current = null;
+      clearNotePressTracking();
+      clearDeferredClick();
     }
-  }, [workspaceEditMode]);
+  }, [workspaceEditMode, clearNotePressTracking, clearDeferredClick]);
 
   // 计算Note的中心点是否在Frame内
   const isNoteInFrame = (note: Note, frame: Frame): boolean => {
@@ -1529,7 +1604,6 @@ const BoardViewComponent: React.FC<BoardViewProps> = ({
 
   // Track transform changes for restoration detection only (position saving moved to pointer up)
   const isRestoringRef = useRef(false);
-  const dragRectRef = useRef<DOMRect | null>(null);
 
   // Navigate to specific coordinates when navigateToCoords is set, or restore saved transform
   useEffect(() => {
@@ -2195,7 +2269,6 @@ const createNoteAtCenter = () => {
   } | null>(null);
 
   const [isZooming, setIsZooming] = useState(false);
-  const isZoomingRef = useRef(false);
   isZoomingRef.current = isZooming;
 
   // Use native event listeners for touch events to allow preventDefault
@@ -2915,514 +2988,6 @@ const createNoteAtCenter = () => {
     resetBlankClickCount();
   };
 
-  const handleNotePointerDown = (e: React.PointerEvent, noteId: string, note: Note) => {
-      // 如果有正在运行的动画，立即停止它
-      stopAnimations();
-      
-      // 缓存容器位置
-      dragRectRef.current = containerRef.current?.getBoundingClientRect() || null;
-      
-      // 如果正在缩放，不响应拖动
-      if (isZooming) return;
-      
-      // 如果在位置选择模式，点击便签时退出位置选择模式
-      if (isSelectingNotePosition) {
-          setIsSelectingNotePosition(false);
-      e.stopPropagation();
-          return;
-      }
-      
-      // 如果不在编辑模式，只记录位置信息用于单击检测，不启动长按计时器
-      if (!workspaceEditMode) {
-          // 阻止默认的长按菜单和事件冒泡，确保note的点击事件被正确处理
-          e.preventDefault();
-      e.stopPropagation();
-      
-          // 记录当前按下的 note ID 和位置，用于单击检测
-          currentNotePressIdRef.current = noteId;
-          lastMousePos.current = { x: e.clientX, y: e.clientY };
-          notePressStartPosRef.current = { x: e.clientX, y: e.clientY };
-          return;
-      }
-      
-      // 如果已经在编辑模式，检查是否是多选拖动
-      e.stopPropagation();
-      e.preventDefault();
-      
-      // Check if this note is part of multi-select
-      if (selectedNoteIds.has(noteId) && selectedNoteIds.size > 1) {
-        // Start multi-select drag
-        setIsMultiSelectDragging(true);
-        setMultiSelectDragOffset({ x: 0, y: 0 });
-      } else {
-        // Single note drag
-      setDraggingNoteId(noteId);
-      setDragOffset({ x: 0, y: 0 });
-      }
-      lastMousePos.current = { x: e.clientX, y: e.clientY };
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  };
-
-  const handleNotePointerMove = (e: React.PointerEvent) => {
-      // 如果正在缩放，不处理移动
-      if (isZooming) return;
-      
-      // 非编辑模式下，检查移动距离，如果移动太多则清空单击检测状态
-      if (!workspaceEditMode) {
-          if (lastMousePos.current && notePressStartPosRef.current) {
-              const dx = e.clientX - notePressStartPosRef.current.x;
-              const dy = e.clientY - notePressStartPosRef.current.y;
-              const dist = Math.sqrt(dx*dx + dy*dy);
-              // 如果移动超过20px，清空单击检测状态，让背景可以滑动
-              // 提高阈值，避免轻微移动导致单击失效
-              if (dist > 20) {
-                  currentNotePressIdRef.current = null;
-                  lastMousePos.current = null;
-                  notePressStartPosRef.current = null;
-              } else {
-                  // 更新lastMousePos，用于跟踪移动
-                  lastMousePos.current = { x: e.clientX, y: e.clientY };
-              }
-          }
-          return;
-      }
-      
-      // Handle multi-select drag
-      if (isMultiSelectDragging && lastMousePos.current) {
-        e.stopPropagation();
-        e.preventDefault();
-        
-        const dx = e.clientX - lastMousePos.current.x;
-        const dy = e.clientY - lastMousePos.current.y;
-        const worldDx = dx / transform.scale;
-        const worldDy = dy / transform.scale;
-
-        setMultiSelectDragOffset(prev => ({ x: prev.x + worldDx, y: prev.y + worldDy }));
-        lastMousePos.current = { x: e.clientX, y: e.clientY };
-        return;
-      }
-      
-      if (!draggingNoteId || !lastMousePos.current) return;
-      e.stopPropagation();
-      e.preventDefault();
-      
-      const dx = e.clientX - lastMousePos.current.x;
-      const dy = e.clientY - lastMousePos.current.y;
-      const worldDx = dx / transform.scale;
-      const worldDy = dy / transform.scale;
-
-      setDragOffset(prev => ({ x: prev.x + worldDx, y: prev.y + worldDy }));
-      lastMousePos.current = { x: e.clientX, y: e.clientY };
-  };
-
-  const handleNotePointerUp = (e: React.PointerEvent, note: Note) => {
-      // Handle multi-select drag end
-      if (isMultiSelectDragging && !isZooming && workspaceEditMode) {
-        e.stopPropagation();
-        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-        
-        if (multiSelectDragOffset.x !== 0 || multiSelectDragOffset.y !== 0) {
-          // 批量更新所有选中的便签，避免多次触发 onUpdateNote 导致的覆盖问题
-          const updatedNotes = [...notes];
-          let hasChanges = false;
-
-          selectedNoteIds.forEach(id => {
-            const noteIndex = updatedNotes.findIndex(n => n.id === id);
-            if (noteIndex !== -1) {
-              const selectedNote = updatedNotes[noteIndex];
-              // 计算新的位置
-              const newBoardX = selectedNote.boardX + multiSelectDragOffset.x;
-              const newBoardY = selectedNote.boardY + multiSelectDragOffset.y;
-              
-              // 检查新位置是否在任何frame内
-              const { width, height } = boardNoteDimensions(selectedNote);
-              
-              const centerX = newBoardX + width / 2;
-              const centerY = newBoardY + height / 2;
-              
-              // 找到所有包含新位置的Frames
-              const containingFrames = frames.filter(frame => 
-                centerX >= frame.x && 
-                centerX <= frame.x + frame.width && 
-                centerY >= frame.y && 
-                centerY <= frame.y + frame.height
-              );
-              
-              // 更新便签对象
-              if (containingFrames.length > 0) {
-                const singleFrame = containingFrames[0];
-                updatedNotes[noteIndex] = {
-                  ...selectedNote,
-                  boardX: newBoardX,
-                  boardY: newBoardY,
-                  groupIds: [singleFrame.id],
-                  groupNames: [singleFrame.title],
-                  groupId: singleFrame.id,
-                  groupName: singleFrame.title
-                };
-              } else {
-                updatedNotes[noteIndex] = {
-                  ...selectedNote,
-                  boardX: newBoardX,
-                  boardY: newBoardY,
-                  groupIds: undefined,
-                  groupNames: undefined,
-                  groupId: undefined,
-                  groupName: undefined
-                };
-              }
-              hasChanges = true;
-            }
-          });
-
-          if (hasChanges && project) {
-            onUpdateProject({
-              ...project,
-              notes: updatedNotes
-            });
-          }
-        }
-        
-        setIsMultiSelectDragging(false);
-        setMultiSelectDragOffset({ x: 0, y: 0 });
-        lastMousePos.current = null;
-        return;
-      }
-      
-      // 先计算移动距离，用于判断是否真的发生了拖动
-      let movedDistance = 0;
-      if (notePressStartPosRef.current) {
-          const dx = e.clientX - notePressStartPosRef.current.x;
-          const dy = e.clientY - notePressStartPosRef.current.y;
-          movedDistance = Math.sqrt(dx*dx + dy*dy);
-      }
-      const hasMoved = dragOffset.x !== 0 || dragOffset.y !== 0;
-      const hasMovedEnough = movedDistance > 15; // 15px阈值
-      const movedTooMuch = movedDistance > 10; // 10px阈值，用于判断短按
-      
-      // 如果正在拖动（编辑模式下），处理拖动结束
-      if (draggingNoteId === note.id && !isZooming && workspaceEditMode) {
-          // 如果确实发生了拖动，处理拖动结束
-          if (hasMoved || hasMovedEnough) {
-          e.stopPropagation();
-          (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-
-          if (dragOffset.x !== 0 || dragOffset.y !== 0) {
-                  // 计算新的位置
-                  const newBoardX = note.boardX + dragOffset.x;
-                  const newBoardY = note.boardY + dragOffset.y;
-                  
-                  // 检查新位置是否在任何frame内
-                  const { width, height } = boardNoteDimensions(note);
-                  
-                  const centerX = newBoardX + width / 2;
-                  const centerY = newBoardY + height / 2;
-                  
-                  // 找到所有包含新位置的Frames
-                  const containingFrames = frames.filter(frame => 
-                    centerX >= frame.x && 
-                    centerX <= frame.x + frame.width && 
-                    centerY >= frame.y && 
-                    centerY <= frame.y + frame.height
-                  );
-                  
-                  // 更新便签：单簇归属（重叠取第一个）
-                  if (containingFrames.length > 0) {
-                    const singleFrame = containingFrames[0];
-              onUpdateNote({
-                  ...note,
-                      boardX: newBoardX,
-                      boardY: newBoardY,
-                      groupIds: [singleFrame.id],
-                      groupNames: [singleFrame.title],
-                      groupId: singleFrame.id,
-                      groupName: singleFrame.title
-                    });
-                  } else {
-                    onUpdateNote({
-                      ...note,
-                      boardX: newBoardX,
-                      boardY: newBoardY,
-                      groupIds: undefined,
-                      groupNames: undefined,
-                      groupId: undefined,
-                      groupName: undefined
-                    });
-                  }
-          }
-          setDraggingNoteId(null);
-          setDragOffset({ x: 0, y: 0 });
-          lastMousePos.current = null;
-              
-              // 清理状态
-              currentNotePressIdRef.current = null;
-              notePressStartPosRef.current = null;
-              return;
-          } else {
-              // 如果没有真正拖动，清除拖动状态
-              setDraggingNoteId(null);
-              setDragOffset({ x: 0, y: 0 });
-          }
-      }
-      
-      // 如果不在编辑模式，且是短按，打开编辑器
-      if (!workspaceEditMode) {
-          // 图片对象不应该打开编辑器
-          if (note.variant === 'image') {
-              currentNotePressIdRef.current = null;
-              lastMousePos.current = null;
-              notePressStartPosRef.current = null;
-              return;
-          }
-          
-          // 检查是否在同一个note上按下和抬起
-          const wasOnSameNote = currentNotePressIdRef.current === note.id;
-          
-          // 判断是否应该打开编辑器：
-          // 1. 在同一个note上按下和抬起
-          // 2. 移动距离很小（小于15px，说明是单击而不是拖动）
-          // 提高阈值，让单击更容易触发
-          const isShortClick =
-            wasOnSameNote && movedDistance < 15 && !e.shiftKey && !isShiftPressed;
-          
-          if (isShortClick) {
-              e.stopPropagation();
-              e.preventDefault();
-              // 使用最新的便签数据
-              const latestNote = notes.find(n => n.id === note.id) || note;
-              ensureNoteImagesLoaded(latestNote).then(loadedNote => {
-                setEditingNote(loadedNote);
-                onToggleEditor(true);
-              });
-              
-              // 清理状态
-              currentNotePressIdRef.current = null;
-              lastMousePos.current = null;
-              notePressStartPosRef.current = null;
-              return;
-          }
-      }
-      
-      // 清理状态
-      currentNotePressIdRef.current = null;
-      notePressStartPosRef.current = null;
-  };
-
-  // Track click timing to distinguish single vs double click
-  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastClickNoteIdRef = useRef<string | null>(null);
-  const lastClickTimeRef = useRef<number>(0);
-
-  const handleNoteClick = (e: React.MouseEvent, note: Note) => {
-      e.stopPropagation(); 
-      
-      // 如果正在缩放，不触发点击
-      if (isZooming) return;
-
-      // 编组逻辑：单击已编组的便签（非 Shift）时，自动选中同组所有成员
-      {
-        const latestNote = notes.find(n => n.id === note.id) || note;
-        if (latestNote.noteGroupId && !isShiftPressed && !e.shiftKey) {
-          const groupMemberIds = new Set(
-            notes.filter(n => n.noteGroupId === latestNote.noteGroupId).map(n => n.id)
-          );
-          setSelectedNoteIds(groupMemberIds);
-          setSelectedNoteId(note.id);
-          return;
-        }
-      }
-      
-      // 图片对象在非编辑模式下点击后放大预览 - 优先显示照片而不是涂鸦（Shift+点击多选）
-      if (note.variant === 'image' && !workspaceEditMode) {
-        if (isShiftPressed || e.shiftKey) {
-          setSelectedNoteIds((prev) => {
-            const newSet = new Set(prev);
-            if (newSet.has(note.id)) {
-              newSet.delete(note.id);
-              if (newSet.size === 0) setSelectedNoteId(null);
-              else setSelectedNoteId(Array.from(newSet)[0]);
-            } else {
-              newSet.add(note.id);
-              setSelectedNoteId(note.id);
-            }
-            return newSet;
-          });
-          resetBlankClickCount();
-          return;
-        }
-        if (note.images && note.images[0]) {
-          setPreviewImage(note.images[0]);
-          return;
-        } else if (note.sketch && note.sketch !== '') {
-          setPreviewImage(note.sketch);
-          return;
-        }
-      }
-      
-      // 图片对象在编辑模式下，单击选中（延迟执行，等待可能的双击）
-      if (note.variant === 'image' && workspaceEditMode) {
-        const now = Date.now();
-        const timeSinceLastClick = now - lastClickTimeRef.current;
-        const isSameNote = lastClickNoteIdRef.current === note.id;
-        
-        // 如果距离上次点击时间很短（小于300ms）且是同一个图片，可能是双击的开始
-        if (clickTimerRef.current) {
-          clearTimeout(clickTimerRef.current);
-        }
-        
-        // 延迟执行选中逻辑，等待可能的双击
-        clickTimerRef.current = setTimeout(() => {
-          if (!isShiftPressed && !e.shiftKey) {
-            // Single select mode: clear multi-select and select only this note
-            setSelectedNoteId(note.id);
-            setSelectedNoteIds(new Set([note.id]));
-          } else {
-            // Multi-select mode: toggle selection
-            setSelectedNoteIds(prev => {
-              const newSet = new Set(prev);
-              if (newSet.has(note.id)) {
-                newSet.delete(note.id);
-                if (newSet.size === 0) {
-                  setSelectedNoteId(null);
-                }
-              } else {
-                newSet.add(note.id);
-                setSelectedNoteId(note.id);
-              }
-              return newSet;
-            });
-          }
-          setConnectingFrom(null);
-          setConnectingTo(null);
-          setHoveringConnectionPoint(null);
-          resetBlankClickCount();
-        }, 300); // Wait 300ms to see if it's a double click
-        
-        lastClickNoteIdRef.current = note.id;
-        lastClickTimeRef.current = now;
-        return;
-      }
-      
-      if (!workspaceEditMode) {
-        if (isShiftPressed || e.shiftKey) {
-          setSelectedNoteIds((prev) => {
-            const newSet = new Set(prev);
-            if (newSet.has(note.id)) {
-              newSet.delete(note.id);
-              if (newSet.size === 0) setSelectedNoteId(null);
-              else setSelectedNoteId(Array.from(newSet)[0]);
-            } else {
-              newSet.add(note.id);
-              setSelectedNoteId(note.id);
-            }
-            return newSet;
-          });
-          resetBlankClickCount();
-          return;
-        }
-        // 使用最新的便签数据
-        const latestNote = notes.find(n => n.id === note.id) || note;
-        ensureNoteImagesLoaded(latestNote).then(loadedNote => {
-          setEditingNote(loadedNote);
-          onToggleEditor(true);
-        });
-      } else {
-        // 在编辑模式下，单击选中便利贴
-        const now = Date.now();
-        const timeSinceLastClick = now - lastClickTimeRef.current;
-        const isSameNote = lastClickNoteIdRef.current === note.id;
-        
-        // 如果距离上次点击时间很短（小于300ms）且是同一个便签，可能是双击的开始
-        // 但我们先处理单击逻辑，双击会在onDoubleClick中处理
-        if (clickTimerRef.current) {
-          clearTimeout(clickTimerRef.current);
-        }
-        
-        // 延迟执行单击逻辑，等待可能的双击
-        // 捕获当前的shift状态
-        const wasShiftPressed = isShiftPressed || e.shiftKey;
-        clickTimerRef.current = setTimeout(() => {
-          if (wasShiftPressed) {
-            // Multi-select mode: toggle selection (add or remove from selection)
-            setSelectedNoteIds(prev => {
-              const newSet = new Set(prev);
-              if (newSet.has(note.id)) {
-                newSet.delete(note.id);
-                // If removing the last selected note, clear single selection too
-                if (newSet.size === 0) {
-                  setSelectedNoteId(null);
-                } else {
-                  // Keep the first remaining note as single selection
-                  setSelectedNoteId(Array.from(newSet)[0]);
-                }
-              } else {
-                newSet.add(note.id);
-                // Update single selection to the clicked note
-                setSelectedNoteId(note.id);
-              }
-              return newSet;
-            });
-          } else {
-            // Single select mode: clear multi-select and select only this note
-            setSelectedNoteId(note.id);
-            setSelectedNoteIds(new Set([note.id]));
-            setSelectedConnectionId(null);
-            setSelectedFrameId(null);
-          }
-          if (wasShiftPressed) {
-            setSelectedConnectionId(null);
-          }
-          setConnectingFrom(null);
-          setConnectingTo(null);
-          setHoveringConnectionPoint(null);
-          resetBlankClickCount();
-        }, 300); // Wait 300ms to see if it's a double click
-        
-        lastClickNoteIdRef.current = note.id;
-        lastClickTimeRef.current = now;
-      }
-  };
-
-  const handleNoteDoubleClick = (e: React.MouseEvent, note: Note) => {
-      e.stopPropagation();
-      
-      // 如果正在缩放，不触发点击
-      if (isZooming) return;
-      
-      // 图片对象双击打开预览
-      if (note.variant === 'image') {
-        // 清除单击的延迟执行
-        if (clickTimerRef.current) {
-          clearTimeout(clickTimerRef.current);
-          clickTimerRef.current = null;
-        }
-        // 优先显示照片
-        if (note.images && note.images[0]) {
-          setPreviewImage(note.images[0]);
-          return;
-        } else if (note.sketch && note.sketch !== '') {
-          setPreviewImage(note.sketch);
-          return;
-        }
-      }
-      
-      // 清除单击的延迟执行
-      if (clickTimerRef.current) {
-        clearTimeout(clickTimerRef.current);
-        clickTimerRef.current = null;
-      }
-      
-      // 在编辑模式下，双击打开编辑器
-      if (workspaceEditMode) {
-        // 使用最新的便签数据
-        const latestNote = notes.find(n => n.id === note.id) || note;
-        ensureNoteImagesLoaded(latestNote).then(loadedNote => {
-          setEditingNote(loadedNote);
-          onToggleEditor(true);
-        });
-      }
-  };
-  
   // 获取连接点的位置
   // 处理连接点点击
   const handleConnectionPointDown = (e: React.PointerEvent, noteId: string, side: 'top' | 'right' | 'bottom' | 'left') => {
@@ -4423,7 +3988,7 @@ const createNoteAtCenter = () => {
 
           {/* Board 视图不渲染连线（连线仅在 Graph 等视图展示） */}
 
-          {notes
+          {displayNotes
             .filter((note) => notePassesBoardVisibilityFilters(note))
             .filter((note) =>
               isNoteVisibleInUnifiedLayer(note, mergedProjectBoardLayers, graphLayerGroupStandard)
@@ -4436,7 +4001,7 @@ const createNoteAtCenter = () => {
             })
             .map((note) => {
               // Check layer visibility based on note variant
-              const isImage = note.variant === 'image';
+              const isImage = noteRendersAsBoardSticker(note);
               
               let shouldShow = false;
               if (isImage && layerVisibility.image) shouldShow = true;
@@ -4492,6 +4057,7 @@ const createNoteAtCenter = () => {
                   onPointerMove={handleNotePointerMove}
                   onPointerUp={(e) => handleNotePointerUp(e, note)}
                   onClick={(e) => handleNoteClick(e, note)}
+                  onDoubleClick={(e) => handleNoteDoubleClick(e, note)}
                 >
                   {workspaceEditMode && (
                       <>
@@ -4567,23 +4133,30 @@ const createNoteAtCenter = () => {
                       </>
                     )}
                     <div 
-                        className={`w-full h-full shadow-xl flex flex-col overflow-hidden group rounded-sm transition-shadow ${isDragging ? 'shadow-2xl ring-4' : isInFrame ? 'ring-4 ring-[#EEEEEE]' : ''}`}
+                        className={`w-full h-full flex flex-col overflow-visible group rounded-sm transition-shadow ${isDragging ? 'ring-4' : isInFrame ? 'ring-4 ring-[#EEEEEE]' : ''}`}
                             style={{ 
                             boxShadow: isDragging ? `0 0 0 4px ${themeColor}` : undefined,
                             backgroundColor: 'transparent'
                         }}
                     >
                         <div
-                          className="w-full h-full relative flex items-center justify-center"
-                          style={{ backgroundColor: note.color || '#FFFDF5' }}
+                          className="w-full h-full relative flex items-center justify-center bg-transparent"
                         >
-                          {note.images && note.images[0] && (
+                          {(() => {
+                            const first = note.media?.[0];
+                            const stickerSrc =
+                              first?.kind === 'sketch'
+                                ? note.sketch
+                                : note.images?.[0] || note.sketch;
+                            if (!stickerSrc) return null;
+                            return (
                             <img
-                              src={note.images[0]}
-                              className="w-full h-full object-contain pointer-events-none"
+                              src={stickerSrc}
+                              className="w-full h-full object-contain pointer-events-none drop-shadow-[0_10px_22px_rgba(15,23,42,0.32)]"
                               alt="board-image"
                             />
-                          )}
+                            );
+                          })()}
                         </div>
                     </div>
                   </div>
@@ -5203,7 +4776,23 @@ const createNoteAtCenter = () => {
           <NoteEditor 
               isOpen={!!editingNote}
               onClose={closeEditor}
-              initialNote={notes.find(n => n.id === editingNote.id) || editingNote}
+              initialNote={(() => {
+                const fromProject = notes.find((n) => n.id === editingNote.id);
+                if (!fromProject) return editingNote;
+                // editingNote 可能已 hydrate 出展示 URL；项目态仍是 img-*，合并以免编辑器重解析失败/卡加载
+                const preferResolvedImages =
+                  (editingNote.images || []).some((img) => typeof img === 'string' && img.startsWith('data:image/'));
+                return {
+                  ...fromProject,
+                  ...editingNote,
+                  images: preferResolvedImages ? editingNote.images : fromProject.images,
+                  imageRefs: editingNote.imageRefs ?? fromProject.imageRefs,
+                  sketch:
+                    editingNote.sketch && String(editingNote.sketch).startsWith('data:image/')
+                      ? editingNote.sketch
+                      : fromProject.sketch
+                };
+              })()}
               onDelete={onDeleteNote}
               onSwitchToMapView={onSwitchToMapView}
               onSwitchToGraphView={onSwitchToGraphView}
@@ -5221,6 +4810,10 @@ const createNoteAtCenter = () => {
                           // Always use updated.images if it exists (even if empty array)
                           // This ensures new uploads are saved, not reverted to old images
                           images: updated.images !== undefined ? updated.images : (existingNote!.images || []),
+                          imageRefs:
+                            updated.imageRefs !== undefined
+                              ? updated.imageRefs
+                              : existingNote!.imageRefs,
                           // Always use updated.sketch if it exists (even if undefined to clear)
                           // This ensures new sketches are saved, not reverted to old sketch
                           sketch: 'sketch' in updated ? updated.sketch : existingNote!.sketch

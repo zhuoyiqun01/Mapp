@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useMap } from 'react-leaflet';
 import { Note } from '../../types';
 import { THEME_COLOR } from '../../constants';
-import { Locate, Loader2, Settings, MapPin } from 'lucide-react';
+import { Locate, Loader2, Settings, MapPin, Plus, Image as ImageIcon } from 'lucide-react';
 import { ChromeIconButton } from '../ui/ChromeIconButton';
 
 interface MapControlsProps {
@@ -18,6 +18,9 @@ interface MapControlsProps {
   settingsOpen?: boolean;
   /** 锚定设置下拉面板 */
   settingsButtonRef?: React.RefObject<HTMLButtonElement | null>;
+  onCreateAtCurrentLocation: () => void;
+  onImportFromPhotos: () => void;
+  isCreatingAtLocation?: boolean;
 }
 
 export const MapControls: React.FC<MapControlsProps> = ({
@@ -29,12 +32,16 @@ export const MapControls: React.FC<MapControlsProps> = ({
   chromeHoverBackground,
   onOpenSettings,
   settingsOpen = false,
-  settingsButtonRef
+  settingsButtonRef,
+  onCreateAtCurrentLocation,
+  onImportFromPhotos,
+  isCreatingAtLocation = false
 }) => {
   const neutralStyle = chromeSurfaceStyle;
   const neutralHover = chromeHoverBackground;
   const map = useMap();
   const [showLocateMenu, setShowLocateMenu] = useState(false);
+  const [showCreateMenu, setShowCreateMenu] = useState(false);
   const controlsRef = useRef<HTMLDivElement>(null);
   const locateMenuRef = useRef<HTMLDivElement>(null);
 
@@ -50,13 +57,14 @@ export const MapControls: React.FC<MapControlsProps> = ({
     const handleClickOutside = (event: MouseEvent) => {
       if (controlsRef.current && !controlsRef.current.contains(event.target as Node)) {
         setShowLocateMenu(false);
+        setShowCreateMenu(false);
       }
     };
-    if (showLocateMenu) {
+    if (showLocateMenu || showCreateMenu) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
-  }, [showLocateMenu]);
+  }, [showLocateMenu, showCreateMenu]);
 
   // Block map container from receiving pointer down events when pointer is in UI area
   useEffect(() => {
@@ -107,11 +115,35 @@ export const MapControls: React.FC<MapControlsProps> = ({
         nonChromeIdleHover="imperative-gray100"
         active={settingsOpen}
         pressThemeFlash
-        onClick={() => onOpenSettings()}
+        onClick={() => {
+          setShowCreateMenu(false);
+          setShowLocateMenu(false);
+          onOpenSettings();
+        }}
         onPointerMove={(e) => e.stopPropagation()}
         tooltip="设置"
       >
         <Settings size={18} className="sm:w-5 sm:h-5" />
+      </ChromeIconButton>
+
+      <ChromeIconButton
+        className="group"
+        themeColor={themeColor}
+        chromeSurfaceStyle={neutralStyle}
+        chromeHoverBackground={neutralHover}
+        active={showCreateMenu}
+        onClick={() => {
+          setShowLocateMenu(false);
+          setShowCreateMenu((v) => !v);
+        }}
+        onPointerMove={(e) => e.stopPropagation()}
+        tooltip="新建节点"
+      >
+        {isCreatingAtLocation ? (
+          <Loader2 size={18} className="sm:w-5 sm:h-5 animate-spin" />
+        ) : (
+          <Plus size={18} className="sm:w-5 sm:h-5" />
+        )}
       </ChromeIconButton>
 
       <div ref={locateMenuRef}>
@@ -121,7 +153,10 @@ export const MapControls: React.FC<MapControlsProps> = ({
           chromeSurfaceStyle={neutralStyle}
           chromeHoverBackground={neutralHover}
           active={showLocateMenu}
-          onClick={() => setShowLocateMenu(!showLocateMenu)}
+          onClick={() => {
+            setShowCreateMenu(false);
+            setShowLocateMenu(!showLocateMenu);
+          }}
           onPointerMove={(e) => e.stopPropagation()}
           tooltip="定位"
         >
@@ -171,6 +206,51 @@ export const MapControls: React.FC<MapControlsProps> = ({
           >
             <MapPin size={16} className="text-gray-400 group-hover:text-red-500 transition-colors" />
             <span>Latest Note</span>
+          </button>
+        </div>
+      )}
+
+      {showCreateMenu && (
+        <div
+          data-create-node-menu
+          className={`absolute left-0 top-full mt-2 w-52 rounded-xl shadow-xl border border-gray-100 py-1 z-[2000] ${neutralStyle ? '' : 'bg-white'}`}
+          style={neutralStyle}
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerMove={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onMouseMove={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowCreateMenu(false);
+              onCreateAtCurrentLocation();
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onPointerMove={(e) => e.stopPropagation()}
+            disabled={isCreatingAtLocation}
+            className="group w-full text-left px-4 py-3 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-3 text-sm transition-colors"
+          >
+            {isCreatingAtLocation ? (
+              <Loader2 size={16} className="text-blue-500 animate-spin" />
+            ) : (
+              <MapPin size={16} className="text-gray-400 group-hover:text-blue-500 transition-colors" />
+            )}
+            <span>在当前位置添加</span>
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowCreateMenu(false);
+              onImportFromPhotos();
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onPointerMove={(e) => e.stopPropagation()}
+            className="group w-full text-left px-4 py-3 hover:bg-gray-50 flex items-center gap-3 text-sm transition-colors"
+          >
+            <ImageIcon size={16} className="text-gray-400 group-hover:text-blue-500 transition-colors" />
+            <span>从相册导入图片</span>
           </button>
         </div>
       )}

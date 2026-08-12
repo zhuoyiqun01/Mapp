@@ -10,6 +10,142 @@ export interface Tag {
   color: string;
 }
 
+/** 原始图片资产元数据；像素在 IndexedDB Blob（`mapp-image-{id}`） */
+export interface ImageAsset {
+  id: string;
+  mime: string;
+  width: number;
+  height: number;
+  size: number;
+  createdAt: number;
+  filename?: string;
+  /** 内容指纹，用于去重 */
+  contentHash?: string;
+}
+
+/**
+ * 归一化坐标点（相对原图像素宽高，范围 0～1）。
+ * 换 display 分辨率后套索/遮罩仍有效。
+ */
+export type NormPoint = [number, number];
+
+/**
+ * 贴纸/抠图遮罩：优先非破坏保存；导出时再 rasterize。
+ * - polygon：套索等矢量路径
+ * - bitmap：AI / 笔刷产生的 alpha
+ * - ai：带模型信息的 bitmap
+ */
+export type ImageMask =
+  | {
+      type: 'polygon';
+      /** 闭合路径，归一化 0～1 */
+      points: NormPoint[];
+    }
+  | {
+      type: 'bitmap';
+      maskBlobKey: string;
+    }
+  | {
+      type: 'ai';
+      maskBlobKey: string;
+      model?: string;
+    };
+
+/** 非破坏编辑操作（按序叠加） */
+export type ImageOperation =
+  | {
+      type: 'lasso';
+      points: NormPoint[];
+    }
+  | {
+      type: 'mask';
+      mask: ImageMask;
+    }
+  | {
+      type: 'outline';
+      width: number;
+      color?: string;
+    }
+  | {
+      type: 'crop';
+      /** 归一化矩形：x,y,w,h ∈ 0～1 */
+      rect: [number, number, number, number];
+    };
+
+/** 编辑描述：操作序列，不直接存像素结果 */
+export interface ImageEdit {
+  id: string;
+  assetId: string;
+  operations: ImageOperation[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type ImageVariantKind = 'thumbnail' | 'display' | 'crop' | 'sticker';
+
+/**
+ * 派生结果：可由 Edit 描述虚渲染，或缓存 raster Blob。
+ * sticker 默认可只有 editId + mask，不必立即有 blobKey。
+ */
+export interface ImageVariant {
+  id: string;
+  assetId: string;
+  kind: ImageVariantKind;
+  editId?: string;
+  /** 已 rasterize 时的 Blob 键（`mapp-variant-blob-{id}`） */
+  blobKey?: string;
+  width?: number;
+  height?: number;
+  /**
+   * sticker raster 布局：tight = 已按遮罩包围盒裁切（展示边界用此宽高）。
+   * 缺省或 full 时解析会重渲为 tight。
+   */
+  layout?: 'tight' | 'full';
+  createdAt: number;
+}
+
+/**
+ * 画布上的图片实例（位置/变换）；同一 Variant 可有多份 Placement。
+ * 看板图片便签可逐步迁到此结构。
+ */
+export interface CanvasImagePlacement {
+  id: string;
+  variantId: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  scaleX: number;
+  scaleY: number;
+  zIndex: number;
+}
+
+/** 便签对图片的引用：资产 + 可选派生 Variant（贴纸/裁剪等） */
+export interface NoteImageRef {
+  assetId: string;
+  variantId?: string;
+  /**
+   * 是否使用 variant 展示。false 时保留裁剪数据但显示原图；缺省视为 true。
+   * 关开关不删数据；重画才会生成新 variant 替换。
+   */
+  variantEnabled?: boolean;
+}
+
+/** 媒体栏统一附件（图片 / 涂鸦混排，可拖拽排序） */
+export type NoteMediaKind = 'image' | 'sketch';
+
+export interface NoteMediaItem {
+  /** 稳定拖拽 key（`mid-…`） */
+  id: string;
+  kind: NoteMediaKind;
+  /** 资产 id（`img-…`）；涂鸦也走资产存储 */
+  assetId: string;
+  variantId?: string;
+  /** false 时保留裁剪数据但显示原图；缺省视为 true */
+  variantEnabled?: boolean;
+}
+
 export interface Note {
   id: string;
   createdAt: number;
@@ -20,8 +156,22 @@ export interface Note {
   isBold?: boolean;
   isFavorite?: boolean; // 收藏标记
   color?: string; // Background color
-  images: string[]; // Image IDs (format: "img-xxx") or Base64 strings (legacy)
-  sketch?: string; // Sketch ID (format: "img-xxx") or Base64 string (legacy)
+  /**
+   * 图片资产 ID 列表（`img-…`）。勿再写入 data URL / Blob。
+   * 与 `imageRefs[].assetId` 同步；新代码优先读 `imageRefs`。
+   */
+  images: string[];
+  /**
+   * 便签对图片资产的引用（可指向派生 Variant；首期可不设 variantId）。
+   * 持久化以本字段为准时仍写回 `images` 以兼容旧路径。
+   */
+  imageRefs?: NoteImageRef[];
+  /**
+   * 媒体栏权威顺序（图片+涂鸦混排，可多个涂鸦）。有值时优先；写盘时同步回 images/imageRefs/sketch。
+   */
+  media?: NoteMediaItem[];
+  /** legacy：media 中第一个涂鸦的资产 ID（`img-…`）；多涂鸦以 media[] 为准 */
+  sketch?: string;
   tags: Tag[];
   
   // 时间段落（精确到年）

@@ -272,8 +272,8 @@ export function runMapTabStandalone(L: any, marked: MarkedLike, payload: MapTabE
 
     const imgSection =
       imgs.length > 0
-        ? `<div class="relative aspect-[4/3] bg-gray-100 flex items-center justify-center shrink-0">
-            <img src="${escapeHtml(imgs[state.previewImgIdx])}" class="w-full h-full object-cover" alt="" />
+        ? `<div class="relative flex items-center justify-center shrink-0 px-4 py-3 bg-transparent">
+            <img src="${escapeHtml(imgs[state.previewImgIdx])}" class="w-full max-h-64 object-contain" style="filter:drop-shadow(0 8px 18px rgba(15,23,42,0.28))" alt="" />
             ${
               imgs.length > 1
                 ? `<button type="button" class="km-prev absolute left-2 p-1.5 bg-black/30 text-white rounded-full">‹</button>

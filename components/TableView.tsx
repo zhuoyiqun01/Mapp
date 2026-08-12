@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { Note, Project, Frame, Connection, type GraphLayerState } from '../types';
 import { Trash2 } from 'lucide-react';
 import {
@@ -18,6 +18,7 @@ import { TableTopRightDownloadButton } from './table/TableTopRightDownloadButton
 import { TableBottomSubViewBar } from './table/TableBottomSubViewBar';
 import { GraphTopCenterConnectionButton } from './graph/GraphTopCenterConnectionButton';
 import { GraphConnectionPanel, connectionToPanelDraft, type ConnectionDraft } from './graph/GraphConnectionPanel';
+import { resolveProjectKind } from '../utils/projectKind';
 
 interface TableViewProps {
   project: Project;
@@ -140,6 +141,18 @@ export const TableView: React.FC<TableViewProps> = ({
   });
   const [pickTarget, setPickTarget] = useState<'from' | 'to' | null>(null);
 
+  /** Mapping 项目表视图仅节点表；关联表仅 Graph 项目 */
+  const edgesTableEnabled = resolveProjectKind(project) === 'graph';
+  const activeSubView: TableSubView = edgesTableEnabled ? subView : 'points';
+
+  useEffect(() => {
+    if (!edgesTableEnabled && subView !== 'points') setSubView('points');
+    if (!edgesTableEnabled) {
+      setShowConnectionPanel(false);
+      setPickTarget(null);
+    }
+  }, [edgesTableEnabled, subView]);
+
   const textNotes = useMemo(
     () => project.notes.filter(note => note.variant !== 'image'),
     [project.notes]
@@ -221,7 +234,7 @@ export const TableView: React.FC<TableViewProps> = ({
   const downloadCurrentTable = useCallback(() => {
     const base = sanitizeFilenamePart(project.name);
     const ts = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '').replace('T', '_');
-    if (subView === 'points') {
+    if (activeSubView === 'points') {
       const header = ['分组', '节点ID', '标题', '正文', '时间段', '标签'];
       const rows: (string | number | undefined | null)[][] = [header];
       const std = (project.graphLayerStandard ?? 'tag') as GraphLayerGroupStandard;
@@ -263,7 +276,7 @@ export const TableView: React.FC<TableViewProps> = ({
       ]);
     }
     triggerDownloadCsv(`${base}_关联表_${ts}.csv`, buildCsv(rows));
-  }, [subView, textNotes, connections, noteById, project.name, project.graphLayerStandard, project.graphLayers, project.graphFrameLayers, project.frames]);
+  }, [activeSubView, textNotes, connections, noteById, project.name, project.graphLayerStandard, project.graphLayers, project.graphFrameLayers, project.frames]);
 
   const rowTrashBtn =
     'opacity-0 pointer-events-none transition-all group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50';
@@ -410,20 +423,24 @@ export const TableView: React.FC<TableViewProps> = ({
         chromeSurfaceStyle={ch}
         chromeHoverBackground={chHover}
         onDownload={downloadCurrentTable}
-        subView={subView}
+        subView={activeSubView}
       />
-      <GraphTopCenterConnectionButton
-        visible={isUIVisible && subView === 'edges' && !!onUpdateConnections}
-        chromeSurfaceStyle={ch}
-        chromeHoverBackground={chHover}
-        showConnectionPanel={showConnectionPanel}
-        onToggleConnectionPanel={toggleConnectionPanel}
-      />
+      {edgesTableEnabled ? (
+        <GraphTopCenterConnectionButton
+          visible={isUIVisible && activeSubView === 'edges' && !!onUpdateConnections}
+          chromeSurfaceStyle={ch}
+          chromeHoverBackground={chHover}
+          showConnectionPanel={showConnectionPanel}
+          onToggleConnectionPanel={toggleConnectionPanel}
+        />
+      ) : null}
       <div
-        className="flex-1 min-h-0 overflow-auto px-4 sm:px-6 pb-28 box-border"
+        className={`flex-1 min-h-0 overflow-auto px-4 sm:px-6 box-border ${
+          edgesTableEnabled ? 'pb-28' : 'pb-8'
+        }`}
         style={{ paddingTop: tableScrollTopPad }}
       >
-        {subView === 'points' ? (
+        {activeSubView === 'points' ? (
           <>
             {onUpdateProject ? (
               <div className="relative mb-6 w-full max-w-xl mx-auto">
@@ -538,7 +555,7 @@ export const TableView: React.FC<TableViewProps> = ({
           </div>
         )}
 
-      {showConnectionPanel && onUpdateConnections && isUIVisible && (
+      {edgesTableEnabled && showConnectionPanel && onUpdateConnections && isUIVisible && (
         <GraphConnectionPanel
           isOpen
           themeColor={themeColor}
@@ -591,12 +608,14 @@ export const TableView: React.FC<TableViewProps> = ({
       )}
       </div>
 
-      <TableBottomSubViewBar
-        panelChromeStyle={panelChromeStyle}
-        themeColor={themeColor}
-        subView={subView}
-        onChangeSubView={setSubView}
-      />
+      {edgesTableEnabled ? (
+        <TableBottomSubViewBar
+          panelChromeStyle={panelChromeStyle}
+          themeColor={themeColor}
+          subView={subView}
+          onChangeSubView={setSubView}
+        />
+      ) : null}
 
       <SettingsPanel
         isOpen={showSettingsPanel}

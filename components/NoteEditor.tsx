@@ -13,6 +13,7 @@ import { ImagePreviewModal } from './note-editor/ImagePreviewModal';
 import { ContentSection } from './note-editor/ContentSection';
 import { PropertySection } from './note-editor/PropertySection';
 import { MediaSection } from './note-editor/MediaSection';
+import { LassoStickerEditor } from './note-editor/LassoStickerEditor';
 import { MetadataSection } from './note-editor/MetadataSection';
 import { Camera, PenTool, Minus, Smile } from 'lucide-react';
 import { EmojiPicker } from './note-editor/EmojiPicker';
@@ -108,16 +109,27 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const color = '#FFFFFF';
 
   const {
+    mediaItems,
+    displaySrcs,
+    reorderMedia,
+    removeMediaAt,
     images,
     setImages,
+    imageRefs,
     sketch,
-    setSketch,
+    appendSketch,
     isProcessingImages,
+    isResolvingMedia,
     handleImageUpload,
     handlePaste,
     handleDropImages,
     removeImage,
     removeSketch,
+    applyLassoSticker,
+    setLassoStickerEnabled,
+    loadOriginalImageSrc,
+    persistMediaForSave,
+    isCropActiveAt,
     previewImage,
     setPreviewImage,
     previewImageIndex,
@@ -125,6 +137,10 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   } = useMediaHandler({ initialNote, isOpen, text, setText, textareaRef });
 
   const [isSketching, setIsSketching] = useState(false);
+  const [lassoIndex, setLassoIndex] = useState<number | null>(null);
+  const [lassoSourceSrc, setLassoSourceSrc] = useState<string | null>(null);
+  const [cropBusy, setCropBusy] = useState(false);
+  const [stickerSize, setStickerSize] = useState<{ width: number; height: number } | null>(null);
 
   const updateCursorPosition = useCallback(() => {
     if (!textareaRef.current) return;
@@ -198,19 +214,49 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
 
   const displayTitle = useMemo(() => parseNoteContent(text || '').title || undefined, [text]);
 
-  const getCurrentNoteData = (): Partial<Note> => {
+  const getCurrentNoteData = (persisted?: {
+    media: import('../types').NoteMediaItem[];
+    images: string[];
+    imageRefs: import('../types').NoteImageRef[] | undefined;
+    sketch?: string;
+  }): Partial<Note> => {
+    const media = persisted?.media;
+    const persistImages =
+      persisted?.images ||
+      (imageRefs.length > 0 && imageRefs.every((r) => r.assetId && r.assetId.startsWith('img-'))
+        ? imageRefs.map((r) => r.assetId)
+        : images || []);
+    const persistRefs =
+      persisted?.imageRefs || imageRefs.filter((r) => r.assetId && r.assetId.startsWith('img-'));
+    const persistSketch =
+      persisted?.sketch !== undefined
+        ? persisted.sketch
+        : sketch && sketch.startsWith('img-')
+          ? sketch
+          : sketch === ''
+            ? undefined
+            : sketch;
+
     const model = buildEditorModel({
       text,
       emoji: isCompactMode ? '' : emoji,
       tags: isCompactMode ? [] : tags,
       startYear,
       endYear,
-      images: images || [],
-      sketch: sketch === '' ? undefined : sketch,
+      images: persistImages,
+      imageRefs: persistRefs,
+      sketch: persistSketch,
       id: initialNote?.id,
       createdAt: initialNote?.createdAt
     });
 
+    const first = media?.[0];
+    const firstCrop =
+      first?.variantId && first.variantEnabled !== false
+        ? true
+        : imageRefs[0]?.variantId && imageRefs[0].variantEnabled !== false;
+
+    // 首项裁剪只影响 Board 贴纸呈现；variant 保持 standard，以保留 mapping 点位
     return fromEditorModel(model, {
       coords: initialNote?.coords,
       boardX: initialNote?.boardX,
@@ -219,11 +265,14 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       groupName: initialNote?.groupName,
       groupIds: initialNote?.groupIds,
       groupNames: initialNote?.groupNames,
-      variant: initialNote?.variant,
-      imageWidth: initialNote?.imageWidth,
-      imageHeight: initialNote?.imageHeight,
+      variant: firstCrop ? 'standard' : initialNote?.variant || 'standard',
+      imageWidth: stickerSize?.width ?? initialNote?.imageWidth,
+      imageHeight: stickerSize?.height ?? initialNote?.imageHeight,
       noteGroupId: initialNote?.noteGroupId,
       isFavorite,
+      imageRefs: persistRefs,
+      sketch: persistSketch,
+      media,
       fontSize: 3,
       isBold: false,
       color: '#FFFFFF'
@@ -235,34 +284,39 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     const hasEmoji = !isCompactMode && noteData.emoji && noteData.emoji.length > 0;
     const hasImages = noteData.images && noteData.images.length > 0;
     const hasSketch = noteData.sketch && noteData.sketch.length > 0;
+    const hasMedia = (noteData.media?.length ?? 0) > 0;
     const hasTags = !isCompactMode && noteData.tags && noteData.tags.length > 0;
     const hasTime = noteData.startYear != null || noteData.endYear != null;
-    return !hasText && !hasEmoji && !hasImages && !hasSketch && !hasTags && !hasTime;
+    return !hasText && !hasEmoji && !hasImages && !hasSketch && !hasMedia && !hasTags && !hasTime;
   };
 
   const handleSave = () => {
-    const noteData = getCurrentNoteData();
+    void (async () => {
+      const persisted = await persistMediaForSave();
+      const noteData = getCurrentNoteData(persisted);
 
-    if (!noteData.images) {
-      noteData.images = images || [];
-    }
+      if (!noteData.images) {
+        noteData.images = persisted.images || images || [];
+      }
+      if (!noteData.media) noteData.media = persisted.media;
 
-    if (isEmptyNote(noteData) && initialNote?.id && onDelete) {
-      onDelete(initialNote.id);
-      onClose();
-      return;
-    }
+      if (isEmptyNote(noteData) && initialNote?.id && onDelete) {
+        onDelete(initialNote.id);
+        onClose();
+        return;
+      }
 
-    if (isEmptyNote(noteData) && !initialNote?.id) {
-      onClose();
-      return;
-    }
+      if (isEmptyNote(noteData) && !initialNote?.id) {
+        onClose();
+        return;
+      }
 
-    onSave(noteData);
+      onSave(noteData);
 
-    setTimeout(() => {
-      onClose();
-    }, 0);
+      setTimeout(() => {
+        onClose();
+      }, 0);
+    })();
   };
 
   const deleteTitleHint = useMemo(
@@ -291,8 +345,58 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     if (!isOpen) {
       setDeleteConfirmOpen(false);
       setDeleteConfirming(false);
+      setLassoIndex(null);
+      setLassoSourceSrc(null);
+      setCropBusy(false);
+      setStickerSize(null);
     }
   }, [isOpen]);
+
+  const startLassoForIndex = useCallback(
+    async (index: number) => {
+      setCropBusy(true);
+      try {
+        const src = await loadOriginalImageSrc(index);
+        if (!src) return;
+        setLassoSourceSrc(src);
+        setLassoIndex(index);
+      } finally {
+        setCropBusy(false);
+      }
+    },
+    [loadOriginalImageSrc]
+  );
+
+  const handleCropEnabledChange = useCallback(
+    async (enabled: boolean) => {
+      const index = previewImageIndex;
+      const item = mediaItems[index];
+      const hasCropData = !!item?.variantId;
+
+      if (enabled) {
+        if (hasCropData) {
+          setCropBusy(true);
+          try {
+            await setLassoStickerEnabled(index, true);
+          } finally {
+            setCropBusy(false);
+          }
+          return;
+        }
+        await startLassoForIndex(index);
+        return;
+      }
+
+      setCropBusy(true);
+      try {
+        await setLassoStickerEnabled(index, false);
+        setStickerSize(null);
+      } finally {
+        setCropBusy(false);
+      }
+    },
+    [previewImageIndex, mediaItems, startLassoForIndex, setLassoStickerEnabled]
+  );
 
   if (!isOpen) return null;
 
@@ -426,10 +530,9 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
           {isSketching && (
             <div className="absolute inset-0 z-50" onPointerDown={(e) => e.stopPropagation()}>
               <DrawingCanvas
-                initialData={sketch}
                 backgroundColor={color}
                 onSave={(data) => {
-                  setSketch(data === '' ? undefined : data);
+                  if (data && data !== '') appendSketch(data);
                   setIsSketching(false);
                 }}
                 onCancel={() => setIsSketching(false)}
@@ -547,24 +650,18 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
 
             {!isCompactMode && (
               <MediaSection
-                images={images}
-                onPreviewImage={(index) => {
+                mediaItems={mediaItems}
+                displaySrcs={displaySrcs}
+                mediaLoading={isResolvingMedia}
+                onReorder={reorderMedia}
+                onPreview={(index) => {
                   dismissOverlays();
                   setPreviewImageIndex(index);
-                  setPreviewImage(images[index] || null);
+                  setPreviewImage(displaySrcs[index] || null);
                 }}
-                onRemoveImage={(index) => {
+                onRemove={(index) => {
                   dismissOverlays();
-                  removeImage(index);
-                }}
-                sketch={sketch}
-                onOpenSketch={() => {
-                  dismissOverlays();
-                  setIsSketching(true);
-                }}
-                onRemoveSketch={() => {
-                  dismissOverlays();
-                  removeSketch();
+                  removeMediaAt(index);
                 }}
                 onDismissOverlays={dismissOverlays}
                 moreActionsSlot={mediaActionsSlot}
@@ -590,15 +687,53 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       </div>
 
       <ImagePreviewModal
-        images={images}
+        images={displaySrcs}
         previewIndex={previewImageIndex}
-        isOpen={!!previewImage && images.length > 0}
+        isOpen={!!previewImage && displaySrcs.length > 0 && lassoIndex == null}
         onClose={() => setPreviewImage(null)}
         onChangeIndex={(idx) => {
           setPreviewImageIndex(idx);
-          setPreviewImage(images[idx] || null);
+          setPreviewImage(displaySrcs[idx] || null);
         }}
+        themeColor={themeColor}
+        cropEnabled={isCropActiveAt(previewImageIndex)}
+        onCropEnabledChange={(enabled) => {
+          void handleCropEnabledChange(enabled);
+        }}
+        onRedrawCrop={() => {
+          void startLassoForIndex(previewImageIndex);
+        }}
+        cropBusy={cropBusy}
       />
+
+      {lassoIndex != null && lassoSourceSrc ? (
+        <LassoStickerEditor
+          imageSrc={lassoSourceSrc}
+          themeColor={themeColor}
+          onCancel={() => {
+            setLassoIndex(null);
+            setLassoSourceSrc(null);
+          }}
+          onConfirm={async (points) => {
+            const idx = lassoIndex;
+            const dims = await applyLassoSticker(idx, points);
+            if (dims) {
+              const maxSide = Math.max(
+                initialNote?.imageWidth || 256,
+                initialNote?.imageHeight || 256,
+                256
+              );
+              const scale = maxSide / Math.max(dims.width, dims.height, 1);
+              setStickerSize({
+                width: Math.max(48, Math.round(dims.width * scale)),
+                height: Math.max(48, Math.round(dims.height * scale))
+              });
+            }
+            setLassoIndex(null);
+            setLassoSourceSrc(null);
+          }}
+        />
+      ) : null}
 
       <DeleteConfirmDialog
         open={deleteConfirmOpen}

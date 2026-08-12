@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Navigation, Pencil } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import type { Note } from '../../../types';
 import { parseNoteContent } from '../../../utils';
 import { noteHasRenderableMapPosition } from '../../../utils/layer/unifiedNoteLayer';
 import { hasNavigableGpsCoords } from '../../../utils/map/openExternalNavigation';
+import { isDisplayableImageSrc, noteNeedsMediaResolve } from '../../../utils/persistence/mediaDisplay';
+import { loadNoteImages } from '../../../utils/persistence/storage';
 import { chromePanelGhostIconButtonClass } from '../../ui/chromePanelIconButton';
 import { PortalTooltip } from '../../ui/PortalTooltip';
 import { ExternalNavigationSheet } from './ExternalNavigationSheet';
@@ -41,6 +43,64 @@ export const NotePreviewCard: React.FC<NotePreviewCardProps> = ({
   onOpenEditor
 }) => {
   const [navSheetOpen, setNavSheetOpen] = useState(false);
+  const [displayNote, setDisplayNote] = useState<Note>(note);
+  const [mediaLoading, setMediaLoading] = useState(() => noteNeedsMediaResolve(note));
+  const loadGenRef = useRef(0);
+
+  const mediaSig = useMemo(
+    () => {
+      if (note.media?.length) {
+        return [
+          note.id,
+          'M',
+          note.media
+            .map(
+              (m) =>
+                `${m.id}:${m.kind}:${m.assetId}>${m.variantId || ''}>${m.variantEnabled === false ? '0' : '1'}`
+            )
+            .join(';')
+        ].join('|');
+      }
+      return [
+        note.id,
+        (note.images || []).join(','),
+        (note.imageRefs || [])
+          .map((r) => `${r.assetId}>${r.variantId || ''}>${r.variantEnabled === false ? '0' : '1'}`)
+          .join(';'),
+        note.sketch || ''
+      ].join('|');
+    },
+    [note.id, note.media, note.images, note.imageRefs, note.sketch]
+  );
+
+  useEffect(() => {
+    const gen = ++loadGenRef.current;
+    if (!noteNeedsMediaResolve(note)) {
+      setDisplayNote(note);
+      setMediaLoading(false);
+      return;
+    }
+    setMediaLoading(true);
+    void (async () => {
+      try {
+        const loaded = await loadNoteImages(note);
+        if (loadGenRef.current !== gen) return;
+        setDisplayNote({
+          ...note,
+          images: loaded.images,
+          sketch: loaded.sketch,
+          imageRefs: loaded.imageRefs ?? note.imageRefs
+        });
+      } catch (err) {
+        console.warn('NotePreviewCard media resolve failed', err);
+        if (loadGenRef.current !== gen) return;
+        setDisplayNote(note);
+      } finally {
+        if (loadGenRef.current === gen) setMediaLoading(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 用 mediaSig 跟踪媒体字段
+  }, [mediaSig]);
 
   const formatPreviewTitle = (rawText: string): string => {
     const title = parseNoteContent(rawText || '').title || 'Untitled Note';
@@ -56,8 +116,16 @@ export const NotePreviewCard: React.FC<NotePreviewCardProps> = ({
   };
 
   const timeRangeText = formatYearRange();
-  const allImages = [...(note.images || [])];
-  if (note.sketch) allImages.push(note.sketch);
+  const allImages = [...(displayNote.images || [])].filter(isDisplayableImageSrc);
+  if (displayNote.sketch && isDisplayableImageSrc(displayNote.sketch)) {
+    allImages.push(displayNote.sketch);
+  }
+  const hasMediaSlots =
+    (note.images && note.images.length > 0) ||
+    !!(note.sketch && note.sketch !== '') ||
+    (note.imageRefs && note.imageRefs.length > 0);
+  const currentSrc = allImages[currentImageIndex];
+  const currentOk = isDisplayableImageSrc(currentSrc);
 
   const topPx = offsetTopPx ?? 16;
   const showEdit = Boolean(onOpenEditor) && !passThrough;
@@ -198,14 +266,20 @@ export const NotePreviewCard: React.FC<NotePreviewCardProps> = ({
           );
         })()}
 
-        {allImages.length > 0 && (
-          <div className="relative group aspect-[4/3] bg-gray-100 flex items-center justify-center shrink-0">
-            <img
-              src={allImages[currentImageIndex]}
-              alt="Preview"
-              className="w-full h-full object-cover"
-              draggable={false}
-            />
+        {(hasMediaSlots || allImages.length > 0) && (
+          <div className="relative group flex items-center justify-center shrink-0 px-4 py-3 bg-transparent">
+            {currentOk ? (
+              <img
+                src={currentSrc}
+                alt="Preview"
+                className="w-full max-h-64 object-contain drop-shadow-[0_8px_18px_rgba(15,23,42,0.28)]"
+                draggable={false}
+              />
+            ) : (
+              <div className="text-xs text-gray-400 py-8">
+                {mediaLoading ? '加载中' : '暂无图片'}
+              </div>
+            )}
             {allImages.length > 1 && (
               <>
                 <button

@@ -57,6 +57,7 @@ import { generateId } from '../utils';
 import { hexToRgb, isPhotoTakenRecently } from '../utils/map/mapUtils';
 import { calculateImageFingerprint, calculateFingerprintFromBase64 } from '../utils/media/imageProcessing';
 import { loadImage, getViewPositionCache } from '../utils/persistence/storage';
+import { useNotesWithResolvedMedia } from '../utils/persistence/useNotesWithResolvedMedia';
 import { ImportPreviewDialog } from './ImportPreviewDialog';
 import { buildMapTabExportPayload } from '../utils/map/mapTabExportPayload';
 import { buildStandaloneMapTabHtml } from '../utils/map/mapTabExportHtml';
@@ -176,7 +177,7 @@ export const MapView: React.FC<MapViewProps> = ({
   const ignoreNextMarkerClickRef = useRef(false);
   const ignoreNextMapClickRef = useRef(false);
 
-  const selectedNote = useMemo(
+  const selectedNoteRaw = useMemo(
     () => (selectedNoteId ? notes.find((n) => n.id === selectedNoteId) : null),
     [selectedNoteId, notes]
   );
@@ -258,7 +259,7 @@ export const MapView: React.FC<MapViewProps> = ({
     return null;
   }, [preSelectedNotes, selectedNoteIds, notes]);
 
-  const hoveredNote = useMemo(
+  const hoveredNoteRaw = useMemo(
     () => (hoveredNoteId ? notes.find((n) => n.id === hoveredNoteId) ?? null : null),
     [hoveredNoteId, notes]
   );
@@ -453,6 +454,7 @@ export const MapView: React.FC<MapViewProps> = ({
   // Location error retry tracking
   const [hasRetriedLocation, setHasRetriedLocation] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
+  const [isCreatingAtLocation, setIsCreatingAtLocation] = useState(false);
   /** Empty-project geolocation arrived after fallback center — one-shot late recenter */
   const [lateAutoCenter, setLateAutoCenter] = useState<[number, number] | null>(null);
   const emptyProjectLocateAttemptedRef = useRef(false);
@@ -636,10 +638,30 @@ export const MapView: React.FC<MapViewProps> = ({
   );
 
   /** 图层过滤后仍仅渲染有坐标的点 */
-  const mapRenderedNotes = useMemo(
+  const mapRenderedNotesRaw = useMemo(
     () => mapCanvasNotes.filter((n) => noteHasRenderableMapPosition(n)),
     [mapCanvasNotes]
   );
+  const mapRenderedNotes = useNotesWithResolvedMedia(mapRenderedNotesRaw);
+
+  /** 详情卡优先用已解析像素的 note，避免再次卡在「加载中」 */
+  const selectedNote = useMemo(() => {
+    if (!selectedNoteId) return null;
+    return (
+      mapRenderedNotes.find((n) => n.id === selectedNoteId) ??
+      selectedNoteRaw ??
+      null
+    );
+  }, [selectedNoteId, mapRenderedNotes, selectedNoteRaw]);
+
+  const hoveredNote = useMemo(() => {
+    if (!hoveredNoteId) return null;
+    return (
+      mapRenderedNotes.find((n) => n.id === hoveredNoteId) ??
+      hoveredNoteRaw ??
+      null
+    );
+  }, [hoveredNoteId, mapRenderedNotes, hoveredNoteRaw]);
 
   const mapNoteStackRank = useMemo(() => {
     const sorted = sortNotesByLayerStack(mapRenderedNotes);
@@ -733,6 +755,27 @@ export const MapView: React.FC<MapViewProps> = ({
     },
     [computeBoardPosition, onToggleEditor]
   );
+
+  const handleCreateAtCurrentLocation = useCallback(async () => {
+    try {
+      setIsCreatingAtLocation(true);
+      setLocationError(null);
+      const loc = await requestLocation({ requestOrientation: false });
+      if (!loc) return;
+      if (mapInstance) {
+        mapInstance.flyTo([loc.lat, loc.lng], 16, { duration: 1.5 });
+      }
+      handleLongPress({ lat: loc.lat, lng: loc.lng });
+    } catch (error) {
+      console.error('Create at current location failed:', error);
+    } finally {
+      setIsCreatingAtLocation(false);
+    }
+  }, [requestLocation, mapInstance, setLocationError, handleLongPress]);
+
+  const handleImportFromPhotos = useCallback(() => {
+    fileInputRef.current?.click();
+  }, [fileInputRef]);
 
   const handleMarkerClick = (note: Note, e?: L.LeafletMouseEvent) => {
     if (ignoreNextMarkerClickRef.current || isMarkerDraggingRef.current) {
@@ -1465,6 +1508,9 @@ export const MapView: React.FC<MapViewProps> = ({
                       setShowSettingsPanel((v) => !v);
                       setShowFrameLayerPanel(false);
                     }}
+                    onCreateAtCurrentLocation={handleCreateAtCurrentLocation}
+                    onImportFromPhotos={handleImportFromPhotos}
+                    isCreatingAtLocation={isCreatingAtLocation}
                   />
                   <MapLayerControl
                     showPanel={showFrameLayerPanel}

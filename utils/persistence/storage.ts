@@ -1,20 +1,33 @@
 import { get, set, del, keys } from 'idb-keyval';
 import { Project, Note } from '../../types';
-import type { ProjectKind } from '../../types';
+import type { NoteImageRef, ProjectKind } from '../../types';
 import type { GraphLayoutMode } from '../graph/graphRuntimeCore';
 import { normalizeProjectConnections } from '../graph/graphData';
 import { sanitizeProjectKind } from '../projectKind';
 import { normalizeNotesToSingleFrame } from '../frame/noteFrameMembership';
 import { coerceGraphLayoutMode } from '../graph/graphRuntimeCore';
+import {
+  IMAGE_PREFIX,
+  SKETCH_PREFIX,
+  extractMediaId,
+  findMediaIdByContentHash,
+  generateMediaId,
+  hashMediaPayload,
+  isMediaRefId,
+  loadMediaDataUrl,
+  mediaRecordExists,
+  syncNoteImageRefs,
+  writeMediaRecordFromDataUrl
+} from './imageAssetStore';
+import { ensureNoteMediaSynced } from './noteMediaSync';
 
 // Storage keys
 const PROJECT_LIST_KEY = 'mapp-project-list';
 const PROJECT_PREFIX = 'mapp-project-';
-const IMAGE_PREFIX = 'mapp-image-';
-const SKETCH_PREFIX = 'mapp-sketch-';
 const BACKGROUND_IMAGE_PREFIX = 'mapp-bg-';
 const STORAGE_VERSION_KEY = 'mapp-storage-version';
-const CURRENT_STORAGE_VERSION = 2; // 版本号，用于数据迁移
+/** v3：图片以 Blob+ImageAsset 存储；Note 持有 imageRefs / asset id */
+const CURRENT_STORAGE_VERSION = 3;
 
 /** 连线规范化（删孤儿边、箭头方向修正）后待写回 IndexedDB 的项目 id */
 const projectIdsPendingConnectionMigration = new Set<string>();
@@ -82,7 +95,11 @@ export function clearViewPositionCache(projectId: string): void {
 
 // 生成图片 ID
 function generateImageId(): string {
-  return `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  return generateMediaId();
+}
+
+function extractImageId(imageData: string): string | null {
+  return extractMediaId(imageData);
 }
 
 // 检查 IndexedDB 存储使用情况
@@ -419,122 +436,48 @@ export async function checkStorageDetails(): Promise<{
   }
 }
 
-// 从 Base64 中提取图片 ID（如果是旧格式的 Base64，返回 null）
-function extractImageId(imageData: string): string | null {
-  if (imageData.startsWith('img-')) {
-    return imageData; // 已经是图片 ID
-  }
-  return null; // 是 Base64 数据，需要转换
-}
-
-// 计算图片数据的哈希值（用于去重）
+// 计算图片数据的哈希值（用于去重 / 分析工具）
 async function calculateImageHash(imageData: string): Promise<string> {
-  // 使用更全面的哈希计算：结合文件头、中间部分和尾部
-  // 这可以更好地区分不同的图片，避免哈希冲突
-
-  let hashInput = imageData;
-
-  // 如果数据很长，使用采样策略
-  if (imageData.length > 2000) {
-    // 取前500字符 + 中间500字符 + 后500字符 + 文件长度
-    const start = imageData.substring(0, 500);
-    const middle = imageData.substring(Math.floor(imageData.length / 2) - 250, Math.floor(imageData.length / 2) + 250);
-    const end = imageData.substring(imageData.length - 500);
-    const length = imageData.length.toString();
-
-    hashInput = start + middle + end + length;
-  }
-
-  const encoder = new TextEncoder();
-  const data = encoder.encode(hashInput);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 32); // 使用32位哈希以减少冲突
+  const full = await hashMediaPayload(imageData);
+  return full.substring(0, 32);
 }
-
-// 检查图片是否已经存在（通过哈希值）
-// 使用一个内存缓存来提高性能，避免重复计算哈希
-const imageHashCache = new Map<string, string>();
 
 async function findExistingImageId(imageData: string): Promise<string | null> {
   try {
-    const imageHash = await calculateImageHash(imageData);
-
-    // 检查所有图片（为了确保准确性）
-    const allKeys = await keys();
-    const imageKeys = allKeys.filter(key =>
-      typeof key === 'string' && (key as string).startsWith(IMAGE_PREFIX)
-    );
-
-    // 为了性能，检查所有图片（不再限制数量，因为重复检测很重要）
-    console.log(`Checking for existing image with hash: ${imageHash.substring(0, 16)}... (scanning ${imageKeys.length} images)`);
-
-    for (const key of imageKeys) {
-      try {
-        const existingData = await get<string>(key as string);
-        if (existingData) {
-          let existingHash: string;
-          const cacheKey = key as string;
-
-          if (imageHashCache.has(cacheKey)) {
-            existingHash = imageHashCache.get(cacheKey)!;
-          } else {
-            existingHash = await calculateImageHash(existingData);
-            imageHashCache.set(cacheKey, existingHash);
-          }
-
-          if (existingHash === imageHash) {
-            console.log(`Found duplicate image: ${key} matches new image (hash: ${imageHash.substring(0, 16)})`);
-            return (key as string).replace(IMAGE_PREFIX, '');
-          }
-        }
-      } catch (error) {
-        // 忽略读取错误，继续检查下一个
-        console.warn(`Error checking image ${key}:`, error);
-        continue;
-      }
-    }
-
-    console.log(`No duplicate found for hash: ${imageHash.substring(0, 16)}`);
+    const imageHash = await hashMediaPayload(imageData);
+    return findMediaIdByContentHash(IMAGE_PREFIX, imageHash);
   } catch (error) {
     console.warn('Failed to check for existing image:', error);
+    return null;
   }
-
-  return null; // 没有找到相同的图片
 }
 
-// 保存图片到 IndexedDB，返回图片 ID
+/** 保存图片资产（Blob + ImageAsset），返回 asset id */
 export async function saveImage(base64Data: string): Promise<string> {
-  // 检查 Base64 数据是否有效
   if (!base64Data || !base64Data.startsWith('data:image/')) {
     throw new Error('Invalid image data: not a valid Base64 image');
   }
 
-  // 检查数据大小（IndexedDB 通常有 ~50MB 限制）
-  const dataSizeMB = (base64Data.length * 3) / 4 / (1024 * 1024); // 估算解码后大小
+  const dataSizeMB = (base64Data.length * 3) / 4 / (1024 * 1024);
   if (dataSizeMB > 10) {
     console.warn(`Large image detected: ${dataSizeMB.toFixed(2)}MB, may cause storage issues`);
   }
 
-  // 检查是否已经存在相同的图片
-  const existingId = await findExistingImageId(base64Data);
+  const contentHash = await hashMediaPayload(base64Data);
+  const existingId = await findMediaIdByContentHash(IMAGE_PREFIX, contentHash);
   if (existingId) {
     console.log(`Reusing existing image: ${existingId}`);
     return existingId;
   }
 
-  // 生成新的图片ID并保存
   const imageId = generateImageId();
-
   try {
-  await set(`${IMAGE_PREFIX}${imageId}`, base64Data);
-    // 验证保存是否成功
-    const verifyData = await get<string>(`${IMAGE_PREFIX}${imageId}`);
-    if (!verifyData) {
-      throw new Error('Image save verification failed');
-    }
-    console.log(`Saved new image: ${imageId} (${dataSizeMB.toFixed(2)}MB)`);
-  return imageId;
+    await writeMediaRecordFromDataUrl(IMAGE_PREFIX, imageId, base64Data, {
+      kind: 'image',
+      contentHash
+    });
+    console.log(`Saved new image asset: ${imageId} (${dataSizeMB.toFixed(2)}MB)`);
+    return imageId;
   } catch (error) {
     console.error('Failed to save image:', error);
     throw error;
@@ -727,108 +670,61 @@ export async function cleanupOrphanedMedia(): Promise<{ cleaned: number, spaceFr
   return { cleaned, spaceFreed };
 }
 
-// 从 IndexedDB 加载图片
+// 从 IndexedDB 加载图片（返回 data URL 供 <img src>；底层为 Blob 资产）
 export async function loadImage(imageId: string): Promise<string | null> {
   try {
-    const data = await get(`${IMAGE_PREFIX}${imageId}`);
-    if (!data) {
+    const dataUrl = await loadMediaDataUrl(IMAGE_PREFIX, imageId, {
+      upgradeLegacy: true,
+      kind: 'image'
+    });
+    if (!dataUrl) {
       console.warn(`Image not found in IndexedDB: ${imageId}`);
       return null;
     }
-
-    // 处理新旧格式的兼容性
-    let imageData: string;
-    if (typeof data === 'string') {
-      // 旧格式：纯字符串
-      imageData = data;
-    } else {
-      // 新格式：对象
-      imageData = data.data;
-    }
-
-    if (!imageData) {
-      console.warn(`Image data is empty for ${imageId}`);
-      return null;
-    }
-
-    // 验证加载的数据是否有效
-    if (!imageData.startsWith('data:image/')) {
-      console.error(`Invalid image data loaded for ${imageId}:`, imageData.substring(0, 100) + '...');
-      return null;
-    }
-
-    return imageData;
+    return dataUrl;
   } catch (error) {
     console.error(`Failed to load image ${imageId}:`, error);
     return null;
   }
 }
 
-// 检查涂鸦是否已经存在（通过哈希值）
 async function findExistingSketchId(sketchData: string): Promise<string | null> {
   try {
-    const sketchHash = await calculateImageHash(sketchData);
-
-    // 检查所有涂鸦ID，看是否有相同的哈希
-    const allKeys = await keys();
-    const sketchKeys = allKeys.filter(key =>
-      typeof key === 'string' && (key as string).startsWith(SKETCH_PREFIX)
-    );
-
-    for (const key of sketchKeys) {
-      try {
-        const existingData = await get<string>(key as string);
-        if (existingData) {
-          const existingHash = await calculateImageHash(existingData);
-          if (existingHash === sketchHash) {
-            // 找到相同的涂鸦，返回其ID
-            return (key as string).replace(SKETCH_PREFIX, '');
-          }
-        }
-      } catch (error) {
-        // 忽略读取错误，继续检查下一个
-        continue;
-      }
-    }
+    const sketchHash = await hashMediaPayload(sketchData);
+    return findMediaIdByContentHash(SKETCH_PREFIX, sketchHash);
   } catch (error) {
     console.warn('Failed to check for existing sketch:', error);
+    return null;
   }
-
-  return null; // 没有找到相同的涂鸦
 }
 
-// 保存 sketch 到 IndexedDB，返回 sketch ID
+/** 保存涂鸦资产（Blob + ImageAsset） */
 export async function saveSketch(base64Data: string): Promise<string> {
-  // 检查是否已经存在相同的涂鸦
+  if (!base64Data || !base64Data.startsWith('data:image/')) {
+    throw new Error('Invalid sketch data: not a valid data URL');
+  }
+  const contentHash = await hashMediaPayload(base64Data);
   const existingId = await findExistingSketchId(base64Data);
   if (existingId) {
     console.log(`Reusing existing sketch: ${existingId}`);
     return existingId;
   }
 
-  // 生成新的涂鸦ID并保存
   const sketchId = generateImageId();
-  await set(`${SKETCH_PREFIX}${sketchId}`, base64Data);
-  console.log(`Saved new sketch: ${sketchId}`);
+  await writeMediaRecordFromDataUrl(SKETCH_PREFIX, sketchId, base64Data, {
+    kind: 'sketch',
+    contentHash
+  });
+  console.log(`Saved new sketch asset: ${sketchId}`);
   return sketchId;
 }
 
-// 从 IndexedDB 加载 sketch
 export async function loadSketch(sketchId: string): Promise<string | null> {
   try {
-    const data = await get<string>(`${SKETCH_PREFIX}${sketchId}`);
-    if (!data) {
-      console.warn(`Sketch not found in IndexedDB: ${sketchId}`);
-      return null;
-    }
-
-    // 验证加载的数据是否有效
-    if (!data.startsWith('data:image/')) {
-      console.error(`Invalid sketch data loaded for ${sketchId}:`, data.substring(0, 100) + '...');
-      return null;
-    }
-
-    return data;
+    return await loadMediaDataUrl(SKETCH_PREFIX, sketchId, {
+      upgradeLegacy: true,
+      kind: 'sketch'
+    });
   } catch (error) {
     console.error(`Failed to load sketch ${sketchId}:`, error);
     return null;
@@ -1387,97 +1283,179 @@ function ensureNoteVariant(note: Note): Note {
   return fixedNote;
 }
 
-// 转换 Note 的图片从 Base64 到图片 ID（用于迁移）
+// 转换 Note 的图片从 Base64 到图片 ID，并同步 imageRefs（保留 variantId）
 async function migrateNoteImages(note: Note): Promise<Note> {
   const migratedNote = ensureNoteVariant({ ...note });
-  
-  // 迁移 images 数组
+  const prevRefs = note.imageRefs || [];
+
   if (note.images && note.images.length > 0) {
-    const imageIds: string[] = [];
-    for (const imageData of note.images) {
+    const nextRefs: NoteImageRef[] = [];
+    for (let i = 0; i < note.images.length; i++) {
+      const imageData = note.images[i];
+      const prev = prevRefs[i];
       try {
-      const existingId = extractImageId(imageData);
-      if (existingId) {
-        imageIds.push(existingId);
-      } else {
-        // 是 Base64，需要保存并获取 ID
-        const imageId = await saveImage(imageData);
-        imageIds.push(imageId);
+        const existingId = extractImageId(imageData);
+        if (existingId) {
+          const item: NoteImageRef = { assetId: existingId };
+          if (prev?.assetId === existingId) {
+            if (prev.variantId) item.variantId = prev.variantId;
+            if (prev.variantEnabled !== undefined) item.variantEnabled = prev.variantEnabled;
+          }
+          nextRefs.push(item);
+        } else if (typeof imageData === 'string' && imageData.startsWith('data:image/')) {
+          // 编辑器展示态 data URL：若已有 asset 引用则勿另存一份像素
+          if (prev?.assetId && isMediaRefId(prev.assetId)) {
+            const item: NoteImageRef = { assetId: prev.assetId };
+            if (prev.variantId) item.variantId = prev.variantId;
+            if (prev.variantEnabled !== undefined) item.variantEnabled = prev.variantEnabled;
+            nextRefs.push(item);
+          } else {
+            const imageId = await saveImage(imageData);
+            const item: NoteImageRef = { assetId: imageId };
+            if (prev?.variantId) item.variantId = prev.variantId;
+            if (prev?.variantEnabled !== undefined) item.variantEnabled = prev.variantEnabled;
+            nextRefs.push(item);
+          }
         }
       } catch (error) {
         console.error(`Failed to migrate image for note ${note.id}:`, error);
-        // 跳过损坏的图片，继续处理其他图片
         continue;
       }
     }
-    migratedNote.images = imageIds;
+    migratedNote.images = nextRefs.map((r) => r.assetId);
+    migratedNote.imageRefs = nextRefs;
+  } else if (prevRefs.length > 0) {
+    migratedNote.images = prevRefs.map((r) => r.assetId).filter(isMediaRefId);
+    migratedNote.imageRefs = prevRefs.filter((r) => isMediaRefId(r.assetId));
   }
-  
+
   // 迁移 sketch
   if (note.sketch) {
     try {
-    const existingId = extractImageId(note.sketch);
-    if (existingId) {
-      migratedNote.sketch = existingId;
-    } else {
-      // 是 Base64，需要保存并获取 ID
-      const sketchId = await saveSketch(note.sketch);
-      migratedNote.sketch = sketchId;
+      const existingId = extractImageId(note.sketch);
+      if (existingId) {
+        migratedNote.sketch = existingId;
+      } else if (note.sketch.startsWith('data:image/')) {
+        const sketchId = await saveSketch(note.sketch);
+        migratedNote.sketch = sketchId;
       }
     } catch (error) {
       console.error(`Failed to migrate sketch for note ${note.id}:`, error);
-      // 移除损坏的sketch
       migratedNote.sketch = undefined;
     }
   }
-  
-  return migratedNote;
+
+  return ensureNoteMediaSynced(syncNoteImageRefs(migratedNote));
 }
 
-// 加载 Note 的图片（将图片 ID 转换为 Base64）
+/**
+ * 将 Note 中的资产 / Variant 解析为展示用 data URL（返回副本，勿写回项目持久化态）。
+ * 若有 media[]，按 media 顺序解析到 images（仅 image 项）与 sketch（sketch 项展示 URL 写入 sketch，variant 时为裁切图）。
+ */
 export async function loadNoteImages(note: Note): Promise<Note> {
-  const loadedNote = { ...note };
-  
-  // 加载 images 数组 - 保持原始的图片ID数组不变，只返回成功加载的图片数据
-  if (note.images && note.images.length > 0) {
-    const loadedImages: string[] = [];
+  const { noteNeedsMediaResolve } = await import('./mediaDisplay');
+  let synced = ensureNoteMediaSynced({ ...note });
+  if (!noteNeedsMediaResolve(synced)) {
+    return synced;
+  }
 
-    for (const imageId of note.images) {
-      const existingId = extractImageId(imageId);
-      if (existingId) {
-        // 是图片 ID，需要加载
-        const imageData = await loadImage(existingId);
-        if (imageData) {
-          loadedImages.push(imageData);
+  const loadedNote = { ...synced };
+  const media = synced.media || [];
+  const { resolveNoteImageRefUrl } = await import('../media/imageMaskRender');
+
+  if (media.length > 0) {
+    const loadedImages: string[] = [];
+    let firstSketch: string | undefined;
+    for (const item of media) {
+      try {
+        const url = await resolveNoteImageRefUrl({
+          assetId: item.assetId,
+          variantId: item.variantId,
+          variantEnabled: item.variantEnabled
+        });
+        if (item.kind === 'sketch') {
+          let sketchUrl = url || '';
+          if (!sketchUrl) {
+            const sk = await loadSketch(item.assetId);
+            if (sk) sketchUrl = sk;
+          }
+          if (sketchUrl && firstSketch === undefined) firstSketch = sketchUrl;
         } else {
-          // 无法加载，但保留ID引用，等待可能的恢复
-          console.warn(`Failed to load image ${imageId} for note ${note.id}`);
+          loadedImages.push(url || '');
         }
-      } else {
-        // 是 Base64（旧格式），直接使用
-        loadedImages.push(imageId);
+      } catch (err) {
+        console.warn(`Failed to load media for note ${note.id}:`, err);
+        if (item.kind === 'image') loadedImages.push('');
       }
     }
+    loadedNote.images = loadedImages;
+    if (firstSketch !== undefined) loadedNote.sketch = firstSketch;
+    loadedNote.media = media;
+    loadedNote.imageRefs = media
+      .filter((m) => m.kind === 'image')
+      .map((m) => ({
+        assetId: m.assetId,
+        variantId: m.variantId,
+        variantEnabled: m.variantEnabled
+      }));
+    return loadedNote;
+  }
 
+  const refs: NoteImageRef[] =
+    synced.imageRefs && synced.imageRefs.length > 0
+      ? synced.imageRefs
+      : (synced.images || []).map((assetId) => ({ assetId } satisfies NoteImageRef));
+
+  if (refs.length > 0) {
+    const loadedImages: string[] = [];
+    for (const ref of refs) {
+      try {
+        if (ref.variantId || isMediaRefId(ref.assetId)) {
+          const url = await resolveNoteImageRefUrl(ref);
+          loadedImages.push(url || '');
+          if (!url) console.warn(`Failed to resolve image ref for note ${note.id}`, ref);
+        } else if (typeof ref.assetId === 'string' && ref.assetId.startsWith('data:')) {
+          loadedImages.push(ref.assetId);
+        } else {
+          loadedImages.push('');
+        }
+      } catch (err) {
+        console.warn(`Failed to load image for note ${note.id}:`, err);
+        loadedImages.push('');
+      }
+    }
     loadedNote.images = loadedImages;
   }
-  
-  // 加载 sketch - 保持原始的sketch ID不变
-  if (note.sketch) {
-    const existingId = extractImageId(note.sketch);
+
+  if (synced.sketch) {
+    const existingId = extractImageId(synced.sketch);
     if (existingId) {
+      // sketch 也可能挂 variant：从 media 已处理；legacy 仅原图
       const sketchData = await loadSketch(existingId);
-      if (sketchData) {
-        loadedNote.sketch = sketchData;
-      } else {
-        // 无法加载，但保留ID引用，等待可能的恢复
-        console.warn(`Failed to load sketch ${existingId} for note ${note.id}`);
-      }
+      if (sketchData) loadedNote.sketch = sketchData;
+      else console.warn(`Failed to load sketch ${existingId} for note ${note.id}`);
     }
-    // 如果已经是 Base64，保持不变
   }
-  
+
   return loadedNote;
+}
+
+/** 将展示态（可能含 data URL）收束为仅资产引用，供写回 project state */
+export function noteMediaToRefsOnly(note: Note): Note {
+  const images = (note.images || []).filter(isMediaRefId);
+  const sketch =
+    note.sketch && isMediaRefId(note.sketch)
+      ? note.sketch
+      : note.sketch && extractImageId(note.sketch)
+        ? extractImageId(note.sketch)!
+        : undefined;
+  return ensureNoteMediaSynced(
+    syncNoteImageRefs({
+      ...note,
+      images,
+      sketch: sketch && isMediaRefId(sketch) ? sketch : undefined
+    })
+  );
 }
 
 // 清理便签中不存在的图片和草图引用
@@ -1485,41 +1463,37 @@ export async function cleanBrokenReferences(notes: Note[]): Promise<Note[]> {
   const cleanedNotes: Note[] = [];
 
   for (const note of notes) {
-    const cleanedNote = { ...note };
+    let cleanedNote = syncNoteImageRefs({ ...note });
 
-    // 清理不存在的图片引用
-    if (note.images && note.images.length > 0) {
+    if (cleanedNote.images && cleanedNote.images.length > 0) {
       const validImages: string[] = [];
-      for (const imageRef of note.images) {
+      for (const imageRef of cleanedNote.images) {
         const imageId = extractImageId(imageRef);
         if (imageId) {
-          // 检查图片是否存在
-          const imageData = await loadImage(imageId);
-          if (imageData) {
-            validImages.push(imageRef);
+          if (await mediaRecordExists(IMAGE_PREFIX, imageId)) {
+            validImages.push(imageId);
           } else {
             console.warn(`Removing broken image reference: ${imageRef} from note ${note.id}`);
           }
-        } else {
-          // Base64 格式，直接保留
+        } else if (typeof imageRef === 'string' && imageRef.startsWith('data:image/')) {
+          // 未迁移的 data URL：保留，留给 save 时 migrate
           validImages.push(imageRef);
         }
       }
       cleanedNote.images = validImages;
     }
 
-    // 清理不存在的草图引用
-    if (note.sketch) {
-      const sketchId = extractImageId(note.sketch);
+    if (cleanedNote.sketch) {
+      const sketchId = extractImageId(cleanedNote.sketch);
       if (sketchId) {
-        const sketchData = await loadSketch(sketchId);
-        if (!sketchData) {
-          console.warn(`Removing broken sketch reference: ${note.sketch} from note ${note.id}`);
+        if (!(await mediaRecordExists(SKETCH_PREFIX, sketchId))) {
+          console.warn(`Removing broken sketch reference: ${cleanedNote.sketch} from note ${note.id}`);
           cleanedNote.sketch = undefined;
         }
       }
     }
 
+    cleanedNote = syncNoteImageRefs(cleanedNote);
     cleanedNotes.push(cleanedNote);
   }
 
@@ -1543,7 +1517,9 @@ function ensureProjectCompatibility(project: Project): Project {
   }
   
   // 修复所有 notes 的兼容性问题
-  fixedProject.notes = normalizeNotesToSingleFrame(fixedProject.notes.map(ensureNoteVariant));
+  fixedProject.notes = normalizeNotesToSingleFrame(
+    fixedProject.notes.map((n) => ensureNoteMediaSynced(ensureNoteVariant(n)))
+  );
 
   if (fixedProject.graphDefaultLayoutMode != null) {
     fixedProject.graphDefaultLayoutMode = coerceGraphLayoutMode(fixedProject.graphDefaultLayoutMode);
@@ -1582,8 +1558,8 @@ function scheduleConnectionMigrationPersist(project: Project): void {
   }, 0);
 }
 
-// 保存项目（分片存储，图片分离）
-export async function saveProject(project: Project): Promise<void> {
+// 保存项目（分片存储，图片分离）；返回已迁移为引用的 Project，供内存态使用
+export async function saveProject(project: Project): Promise<Project> {
   // 0. 确保项目数据兼容性
   const compatibleProject = ensureProjectCompatibility(project);
   
@@ -1596,7 +1572,7 @@ export async function saveProject(project: Project): Promise<void> {
   );
   
   // 2. 添加版本号
-  const projectWithVersion = {
+  const projectWithVersion: Project = {
     ...migratedProject,
     version: Date.now(), // 使用时间戳作为版本号
     storageVersion: CURRENT_STORAGE_VERSION
@@ -1611,6 +1587,8 @@ export async function saveProject(project: Project): Promise<void> {
     projectList.push(project.id);
     await set(PROJECT_LIST_KEY, projectList);
   }
+
+  return projectWithVersion;
 }
 
 // 加载项目（按需加载，图片懒加载）

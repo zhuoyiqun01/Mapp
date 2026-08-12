@@ -6,11 +6,11 @@ import {
   saveProject,
   deleteProject as deleteProjectStorage,
   loadProject,
-  loadNoteImages,
   cleanBrokenReferences,
   flushPendingConnectionMigrationSave,
   ProjectSummary
 } from '../../utils/persistence/storage';
+import { syncNoteImageRefs } from '../../utils/persistence/imageAssetStore';
 
 interface UseProjectStateReturn {
   // Project state
@@ -77,7 +77,7 @@ export const useProjectState = (): UseProjectStateReturn => {
       const project = await loadProject(projectId, false);
       if (!project) return null;
 
-      // Step 2: Load images for each note（remaining 90%）
+      // Step 2: 校验引用完整性（不再把像素 hydrate 进 project.notes）
       if (project.notes.length > 0) {
         const totalNotes = project.notes.length;
         let loadedNotes = 0;
@@ -85,23 +85,10 @@ export const useProjectState = (): UseProjectStateReturn => {
         const batchSize = 5;
         for (let i = 0; i < totalNotes; i += batchSize) {
           const batch = project.notes.slice(i, i + batchSize);
-
-          const loadedBatch = await Promise.all(
-            batch.map(async (note) => {
-              try {
-                const loadedNote = await loadNoteImages(note);
-                return loadedNote;
-              } catch (error) {
-                console.error(`Failed to load images for note ${note.id}:`, error);
-                return note;
-              }
-            })
-          );
-
+          const syncedBatch = batch.map((note) => syncNoteImageRefs(note));
           for (let j = 0; j < batch.length; j++) {
-            project.notes[i + j] = loadedBatch[j];
+            project.notes[i + j] = syncedBatch[j];
           }
-
           loadedNotes += batch.length;
           const progress = 10 + (loadedNotes / totalNotes) * 90;
           setLoadingProgress(Math.min(100, Math.round(progress)));
@@ -152,7 +139,7 @@ export const useProjectState = (): UseProjectStateReturn => {
       frames: [],
       connections: [],
       version: Date.now(),
-      storageVersion: 2
+      storageVersion: 3
     };
 
     await saveProject(newProject);
